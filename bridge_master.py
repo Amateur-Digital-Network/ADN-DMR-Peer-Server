@@ -38,7 +38,7 @@ from time import time,sleep,perf_counter
 import importlib.util
 import re
 import copy
-from setproctitle import setproctitle
+#from setproctitle import setproctitle
 
 # Twisted is pretty important, so I keep it separate
 from twisted.internet.protocol import Factory, Protocol
@@ -2137,7 +2137,7 @@ if __name__ == '__main__':
     ID_MAX = 16776415
 
     #Set process title early
-    setproctitle(__file__)
+    #setproctitle(__file__)
     
     # Change the current directory to the location of the application
     os.chdir(os.path.dirname(os.path.realpath(sys.argv[0])))
