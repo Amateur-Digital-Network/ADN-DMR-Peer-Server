@@ -9,6 +9,7 @@ RUN adduser -D -u 54000 radio && \
         cd /opt && \
         git clone https://github.com/hacknix/freedmr && \
         cd /opt/freedmr && \
+	pypy -m ensurepip && \
         pypy -m pip install --no-cache-dir -r requirements.txt && \
         apk del git gcc musl-dev pypy-dev && \
         chown -R radio: /opt/freedmr
