@@ -4,7 +4,7 @@ COPY entrypoint-proxy /entrypoint
 
 RUN useradd -u 54000 radio && \
         apt-get update && \
-        apt-get -y  install git gcc musl-dev pypy pypy-dev && \
+        apt-get -y  install git gcc musl-dev pypy3 pypy3-dev && \
 	cd /opt && \
         git clone https://github.com/hacknix/freedmr && \
         cd /opt/freedmr && \
