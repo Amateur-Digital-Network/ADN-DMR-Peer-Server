@@ -14,7 +14,7 @@ RUN adduser -D -u 54000 radio && \
         apt-get remove gcc musl-dev pypy-dev && \
 	apt-get -y autoremove && \
 	apt-get -y purge && \
-	rm -rvf /var/cache/apt/archives/* && \\
+	rm -rvf /var/cache/apt/archives/* && \
         chown -R radio: /opt/freedmr
 
 USER radio
