@@ -4,11 +4,10 @@ COPY entrypoint-proxy /entrypoint
 
 RUN useradd -u 54000 radio && \
         apt-get update && \
-        apt-get -y  install git gcc musl-dev pypy3 pypy3-dev && \
+        apt-get -y  install git gcc musl-dev pypy3 pypy3-dev python3-pip && \
 	cd /opt && \
         git clone https://github.com/hacknix/freedmr && \
         cd /opt/freedmr && \
-	pypy3 -m ensurepip && \
         pypy3 -m pip install --no-cache-dir -r requirements.txt && \
         apt-get -y remove gcc musl-dev pypy-dev && \
 	apt-get -y autoremove && \
@@ -19,3 +18,4 @@ RUN useradd -u 54000 radio && \
 USER radio
 
 ENTRYPOINT [ "/entrypoint" ]
+
