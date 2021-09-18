@@ -10,7 +10,7 @@ RUN adduser -D -u 54000 radio && \
 	tar jxvf ./pypy.tar.bz2 && \
         git clone https://github.com/hacknix/freedmr && \
         cd /opt/freedmr && \
-	ls -la /opt/pypy* && \
+	ls -la /opt/pypy*/bin && \
 	/opt/pypy3.7-v7.3.5-linux64/bin/pypy3 -m ensurepip && \
         /opt/pypy3.7-v7.3.5-linux64/bin/pypy3 -m pip install --no-cache-dir -r requirements.txt && \
         apk del git gcc musl-dev && \
