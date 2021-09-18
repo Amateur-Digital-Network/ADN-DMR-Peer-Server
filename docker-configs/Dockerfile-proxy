@@ -2,7 +2,7 @@ FROM debian:bullseye-slim
 
 COPY entrypoint-proxy /entrypoint
 
-RUN adduser -u 54000 radio && \
+RUN useradd -u 54000 radio && \
         apt-get && \
         apt-get install git gcc musl-dev pypy pypy-dev && \
 	cd /opt && \
