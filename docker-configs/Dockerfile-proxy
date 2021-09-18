@@ -1,19 +1,20 @@
-FROM alpine
+FROM debian:bullseye-slim
 
 COPY entrypoint-proxy /entrypoint
 
 RUN adduser -D -u 54000 radio && \
-        apk update && \
-        apk add git gcc musl-dev curl && \
-        cd /opt && \
-	curl https://downloads.python.org/pypy/pypy3.7-v7.3.5-linux64.tar.bz2 -o pypy.tar.bz2 && \
-	tar jxvf ./pypy.tar.bz2 && \
+        apt-get && \
+        apt-get install git gcc musl-dev pypy pypy-dev && \
+	cd /opt && \
         git clone https://github.com/hacknix/freedmr && \
         cd /opt/freedmr && \
 	cd /opt/pypy3.7-v7.3.5-linux64/bin/ && \
 	./pypy3 -m ensurepip && \
         /opt/pypy3.7-v7.3.5-linux64/bin/pypy3 -m pip install --no-cache-dir -r requirements.txt && \
-        apk del git gcc musl-dev && \
+        apt-get remove gcc musl-dev pypy-dev && \
+	apt-get -y autoremove && \
+	apt-get -y purge && \
+	rm -rvf /var/cache/apt/archives/*
         chown -R radio: /opt/freedmr
 
 USER radio
