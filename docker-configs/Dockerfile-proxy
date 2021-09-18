@@ -9,7 +9,6 @@ RUN adduser -D -u 54000 radio && \
 	curl https://downloads.python.org/pypy/pypy3.7-v7.3.5-linux64.tar.bz2 -o pypy.tar.bz2 && \
 	tar jxvf ./pypy.tar.bz2&& \
 	ln  /opt/pypy3.7-v7.3.5-linux64/bin/pypy /bin/pypy && \
-	cd .. &&\
         git clone https://github.com/hacknix/freedmr && \
         cd /opt/freedmr && \
 	pypy -m ensurepip && \
