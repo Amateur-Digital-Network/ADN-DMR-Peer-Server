@@ -1,4 +1,4 @@
-from bitarray import bitarray
+from bit_array import BitArray as bitarray
 from itertools import islice
 import os
 import glob

@@ -18,7 +18,7 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 ###############################################################################
 
-from bitarray import bitarray
+from fd_bitarray import bitarray
 from dmr_utils3 import bptc, golay, qr
 from dmr_utils3.utils import bytes_3, bytes_4
 from dmr_utils3.const import EMB, SLOT_TYPE, BS_VOICE_SYNC, BS_DATA_SYNC, LC_OPT

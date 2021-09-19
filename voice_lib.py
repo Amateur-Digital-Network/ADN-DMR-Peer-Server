@@ -1,4 +1,4 @@
-from bitarray import bitarray
+from fd_bitarray import bitarray
 
 words = {
     'all_circuits': [
