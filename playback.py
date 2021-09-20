@@ -21,7 +21,6 @@
 
 # Python modules we need
 import sys
-from bit_array import BitArray as bitarray
 from time import time, sleep
 from importlib import import_module
 from random import randint
