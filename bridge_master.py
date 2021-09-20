@@ -33,7 +33,7 @@ This program currently only works with group voice calls.
 
 # Python modules we need
 import sys
-from bit_array import BitArray as bitarray
+from bitstring import BitArray
 from time import time,sleep,perf_counter
 import importlib.util
 import re
@@ -1256,8 +1256,7 @@ class routerOBP(OPENBRIDGE):
                     # MUST TEST FOR NEW STREAM AND IF SO, RE-WRITE THE LC FOR THE TARGET
                     # MUST RE-WRITE DESTINATION TGID IF DIFFERENT
                     # if _dst_id != rule['DST_GROUP']:
-                    dmrbits = bitarray(endian='big')
-                    dmrbits.frombytes(dmrpkt)
+                    dmrbits = BitArray(bytes=dmrpkt)
                     # Create a voice header packet (FULL LC)
                     if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
                         dmrbits = _target_status[_stream_id]['H_LC'][0:98] + dmrbits[98:166] + _target_status[_stream_id]['H_LC'][98:197]
@@ -1338,8 +1337,7 @@ class routerOBP(OPENBRIDGE):
                     # MUST TEST FOR NEW STREAM AND IF SO, RE-WRITE THE LC FOR THE TARGET
                     # MUST RE-WRITE DESTINATION TGID IF DIFFERENT
                     # if _dst_id != rule['DST_GROUP']:
-                    dmrbits = bitarray(endian='big')
-                    dmrbits.frombytes(dmrpkt)
+                    dmrbits = BitArray(bytes=dmrpkt)
                     # Create a voice header packet (FULL LC)
                     if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
                         dmrbits = _target_status[_target['TS']]['TX_H_LC'][0:98] + dmrbits[98:166] + _target_status[_target['TS']]['TX_H_LC'][98:197]
@@ -1644,8 +1642,7 @@ class routerHBP(HBSYSTEM):
                         # MUST TEST FOR NEW STREAM AND IF SO, RE-WRITE THE LC FOR THE TARGET
                         # MUST RE-WRITE DESTINATION TGID IF DIFFERENT
                         # if _dst_id != rule['DST_GROUP']:
-                        dmrbits = bitarray(endian='big')
-                        dmrbits.frombytes(dmrpkt)
+                        dmrbits = BitArray(bytes=dmrpkt)
                         # Create a voice header packet (FULL LC)
                         if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
                             dmrbits = _target_status[_stream_id]['H_LC'][0:98] + dmrbits[98:166] + _target_status[_stream_id]['H_LC'][98:197]
@@ -1722,8 +1719,7 @@ class routerHBP(HBSYSTEM):
                         # MUST TEST FOR NEW STREAM AND IF SO, RE-WRITE THE LC FOR THE TARGET
                         # MUST RE-WRITE DESTINATION TGID IF DIFFERENT
                         # if _dst_id != rule['DST_GROUP']:
-                        dmrbits = bitarray(endian='big')
-                        dmrbits.frombytes(dmrpkt)
+                        dmrbits = BitArray(bytes=dmrpkt)
                         # Create a voice header packet (FULL LC)
                         if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
                             dmrbits = _target_status[_target['TS']]['TX_H_LC'][0:98] + dmrbits[98:166] + _target_status[_target['TS']]['TX_H_LC'][98:197]

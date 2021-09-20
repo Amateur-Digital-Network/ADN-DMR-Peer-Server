@@ -18,7 +18,7 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 ###############################################################################
 
-from fd_bitarray import bitarray
+from bitstring import BitArray
 from dmr_utils3 import bptc, golay, qr
 from dmr_utils3.utils import bytes_3, bytes_4
 from dmr_utils3.const import EMB, SLOT_TYPE, BS_VOICE_SYNC, BS_DATA_SYNC, LC_OPT
@@ -31,8 +31,7 @@ BURSTBITS = [0b00010000,0b00000001,0b00000010,0b00000011,0b00000100,0b00000101]
 TERMBITS  = 0b00100010
 
 # Need a bitstring of 4-bytes of zero for burst F
-NULL_EMB_LC = bitarray(endian='big')
-NULL_EMB_LC.frombytes(b'\x00\x00\x00\x00')
+NULL_EMB_LC = BitArray(bytes=b'\x00\x00\x00\x00')
 
 # This is where HBP encodes RSSI, it will need to be null
 TAIL = b'\x00\x00'
