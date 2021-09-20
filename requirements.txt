@@ -1,7 +1,6 @@
 bitstring>=3.1.5
-bit_array
 Twisted>=16.3.0
 dmr_utils3>=0.1.19
 configparser>=3.0.0
-mysql-connector
+mysql-connector-python
 setproctitle
