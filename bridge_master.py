@@ -39,7 +39,7 @@ import importlib.util
 import re
 import copy
 from setproctitle import setproctitle
-from crccheck.crc import Crc32
+#from crccheck.crc import Crc32
 
 # Twisted is pretty important, so I keep it separate
 from twisted.internet.protocol import Factory, Protocol
@@ -1464,8 +1464,9 @@ class routerOBP(OPENBRIDGE):
         pkt_time = time()
         dmrpkt = _data[20:53]
         _bits = _data[15]
-        _pkt_crc = Crc32.calc(_data[4:53])
+        #_pkt_crc = Crc32.calc(_data[4:53])
         #_pkt_crc = Crc32.calc(dmrpkt)
+        _pkt_crc = _data[53:]
         
 
         # Match UNIT data, SMS/GPS, and send it to the dst_id if it is in SUB_MAP
@@ -2062,7 +2063,8 @@ class routerHBP(HBSYSTEM):
         dmrpkt = _data[20:53]
         _bits = _data[15]
         
-        _pkt_crc = Crc32.calc(_data[4:53])
+        #_pkt_crc = Crc32.calc(_data[4:53])
+        _pkt_crc = _data[53:]
         
         _nine = bytes_3(9)
         
