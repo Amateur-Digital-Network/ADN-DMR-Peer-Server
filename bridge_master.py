@@ -2066,7 +2066,7 @@ class routerHBP(HBSYSTEM):
         _bits = _data[15]
         
         #_pkt_crc = Crc32.calc(_data[4:53])
-        _pkt_crc = sha1(_data).digest()
+        _pkt_crc = haslib.sha1(_data).digest()
         
         _nine = bytes_3(9)
         
