@@ -33,7 +33,7 @@ from binascii import a2b_hex as bhex
 from random import randint
 from hashlib import sha256, sha1
 from hmac import new as hmac_new, compare_digest
-from time import time
+
 from collections import deque
 
 # Twisted is pretty important, so I keep it separate
@@ -166,7 +166,7 @@ class OPENBRIDGE(DatagramProtocol):
             logger.debug('(%s) *BridgeControl* Not sent BCSQ Source Quench TARGET_IP not known , TG: %s, Stream ID: %s',self._system,int_id(_tgid))
     
 
-    def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
+    def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash):
         pass
         #print(int_id(_peer_id), int_id(_rf_src), int_id(_dst_id), int_id(_seq), _slot, _call_type, _frame_type, repr(_dtype_vseq), int_id(_stream_id))
 
