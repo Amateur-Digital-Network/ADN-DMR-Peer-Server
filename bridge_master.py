@@ -40,7 +40,7 @@ import re
 import copy
 from setproctitle import setproctitle
 #from crccheck.crc import Crc32
-import hashlib
+from hashlib import hashlib.sha1
 
 # Twisted is pretty important, so I keep it separate
 from twisted.internet.protocol import Factory, Protocol
