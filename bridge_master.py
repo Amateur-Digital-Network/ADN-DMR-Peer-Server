@@ -40,7 +40,6 @@ import re
 import copy
 from setproctitle import setproctitle
 #from crccheck.crc import Crc32
-from hashlib import sha1
 
 # Twisted is pretty important, so I keep it separate
 from twisted.internet.protocol import Factory, Protocol
@@ -2060,13 +2059,13 @@ class routerHBP(HBSYSTEM):
             systems[system]._report.send_bridgeEvent('UNIT DATA,START,TX,{},{},{},{},{},{}'.format(_target, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), 1, _int_dst_id).encode(encoding='utf-8', errors='ignore'))
     
 
-    def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
+    def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash):
         pkt_time = time()
         dmrpkt = _data[20:53]
         _bits = _data[15]
         
         #_pkt_crc = Crc32.calc(_data[4:53])
-        _pkt_crc = haslib.sha1(_data).digest()
+        _pkt_crc = _hash
         
         _nine = bytes_3(9)
         
