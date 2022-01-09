@@ -31,7 +31,7 @@ sufficient logging to be used standalone as a troubleshooting application.
 from binascii import b2a_hex as ahex
 from binascii import a2b_hex as bhex
 from random import randint
-from hashlib import sha256, sha1
+
 from hmac import new as hmac_new, compare_digest
 
 from collections import deque
@@ -245,7 +245,7 @@ class OPENBRIDGE(DatagramProtocol):
                         return
 
                 # Userland actions -- typically this is the function you subclass for an application
-                self.dmrd_received(_peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash)
+                self.dmrd_received(_peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data)
                 #Silently treat a DMRD packet like a keepalive - this is because it's traffic and the 
                 #Other end may not have enabled ENAHNCED_OBP
                 self._config['_bcka'] = time()
