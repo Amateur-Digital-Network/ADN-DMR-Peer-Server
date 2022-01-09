@@ -1460,14 +1460,13 @@ class routerOBP(OPENBRIDGE):
             systems[_target]._report.send_bridgeEvent('UNIT DATA,START,TX,{},{},{},{},{},{}'.format(_target, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), 1, _int_dst_id).encode(encoding='utf-8', errors='ignore'))
 
 
-    def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash):
+    def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
         pkt_time = time()
         dmrpkt = _data[20:53]
         _bits = _data[15]
         #_pkt_crc = Crc32.calc(_data[4:53])
         #_pkt_crc = Crc32.calc(dmrpkt)
-        #_pkt_crc = _data[53:]
-        _pkt_crc = _hash
+        _pkt_crc = _data[53:]
         
 
         # Match UNIT data, SMS/GPS, and send it to the dst_id if it is in SUB_MAP
