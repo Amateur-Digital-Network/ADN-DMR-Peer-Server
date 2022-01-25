@@ -153,7 +153,7 @@ class OPENBRIDGE(DatagramProtocol):
                 if self._config['VER'] > 2:
                     _packet = b''.join([DMRF,_packet[4:11], self._CONFIG['GLOBAL']['SERVER_ID'],_packet[15:], time_ns().to_bytes(8,'big')])
                 else:
-                    _packet = b''.join([DMRF,_packet[4:11], self._CONFIG['GLOBAL']['SERVER_ID'],_packet[15:], time_ns().to_bytes(8,'big')],_source_server)
+                    _packet = b''.join([DMRF,_packet[4:11], self._CONFIG['GLOBAL']['SERVER_ID'],_packet[15:], time_ns().to_bytes(8,'big'),_source_server])
                 _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
                 _h.update(_packet)
                 _hash = _h.digest()
