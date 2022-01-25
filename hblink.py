@@ -55,13 +55,6 @@ from reporting_const import *
 import logging
 logger = logging.getLogger(__name__)
 
-from functools import partial, partialmethod
-
-logging.TRACE = 5
-logging.addLevelName(logging.TRACE, 'TRACE')
-logging.Logger.trace = partialmethod(logging.Logger.log, logging.TRACE)
-logging.trace = partial(logging.log, logging.TRACE)
-
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Cortney T. Buffington, N0MJS, Forked by Simon Adlem - G7RZU'
 __copyright__  = 'Copyright (c) 2016-2019 Cortney T. Buffington, N0MJS and the K0USY Group, Simon Adlem, G7RZU 2020,2021'
@@ -144,7 +137,7 @@ class OPENBRIDGE(DatagramProtocol):
     def dereg(self):
         logger.info('(%s) is mode OPENBRIDGE. No De-Registration required, continuing shutdown', self._system)
 
-    def send_system(self, _packet,_hops = b''):                      
+    def send_system(self, _packet,_hops = b'',_source_server = b'\x00\x00\x00\x00'):                      
         #Don't do anything if we are STUNned
         if 'STUN' in self._CONFIG:
             logger.info('(%s) Bridge STUNned, discarding', self._system)
@@ -157,7 +150,10 @@ class OPENBRIDGE(DatagramProtocol):
         
         if _packet[:3] == DMR and self._config['TARGET_IP']:
             if 'VER' in self._config and self._config['VER'] > 1:
-                _packet = b''.join([DMRF,_packet[4:11], self._CONFIG['GLOBAL']['SERVER_ID'],_packet[15:], time_ns().to_bytes(8,'big')])
+                if self._config['VER'] > 2:
+                    _packet = b''.join([DMRF,_packet[4:11], self._CONFIG['GLOBAL']['SERVER_ID'],_packet[15:], time_ns().to_bytes(8,'big')])
+                else:
+                    _packet = b''.join([DMRF,_packet[4:11], self._CONFIG['GLOBAL']['SERVER_ID'],_packet[15:], time_ns().to_bytes(8,'big')],_source_server)
                 _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
                 _h.update(_packet)
                 _hash = _h.digest()
@@ -215,7 +211,7 @@ class OPENBRIDGE(DatagramProtocol):
             
     
 
-    def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash,_hops = b''):
+    def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash,_hops = b'', _source_server = b'\x00\x00\x00\x00'):
         pass
         #print(int_id(_peer_id), int_id(_rf_src), int_id(_dst_id), int_id(_seq), _slot, _call_type, _frame_type, repr(_dtype_vseq), int_id(_stream_id))
 
@@ -323,12 +319,22 @@ class OPENBRIDGE(DatagramProtocol):
             elif _packet[:4] == DMRF:
                 _data = _packet[:53]
                 _timestamp = _packet[53:60]
-                _hops = _packet[61]
-                _hash = _packet[62:]
-                #_ckhs = hmac_new(self._config['PASSPHRASE'],_data,sha1).digest()
-                _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
-                _h.update(_packet[:61])
-                _ckhs = _h.digest()
+                if self._config['VER'] > 2:
+                    _source_server = _packet[60:63]
+                    _hops = _packet[64]
+                    _hash = _packet[65:]
+                    #_ckhs = hmac_new(self._config['PASSPHRASE'],_data,sha1).digest()
+                    _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
+                    _h.update(_packet[:64])
+                    _ckhs = _h.digest()
+                else:
+                    _source_server = b'\x00\x00\x00\x00'
+                    _hops = _packet[61]
+                    _hash = _packet[62:]
+                    #_ckhs = hmac_new(self._config['PASSPHRASE'],_data,sha1).digest()
+                    _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
+                    _h.update(_packet[:61])
+                    _ckhs = _h.digest()
 
                 if compare_digest(_hash, _ckhs) and (_sockaddr == self._config['TARGET_SOCK'] or self._config['RELAX_CHECKS']):
                     _peer_id = _data[11:15]
@@ -414,7 +420,7 @@ class OPENBRIDGE(DatagramProtocol):
                     
                     _hops = _inthops.to_bytes(1,'big')
                     # Userland actions -- typically this is the function you subclass for an application
-                    self.dmrd_received(_peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash,_hops)
+                    self.dmrd_received(_peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash,_hops,_source_server)
                     #Silently treat a DMRD packet like a keepalive - this is because it's traffic and the 
                     #Other end may not have enabled ENAHNCED_OBP
                     self._config['_bcka'] = time()
