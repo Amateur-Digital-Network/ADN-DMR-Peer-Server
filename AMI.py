@@ -73,5 +73,5 @@ if __name__ == '__main__':
     
     a = AMI(sys.argv[1],int(sys.argv[2]),'admin','llcgi',29177)
     #AMIOBJ.AMIClientFactory(AMIOBJ.AMIClient,'rpt cmd 29177 ilink 3 2001')
-    a.send_command(sys.argv[3].encode('utf-8'))
+    a.send_command(sys.argv[3])
     reactor.run()

@@ -2369,6 +2369,9 @@ class routerHBP(HBSYSTEM):
             if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):                
                 if _int_dst_id == 4000:
                     logger.info('(%s) AMI: Private call from %s to %s (Disconnect)',self._system, int_id(_rf_src), _int_dst_id)
+                    AMIOBJ.send_command('ilink 6 0')                    
+                elif _int_dst_id == 5000:
+                    logger.info('(%s) AMI: Private call from %s to %s (Status)',self._system, int_id(_rf_src), _int_dst_id)
                     AMIOBJ.send_command('ilink 5 0')                    
                 else:
                     logger.info('(%s) AMI: Private call from %s to %s (Link)',self._system, int_id(_rf_src), _int_dst_id)
