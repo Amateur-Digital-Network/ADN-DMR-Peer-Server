@@ -2367,9 +2367,9 @@ class routerHBP(HBSYSTEM):
         #Handle AMI
         if _call_type == 'unit' and not _data_call and _slot == 1:
             
-            if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
-                _tmp_hang = self._system['GROUP_HANGTIME']
-                self._system['GROUP_HANGTIME'] = 0                
+            self.STATUS[_slot]['TX_TIME'] = self.STATUS[_slot]['TX_TIME'] - 20
+            
+            if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):                
                 if _int_dst_id == 4000:
                     logger.info('(%s) AMI: Private call from %s to %s (Disconnect)',self._system, int_id(_rf_src), _int_dst_id)
                     AMIOBJ.send_command('ilink 6 0')                    
@@ -2380,8 +2380,6 @@ class routerHBP(HBSYSTEM):
                     logger.info('(%s) AMI: Private call from %s to %s (Link)',self._system, int_id(_rf_src), _int_dst_id)
                     AMIOBJ.send_command('ilink 6 0')
                     AMIOBJ.send_command('ilink 3 ' + str(_int_dst_id))
-            
-                self._system['GROUP_HANGTIME'] = _tmp_hang
             
             if (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM) and (self.STATUS[_slot]['RX_TYPE'] != HBPF_SLT_VTERM):
                 pass
