@@ -1,18 +1,30 @@
 
+import sys
+
 from time import time
-from random import randint
 
 from twisted.internet import reactor,task
 from twisted.internet.defer import Deferred
-from twisted.internet.protocol import ClientFactory,ReconnectingClientFactory,Protocol
+from twisted.internet.protocol import ClientFactory,ClientFactory,Protocol
 from twisted.protocols.basic import LineReceiver
 
 class AMI():
-    def __init__(self,host,port):
+    def __init__(self,host,port,username,secret,nodenum):
         self._AMIClient = self.AMIClient
+        self.host = host
+        self.port = port
+        self.username = username.encode('utf-8')
+        self.secret = secret.encode('utf-8')
+        self.nodenum = str(nodenum)
 
+    def send_command(self,command):
+        self._AMIClient.command = command
+        self._AMIClient.username = self.username
+        self._AMIClient.secret = self.secret
+        self._AMIClient.nodenum = self.nodenum.encode('utf-8')
+        self.command = command
         
-        self.CF = reactor.connectTCP(host, port, self.CCClientFactory(self._AMIClient))
+        self.CF = reactor.connectTCP(self.host, self.port, self.AMIClientFactory(self._AMIClient))
     
     def closeConnection(self):
         self.transport.loseConnection()
@@ -21,55 +33,45 @@ class AMI():
         
         delimiter = b'\r\n'
         
-        end = b"Bye-bye!"
-        
         def connectionMade(self):
-            print('b')
-            self.sendLine('Action: login')
-            self.sendLine('Username: admin')
-            self.sendLine('Secret: ilcgi')
-            self.sendLine('\r\n')
+            self.sendLine(b'Action: login')
+            self.sendLine(b''.join([b'Username: ',self.username]))
+            self.sendLine(b''.join([b'Secret: ',self.secret]))
+            self.sendLine(self.delimiter)
             
         def lineReceived(self,line):
-            
             print(line)
-            
-            if line == 'Asterisk Call Manager/1.0':
-                print('OK')
+            if line == b'Asterisk Call Manager/1.0':
                 return
             
-            k,v = line.split(':')
-            
-            if v == ' Success':
-                    self.lastresponse = True
-            elif k == 'Response' and v == ' Error':
-                self.transport.loseConnection()
-            
-            else:
-                self.sendLine('Action: command')
-                self.sendLine('Command:' + self.command)
-                self.sendline('\r\n')
+            if line == b'Response: Success':
+                self.sendLine(b'Action: command')
+                #print(b''.join([b'Command: ',b'rpt cmd ',self.nodenum,b' ',self.command]))
+                self.sendLine(b''.join([b'Command: ',b'rpt cmd ',self.nodenum,b' ',self.command]))
+                #self.sendLine(b'Command: ' + b'rpt cmd 29177 ilink 3 2001')
+                self.sendLine(self.delimiter)
                 self.transport.loseConnection()
                     
             
             
-    class AMIClientFactory(ReconnectingClientFactory):
-        def __init__(self,AMIClient,command):
-            self.command = command
+    class AMIClientFactory(ClientFactory):
+        def __init__(self,AMIClient):
+            #self.command = command
             self.done = Deferred()
             self.protocol = AMIClient
-            self.protocol.command = command
-            print('a')
-
+            #self.protocol.command = command
+            
         def clientConnectionFailed(self, connector, reason):
-            print("connection failed:", reason.getErrorMessage())
-            ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
+            ClientFactory.clientConnectionLost(self, connector, reason)
 
         def clientConnectionLost(self, connector, reason):
-            print("connection lost:", reason.getErrorMessage())
-            ReconnectingClientFactory.clientConnectionLost(self, connector, reason)
+            ClientFactory.clientConnectionLost(self, connector, reason)
         
             
 if __name__ == '__main__':
-    AMIc = AMI.AMIClientFactory(AMI.AMIClient,'rpt cmd 29177 ilink 3 2001')
+
     
+    a = AMI(sys.argv[1],int(sys.argv[2]),'admin','llcgi',29177)
+    #AMIOBJ.AMIClientFactory(AMIOBJ.AMIClient,'rpt cmd 29177 ilink 3 2001')
+    a.send_command(sys.argv[3].encode('utf-8'))
+    reactor.run()

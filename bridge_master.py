@@ -80,6 +80,7 @@ import re
 
 from binascii import b2a_hex as ahex
 
+from AMI import AMI
 
 ##from hmac import new as hmac_new, compare_digest
 ##from hashlib import sha256, hash
@@ -2216,7 +2217,7 @@ class routerHBP(HBSYSTEM):
 
         
         #Handle  private voice calls (for reflectors)
-        if _call_type == 'unit' and not _data_call:
+        if _call_type == 'unit' and not _data_call and _slot == 2:
             if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
                 
                 self.STATUS[_slot]['packets'] = 0
@@ -2362,7 +2363,36 @@ class routerHBP(HBSYSTEM):
             self.STATUS[_slot]['VOICE_STREAM'] = _voice_call
             
             self.STATUS[_slot]['packets'] = self.STATUS[_slot]['packets'] +1                
-
+        
+        #Handle AMI
+        if _call_type == 'unit' and not _data_call and _slot == 1:
+            if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):                
+                if _int_dst_id == 4000:
+                    logger.info('(%s) AMI: Private call from %s to %s (Disconnect)',self._system, int_id(_rf_src), _int_dst_id)
+                    AMIOBJ.send_command('ilink 5 0')                    
+                else:
+                    logger.info('(%s) AMI: Private call from %s to %s (Link)',self._system, int_id(_rf_src), _int_dst_id)
+                    AMIOBJ.send_command('ilink 6 0')
+                    AMIOBJ.send_command('ilink 3 ' + str(_int_dst_id))
+            
+            if (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM) and (self.STATUS[_slot]['RX_TYPE'] != HBPF_SLT_VTERM):
+                pass
+            
+        
+            # Mark status variables for use later
+            self.STATUS[_slot]['RX_PEER']      = _peer_id
+            self.STATUS[_slot]['RX_SEQ']       = _seq
+            self.STATUS[_slot]['RX_RFS']       = _rf_src
+            self.STATUS[_slot]['RX_TYPE']      = _dtype_vseq
+            self.STATUS[_slot]['RX_TGID']      = _dst_id
+            self.STATUS[_slot]['RX_TIME']      = pkt_time
+            self.STATUS[_slot]['RX_STREAM_ID'] = _stream_id
+            self.STATUS[_slot]['VOICE_STREAM'] = _voice_call
+            
+            self.STATUS[_slot]['packets'] = self.STATUS[_slot]['packets'] +1                
+        
+        
+        
         #Handle group calls
         if _call_type == 'group' or _call_type == 'vcsbk':
 
@@ -2704,6 +2734,8 @@ if __name__ == '__main__':
             CONFIG['SYSTEMS'].update(SQLCONFIG)
         else:
             logger.debug('(MYSQL) problem connecting to SQL server, aborting')
+            
+        AMIOBJ = AMI('asl.gb7fr.org.uk',5038,'admin','llcgi',29177)
         
 
     # Set up the signal handler
