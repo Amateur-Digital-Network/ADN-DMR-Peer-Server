@@ -2366,6 +2366,9 @@ class routerHBP(HBSYSTEM):
         
         #Handle AMI
         if _call_type == 'unit' and not _data_call and _slot == 1:
+            
+            self.STATUS[_slot]['TX_TIME'] = self.STATUS[_slot]['TX_TIME'] - 5
+            
             if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):                
                 if _int_dst_id == 4000:
                     logger.info('(%s) AMI: Private call from %s to %s (Disconnect)',self._system, int_id(_rf_src), _int_dst_id)
