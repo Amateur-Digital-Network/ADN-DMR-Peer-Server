@@ -18,7 +18,7 @@ class AMI():
         self.nodenum = str(nodenum)
 
     def send_command(self,command):
-        self._AMIClient.command = command
+        self._AMIClient.command = command.encode('utf-8')
         self._AMIClient.username = self.username
         self._AMIClient.secret = self.secret
         self._AMIClient.nodenum = self.nodenum.encode('utf-8')
