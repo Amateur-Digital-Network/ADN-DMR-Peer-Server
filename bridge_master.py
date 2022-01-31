@@ -2741,7 +2741,7 @@ if __name__ == '__main__':
         else:
             logger.debug('(MYSQL) problem connecting to SQL server, aborting')
             
-        AMIOBJ = AMI('asl.gb7fr.org.uk',5038,'admin','llcgi',29177)
+        AMIOBJ = AMI('asl.gb7fr.org.uk',5038,'admin','Fr33DMR',29177)
         
 
     # Set up the signal handler
