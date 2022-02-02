@@ -1822,7 +1822,8 @@ class routerHBP(HBSYSTEM):
                 'lastSeq': False,
                 'lastData': False,
                 'packets': 0,
-                'crcs': set()
+                'crcs': set(),
+                '_allStarMode': False
                 },
             2: {
                 'RX_START':     time(),
@@ -1852,7 +1853,8 @@ class routerHBP(HBSYSTEM):
                 'lastSeq': False,
                 'lastData': False,
                 'packets': 0,
-                'crcs': set()
+                'crcs': set(),
+                '_allStarMode': False
                 }
             }
 
@@ -2104,6 +2106,10 @@ class routerHBP(HBSYSTEM):
         #Add system to SUB_MAP
         SUB_MAP[_rf_src] = (self._system,_slot,pkt_time)
         
+        def resetallStarMode():
+            self.STATUS[_slot]['_allStarMode'] = False
+            logger.info('(%s) Reset all star mode -> dial mode',self._system)
+        
         #Rewrite GPS Data comming in as a group call to a unit call
         #if (_call_type == 'group' or _call_type == 'vcsbk') and _int_dst_id == 900999:
             #_bits = header(_slot,'unit',_bits)
@@ -2217,7 +2223,7 @@ class routerHBP(HBSYSTEM):
 
         
         #Handle  private voice calls (for reflectors)
-        if _call_type == 'unit' and not _data_call and _slot == 2:
+        if _call_type == 'unit' and not _data_call and not self.STATUS[_slot]['_allStarMode']:
             if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
                 
                 self.STATUS[_slot]['packets'] = 0
@@ -2292,6 +2298,15 @@ class routerHBP(HBSYSTEM):
                     _say.append(words[_lang]['busy'])
                     _say.append(words[_lang]['silence'])
                     self.STATUS[_slot]['_stopTgAnnounce'] = True
+                    
+                #Allstar mode switch
+                if _int_dst_id == 8:
+                    logger.info('(%s) Reflector: voice called - TG 8 AllStar"', self._system)
+                    _say.append(words[_lang]['A'])
+                    _say.append(words[_lang]['silence'])
+                    self.STATUS[_slot]['_stopTgAnnounce'] = True
+                    self.STATUS[_slot]['_allStarMode'] = True
+                    task.deferLater(10,reactor,resetallStarMode)
                 
                 #If disconnection called
                 if _int_dst_id == 4000:
@@ -2365,7 +2380,7 @@ class routerHBP(HBSYSTEM):
             self.STATUS[_slot]['packets'] = self.STATUS[_slot]['packets'] +1                
         
         #Handle AMI
-        if _call_type == 'unit' and not _data_call and _slot == 1:
+        if _call_type == 'unit' and not _data_call and self.STATUS[_slot]['_allStarMode']:
             
             self.STATUS[_slot]['TX_TIME'] = self.STATUS[_slot]['TX_TIME'] - 20
             
