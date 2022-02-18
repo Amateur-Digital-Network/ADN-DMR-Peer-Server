@@ -2235,7 +2235,7 @@ class routerHBP(HBSYSTEM):
                                 
         #Handle AMI private calls
         if _call_type == 'unit' and not _data_call and self.STATUS[_slot]['_allStarMode']:
-             if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
+            if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
                  logger.info('(%s) AMI: Private call from %s to %s',self._system, int_id(_rf_src), _int_dst_id)
                 
                     
