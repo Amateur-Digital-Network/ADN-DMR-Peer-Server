@@ -2236,6 +2236,11 @@ class routerHBP(HBSYSTEM):
         #Handle AMI private calls
         if _call_type == 'unit' and not _data_call and self.STATUS[_slot]['_allStarMode']:
              if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
+                 logger.info('(%s) AMI: Private call from %s to %s',self._system, int_id(_rf_src), _int_dst_id)
+                
+                    
+            if (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM) and (self.STATUS[_slot]['RX_TYPE'] != HBPF_SLT_VTERM):
+                
                 if _int_dst_id == 4000:
                     logger.info('(%s) AMI: Private call from %s to %s (Disconnect)',self._system, int_id(_rf_src), _int_dst_id)
                     AMIOBJ.send_command('ilink 6 0')                    
@@ -2246,6 +2251,20 @@ class routerHBP(HBSYSTEM):
                     logger.info('(%s) AMI: Private call from %s to %s (Link)',self._system, int_id(_rf_src), _int_dst_id)
                     AMIOBJ.send_command('ilink 6 0')
                     AMIOBJ.send_command('ilink 3 ' + str(_int_dst_id))
+                
+            # Mark status variables for use later
+            self.STATUS[_slot]['RX_PEER']      = _peer_id
+            self.STATUS[_slot]['RX_SEQ']       = _seq
+            self.STATUS[_slot]['RX_RFS']       = _rf_src
+            self.STATUS[_slot]['RX_TYPE']      = _dtype_vseq
+            self.STATUS[_slot]['RX_TGID']      = _dst_id
+            self.STATUS[_slot]['RX_TIME']      = pkt_time
+            self.STATUS[_slot]['RX_STREAM_ID'] = _stream_id
+            self.STATUS[_slot]['VOICE_STREAM'] = _voice_call
+            
+            self.STATUS[_slot]['packets'] = self.STATUS[_slot]['packets'] +1 
+            
+                
         
         #Handle  private voice calls (for reflectors)
         elif _call_type == 'unit' and not _data_call and not self.STATUS[_slot]['_allStarMode']:
@@ -2403,21 +2422,6 @@ class routerHBP(HBSYSTEM):
             self.STATUS[_slot]['VOICE_STREAM'] = _voice_call
             
             self.STATUS[_slot]['packets'] = self.STATUS[_slot]['packets'] +1                
-            
-        
-            # Mark status variables for use later
-            self.STATUS[_slot]['RX_PEER']      = _peer_id
-            self.STATUS[_slot]['RX_SEQ']       = _seq
-            self.STATUS[_slot]['RX_RFS']       = _rf_src
-            self.STATUS[_slot]['RX_TYPE']      = _dtype_vseq
-            self.STATUS[_slot]['RX_TGID']      = _dst_id
-            self.STATUS[_slot]['RX_TIME']      = pkt_time
-            self.STATUS[_slot]['RX_STREAM_ID'] = _stream_id
-            self.STATUS[_slot]['VOICE_STREAM'] = _voice_call
-            
-            self.STATUS[_slot]['packets'] = self.STATUS[_slot]['packets'] +1                
-        
-        
         
         #Handle group calls
         if _call_type == 'group' or _call_type == 'vcsbk':
