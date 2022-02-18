@@ -2350,7 +2350,7 @@ class routerHBP(HBSYSTEM):
                     _say.append(words[_lang]['silence'])
                     self.STATUS[_slot]['_stopTgAnnounce'] = True
                     self.STATUS[_slot]['_allStarMode'] = True
-                    reactor.callLater(10,reactor,resetallStarMode)
+                    reactor.callLater(10,resetallStarMode)
                 
                 #If disconnection called
                 if _int_dst_id == 4000:
