@@ -2235,16 +2235,17 @@ class routerHBP(HBSYSTEM):
                                 
         #Handle AMI private calls
         if _call_type == 'unit' and not _data_call and self.STATUS[_slot]['_allStarMode']:
-            if _int_dst_id == 4000:
-                logger.info('(%s) AMI: Private call from %s to %s (Disconnect)',self._system, int_id(_rf_src), _int_dst_id)
-                AMIOBJ.send_command('ilink 6 0')                    
-            elif _int_dst_id == 5000:
-                logger.info('(%s) AMI: Private call from %s to %s (Status)',self._system, int_id(_rf_src), _int_dst_id)
-                AMIOBJ.send_command('ilink 5 0')                    
-            else:
-                logger.info('(%s) AMI: Private call from %s to %s (Link)',self._system, int_id(_rf_src), _int_dst_id)
-                AMIOBJ.send_command('ilink 6 0')
-                AMIOBJ.send_command('ilink 3 ' + str(_int_dst_id))
+             if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
+                if _int_dst_id == 4000:
+                    logger.info('(%s) AMI: Private call from %s to %s (Disconnect)',self._system, int_id(_rf_src), _int_dst_id)
+                    AMIOBJ.send_command('ilink 6 0')                    
+                elif _int_dst_id == 5000:
+                    logger.info('(%s) AMI: Private call from %s to %s (Status)',self._system, int_id(_rf_src), _int_dst_id)
+                    AMIOBJ.send_command('ilink 5 0')                    
+                else:
+                    logger.info('(%s) AMI: Private call from %s to %s (Link)',self._system, int_id(_rf_src), _int_dst_id)
+                    AMIOBJ.send_command('ilink 6 0')
+                    AMIOBJ.send_command('ilink 3 ' + str(_int_dst_id))
         
         #Handle  private voice calls (for reflectors)
         elif _call_type == 'unit' and not _data_call and not self.STATUS[_slot]['_allStarMode']:
@@ -2326,7 +2327,7 @@ class routerHBP(HBSYSTEM):
                 #Allstar mode switch
                 if _int_dst_id == 8:
                     logger.info('(%s) Reflector: voice called - TG 8 AllStar"', self._system)
-                    _say.append(words[_lang]['A'])
+                    _say.append(words[_lang]['busy'])
                     _say.append(words[_lang]['silence'])
                     self.STATUS[_slot]['_stopTgAnnounce'] = True
                     self.STATUS[_slot]['_allStarMode'] = True
