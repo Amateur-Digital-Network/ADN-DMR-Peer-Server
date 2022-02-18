@@ -144,7 +144,7 @@ class OPENBRIDGE(DatagramProtocol):
     def dereg(self):
         logger.info('(%s) is mode OPENBRIDGE. No De-Registration required, continuing shutdown', self._system)
 
-    def send_system(self, _packet,_hops = b''):                      
+    def send_system(self, _packet, _hops = b'', _ber = b'\x00', _rssi = b'\x00', _source_server = b'\x00\x00\x00\x00'):                      
         #Don't do anything if we are STUNned
         if 'STUN' in self._CONFIG:
             logger.info('(%s) Bridge STUNned, discarding', self._system)
@@ -156,7 +156,25 @@ class OPENBRIDGE(DatagramProtocol):
             
         
         if _packet[:3] == DMR and self._config['TARGET_IP']:
-            if 'VER' in self._config and self._config['VER'] > 1:
+
+            if 'VER' in self._config and self._config['VER'] > 3:
+                _ver = VER.to_bytes(1,'big')
+                _packet = b''.join([DMRE,_packet[4:11], self._CONFIG['GLOBAL']['SERVER_ID'],_packet[15:],_ber,_rssi,_ver,time_ns().to_bytes(8,'big'), _source_server, _hops])
+                _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
+                _h.update(_packet)
+                _hash = _h.digest()
+                _packet = b''.join([_packet, _hash])
+                self.transport.write(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
+            
+            elif 'VER' in self._config and self._config['VER'] == 3:
+                _packet = b''.join([DMRF,_packet[4:11], self._CONFIG['GLOBAL']['SERVER_ID'],_packet[15:]])
+                _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
+                _h.update(_packet)
+                _hash = _h.digest()
+                _packet = b''.join([_packet,time_ns().to_bytes(8,'big'), _hops, _hash])
+                self.transport.write(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
+            
+            elif 'VER' in self._config and self._config['VER'] == 2:
                 _packet = b''.join([DMRF,_packet[4:11], self._CONFIG['GLOBAL']['SERVER_ID'],_packet[15:], time_ns().to_bytes(8,'big')])
                 _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
                 _h.update(_packet)
@@ -215,7 +233,7 @@ class OPENBRIDGE(DatagramProtocol):
             
     
 
-    def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash,_hops = b''):
+    def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash,_hops = b'', _source_server = b'\x00\x00\x00\x00', _ber = b'\x00', _rssi = b'\x00'):
         pass
         #print(int_id(_peer_id), int_id(_rf_src), int_id(_dst_id), int_id(_seq), _slot, _call_type, _frame_type, repr(_dtype_vseq), int_id(_stream_id))
 
@@ -225,11 +243,14 @@ class OPENBRIDGE(DatagramProtocol):
         
         if _packet[:3] == DMR:    # DMRData -- encapsulated DMR data frame
             if _packet[:4] == DMRD:
+                _data = _packet[:53]
+                _stream_id = _data[16:20]
                 if self._config['VER'] > 1:
-                    logger.warning('(%s) *ProtoControl*  Version 1 protocol prohibited by PROTO_VER, Ver: %s',self._system,self._config['VER'])
+                    if _stream_id not in self._laststrid:
+                        logger.warning('(%s) *ProtoControl*  Version 1 protocol prohibited by PROTO_VER, Ver: %s',self._system,self._config['VER'])
+                        self._laststrid.append(_stream_id)
                     self.send_bcve()
                     return
-                _data = _packet[:53]
                 _hash = _packet[53:]
                 _ckhs = hmac_new(self._config['PASSPHRASE'],_data,sha1).digest()
 
@@ -252,7 +273,6 @@ class OPENBRIDGE(DatagramProtocol):
                         _call_type = 'group'
                     _frame_type = (_bits & 0x30) >> 4
                     _dtype_vseq = (_bits & 0xF) # data, 1=voice header, 2=voice terminator; voice, 0=burst A ... 5=burst F
-                    _stream_id = _data[16:20]
                     #logger.debug('(%s) DMRD - Seqence: %s, RF Source: %s, Destination ID: %s', self._system, int_id(_seq), int_id(_rf_src), int_id(_dst_id))
                         
 
@@ -319,6 +339,122 @@ class OPENBRIDGE(DatagramProtocol):
             elif _packet[:4] == EOBP:
                logger.warning('(%s) *ProtoControl* KF7EEL EOBP protocol not supported',self._system)
                return
+           
+            elif _packet[:4] == DMRE:
+                _data = _packet[:53]
+                _ber = _packet[53:54]
+                _rssi = _packet[54:55]
+                _embedded_version  = _packet[55]
+                self._config['VER'] = _embedded_version
+                _timestamp = _packet[56:64]
+                _source_server = _packet[64:68]
+                _hops = _packet[68]
+                _hash = _packet[69:85]
+                #_ckhs = hmac_new(self._config['PASSPHRASE'],_data,sha1).digest()
+                _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
+                _h.update(_packet[:69])
+                    
+                _ckhs = _h.digest()
+
+                if compare_digest(_hash, _ckhs) and (_sockaddr == self._config['TARGET_SOCK'] or self._config['RELAX_CHECKS']):
+                    _peer_id = _data[11:15]
+                    if self._config['NETWORK_ID'] != _peer_id:
+                        logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
+                        return
+                    _seq = _data[4]
+                    _rf_src = _data[5:8]
+                    _dst_id = _data[8:11]
+                    _int_dst_id = int_id(_dst_id)
+                    _bits = _data[15]
+                    _slot = 2 if (_bits & 0x80) else 1
+                    #_call_type = 'unit' if (_bits & 0x40) else 'group'
+                    if _bits & 0x40:
+                        _call_type = 'unit'
+                    elif (_bits & 0x23) == 0x23:
+                        _call_type = 'vcsbk'
+                    else:
+                        _call_type = 'group'
+                    _frame_type = (_bits & 0x30) >> 4
+                    _dtype_vseq = (_bits & 0xF) # data, 1=voice header, 2=voice terminator; voice, 0=burst A ... 5=burst F
+                    _stream_id = _data[16:20]
+                    #logger.debug('(%s) DMRD - Seqence: %s, RF Source: %s, Destination ID: %s', self._system, int_id(_seq), int_id(_rf_src), int_id(_dst_id))
+                    
+                    #Don't do anything if we are STUNned
+                    if 'STUN' in self._CONFIG:
+                            if _stream_id not in self._laststrid:
+                                logger.warning('(%s) Bridge STUNned, discarding', self._system)
+                                self._laststrid.append(_stream_id)
+                            return
+                        
+                    #Discard old packets
+                    if (int.from_bytes(_timestamp,'big')/1000000000) < (time() - 2):
+                        logger.warning('(%s) Packet more than 2s old!, discarding', self._system)
+                        return
+                        
+                    #Increment max hops
+                    _inthops = _hops +1 
+                    
+                    if _inthops > 10:
+                        logger.warning('(%s) MAX HOPS exceed, dropping. Hops: %s, DST: %s', self._system, _inthops, _int_dst_id)
+                        self.send_bcsq(_dst_id,_stream_id)
+                        return
+                    
+                    
+                    #Low-level TG filtering 
+                    if _call_type != 'unit':
+                        _int_dst_id = int_id(_dst_id)
+                        if _int_dst_id <= 79 or (_int_dst_id >= 9990 and _int_dst_id <= 9999) or _int_dst_id == 900999:
+                            if _stream_id not in self._laststrid:
+                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL TG FILTER', self._system, int_id(_stream_id), _int_dst_id)
+                                self.send_bcsq(_dst_id,_stream_id)
+                                self._laststrid.append(_stream_id)
+                            return
+                    
+                    # ACL Processing
+                    if self._CONFIG['GLOBAL']['USE_ACL']:
+                        if not acl_check(_rf_src, self._CONFIG['GLOBAL']['SUB_ACL']):
+                            if _stream_id not in self._laststrid:
+                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL', self._system, int_id(_stream_id), int_id(_rf_src))
+                                self.send_bcsq(_dst_id,_stream_id)
+                                self._laststrid.append(_stream_id)
+                            return
+                        if _slot == 1 and not acl_check(_dst_id, self._CONFIG['GLOBAL']['TG1_ACL']):
+                            if _stream_id not in self._laststrid:
+                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL', self._system, int_id(_stream_id), int_id(_dst_id))
+                                self.send_bcsq(_dst_id,_stream_id)
+                                self._laststrid.append(_stream_id)
+                            return
+                    if self._config['USE_ACL']:
+                        if not acl_check(_rf_src, self._config['SUB_ACL']):
+                            if _stream_id not in self._laststrid:
+                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL', self._system, int_id(_stream_id), int_id(_rf_src))
+                                self.send_bcsq(_dst_id,_stream_id)
+                                self._laststrid.append(_stream_id)
+                            return
+                        if not acl_check(_dst_id, self._config['TG1_ACL']):
+                            if _stream_id not in self._laststrid:
+                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM ACL', self._system, int_id(_stream_id), int_id(_dst_id))
+                                self.send_bcsq(_dst_id,_stream_id)
+                                self._laststrid.append(_stream_id)
+                            return
+                
+
+                    
+                    #Remove timestamp from data. For now dmrd_received does not expect it
+                    #Leaving it in screws up the AMBE data
+                    #_data = b''.join([_data[:5],_data[12:]])
+                    _data = b''.join([DMRD,_data[4:]])
+                    
+                    _hops = _inthops.to_bytes(1,'big')
+                    # Userland actions -- typically this is the function you subclass for an application
+                    self.dmrd_received(_peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash,_hops,_source_server,_ber,_rssi)
+                    #Silently treat a DMRD packet like a keepalive - this is because it's traffic and the 
+                    #Other end may not have enabled ENAHNCED_OBP
+                    self._config['_bcka'] = time()
+                else:
+                    h,p = _sockaddr
+                    logger.warning('(%s) FreeBridge HMAC failed, packet discarded - OPCODE: %s DATA: %s HMAC LENGTH: %s HMAC: %s SRC IP: %s SRC PORT: %s', self._system, _packet[:4], repr(_packet[:69]), len(_packet[69:]), repr(_packet[61:]),h,p) 
+
 
             elif _packet[:4] == DMRF:
                 _data = _packet[:53]
@@ -327,7 +463,11 @@ class OPENBRIDGE(DatagramProtocol):
                 _hash = _packet[62:]
                 #_ckhs = hmac_new(self._config['PASSPHRASE'],_data,sha1).digest()
                 _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
-                _h.update(_packet[:61])
+                if 'VER' in self._config and self._config['VER'] > 2:
+                    _h.update(_packet[:53])
+                elif 'VER' in self._config and self._config['VER'] == 2:
+                    _h.update(_packet[:61])
+                    
                 _ckhs = _h.digest()
 
                 if compare_digest(_hash, _ckhs) and (_sockaddr == self._config['TARGET_SOCK'] or self._config['RELAX_CHECKS']):
@@ -598,8 +738,9 @@ class HBSYSTEM(DatagramProtocol):
     def updateSockaddr_errback(self,failure):
         logger.info('(%s) hostname resolution error: %s',self._system,failure)
 
-    def send_peers(self, _packet, _hops = b''):
+    def send_peers(self, _packet, _hops = b'', _ber = b'\x00', _rssi = b'\x00',_source_server = b'\x00\x00\x00\x00'):
         for _peer in self._peers:
+            _packet =b''.join([_packet,_ber,_rssi])
             self.send_peer(_peer, _packet)
             #logger.debug('(%s) Packet sent to peer %s', self._system, self._peers[_peer]['RADIO_ID'])
 
@@ -610,9 +751,9 @@ class HBSYSTEM(DatagramProtocol):
         # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
         #logger.debug('(%s) TX Packet to %s on port %s: %s', self._peers[_peer]['RADIO_ID'], self._peers[_peer]['IP'], self._peers[_peer]['PORT'], ahex(_packet))
 
-    def send_master(self, _packet, _hops = b''):
+    def send_master(self, _packet, _hops = b'', _ber = b'\x00', _rssi = b'\x00',_source_server = b'\x00\x00\x00\x00'):
         if _packet[:4] == DMRD:
-            _packet = b''.join([_packet[:11], self._config['RADIO_ID'], _packet[15:]])
+            _packet = b''.join([_packet[:11], self._config['RADIO_ID'], _packet[15:],_ber,_rssi])
         self.transport.write(_packet, self._config['MASTER_SOCKADDR'])
         # KEEP THE FOLLOWING COMMENTED OUT UNLESS YOU'RE DEBUGGING DEEPLY!!!!
         #logger.debug('(%s) TX Packet to %s:%s -- %s', self._system, self._config['MASTER_IP'], self._config['MASTER_PORT'], ahex(_packet))
