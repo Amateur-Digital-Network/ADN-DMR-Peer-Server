@@ -2346,9 +2346,7 @@ class routerHBP(HBSYSTEM):
                 #Allstar mode switch
                 if CONFIG['ALLSTAR']['ENABLED'] and _int_dst_id == 8:
                     logger.info('(%s) Reflector: voice called - TG 8 AllStar"', self._system)
-                    _say.append(words[_lang]['A'])
-                    _say.append(words[_lang]['S'])
-                    _say.append(words[_lang]['L'])
+                    _say.append(words[_lang]['all-star-link-mode'])
                     _say.append(words[_lang]['silence'])
                     self.STATUS[_slot]['_stopTgAnnounce'] = True
                     self.STATUS[_slot]['_allStarMode'] = True
