@@ -2234,7 +2234,7 @@ class routerHBP(HBSYSTEM):
                                     logger.info('(%s) UNIT Data not bridged to HBP on slot %s - target busy: %s DST_ID: %s',self._system,_d_slot,_d_system,_int_dst_id)
                                 
         #Handle AMI private calls
-        if _call_type == 'unit' and not _data_call and self.STATUS[_slot]['_allStarMode'] and if CONFIG['ALLSTAR']['ENABLED']:
+        if _call_type == 'unit' and not _data_call and self.STATUS[_slot]['_allStarMode'] and CONFIG['ALLSTAR']['ENABLED']:
             if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
                  logger.info('(%s) AMI: Private call from %s to %s',self._system, int_id(_rf_src), _int_dst_id)
                 
