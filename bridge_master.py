@@ -2234,7 +2234,7 @@ class routerHBP(HBSYSTEM):
                                     logger.info('(%s) UNIT Data not bridged to HBP on slot %s - target busy: %s DST_ID: %s',self._system,_d_slot,_d_system,_int_dst_id)
                                 
         #Handle AMI private calls
-        if _call_type == 'unit' and not _data_call and self.STATUS[_slot]['_allStarMode']:
+        if _call_type == 'unit' and not _data_call and self.STATUS[_slot]['_allStarMode'] and if CONFIG['ALLSTAR']['ENABLED']:
             if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
                  logger.info('(%s) AMI: Private call from %s to %s',self._system, int_id(_rf_src), _int_dst_id)
                 
@@ -2344,9 +2344,9 @@ class routerHBP(HBSYSTEM):
                     self.STATUS[_slot]['_stopTgAnnounce'] = True
                     
                 #Allstar mode switch
-                if _int_dst_id == 8:
+                 if CONFIG['ALLSTAR']['ENABLED'] and _int_dst_id == 8:
                     logger.info('(%s) Reflector: voice called - TG 8 AllStar"', self._system)
-                    _say.append(words[_lang]['busy'])
+                    _say.append(words[_lang]['A'])
                     _say.append(words[_lang]['silence'])
                     self.STATUS[_slot]['_stopTgAnnounce'] = True
                     self.STATUS[_slot]['_allStarMode'] = True
@@ -2764,8 +2764,9 @@ if __name__ == '__main__':
             CONFIG['SYSTEMS'].update(SQLCONFIG)
         else:
             logger.debug('(MYSQL) problem connecting to SQL server, aborting')
-            
-        AMIOBJ = AMI('asl.gb7fr.org.uk',5038,'admin','Fr33DMR',29177)
+        
+        if CONFIG['ALLSTAR']['ENABLED']:
+            AMIOBJ = AMI(CONFIG['ALLSTAR']['SERVER'],CONFIG['ALLSTAR']['PORT'],CONFIG['ALLSTAR']['USER'],CONFIG['ALLSTAR']['PASS'],CONFIG['ALLSTAR']['NODE'])
         
 
     # Set up the signal handler
