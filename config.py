@@ -195,7 +195,7 @@ def build_config(_config_file):
             })
                 
             elif section == 'ALLSTAR':
-                CONFIG['MYSQL'].update({
+                CONFIG['ALLSTAR'].update({
                     'ENABLED': config.getboolean(section, 'ENABLED'),
                     'USER': config.get(section, 'USER'),
                     'PASS': config.get(section, 'PASS'),
