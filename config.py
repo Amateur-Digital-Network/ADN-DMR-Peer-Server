@@ -200,8 +200,8 @@ def build_config(_config_file):
                     'USER': config.get(section, 'USER'),
                     'PASS': config.get(section, 'PASS'),
                     'SERVER': config.get(section, 'SERVER'),
-                    'PORT': config.getint(section,'PORT'))
-                    'NODE' : config.getint(section,'NODE'))
+                    'PORT': config.getint(section,'PORT'),
+                    'NODE' : config.getint(section,'NODE')
             })
             
                 
