@@ -129,6 +129,7 @@ def build_config(_config_file):
     CONFIG['ALIASES'] = {}
     CONFIG['SYSTEMS'] = {}
     CONFIG['MYSQL'] = {}
+    CONFIG['ALLSTAR'] = {}
 
     try:
         for section in config.sections():
