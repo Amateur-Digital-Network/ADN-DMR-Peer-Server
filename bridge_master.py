@@ -2742,17 +2742,17 @@ if __name__ == '__main__':
     
     #If MySQL is enabled, read master config from MySQL too
     if CONFIG['MYSQL']['USE_MYSQL'] == True:
-        logger.debug('(MYSQL) MySQL config enabled')
+        logger.info('(MYSQL) MySQL config enabled')
         SQLCONFIG = {}
         sql = useMYSQL(CONFIG['MYSQL']['SERVER'], CONFIG['MYSQL']['USER'], CONFIG['MYSQL']['PASS'], CONFIG['MYSQL']['DB'],CONFIG['MYSQL']['TABLE'],logger)
         #Run it once immediately
         if sql.con():
-            logger.debug('(MYSQL) reading config from database')
+            logger.info('(MYSQL) reading config from database')
             try:
                 SQLCONFIG = sql.getConfig()
                 #Add MySQL config data to config dict
             except:
-                logger.debug('(MYSQL) problem with SQL query, aborting')
+                logger.warning('(MYSQL) problem with SQL query, aborting')
             sql.close()
             logger.debug('(MYSQL) building ACLs')
             # Build ACLs
@@ -2763,9 +2763,11 @@ if __name__ == '__main__':
             
             CONFIG['SYSTEMS'].update(SQLCONFIG)
         else:
-            logger.debug('(MYSQL) problem connecting to SQL server, aborting')
+            logger.warning('(MYSQL) problem connecting to SQL server, aborting')
         
         if CONFIG['ALLSTAR']['ENABLED']:
+            logger.info('(AMI) Setting up AMI: Server: %s, Port: %s, User: %s, Pass: %s, Node: %s',CONFIG['ALLSTAR']['SERVER'],CONFIG['ALLSTAR']['PORT'],CONFIG['ALLSTAR']['USER'],CONFIG['ALLSTAR']['PASS'],CONFIG['ALLSTAR']['NODE'])
+            
             AMIOBJ = AMI(CONFIG['ALLSTAR']['SERVER'],CONFIG['ALLSTAR']['PORT'],CONFIG['ALLSTAR']['USER'],CONFIG['ALLSTAR']['PASS'],CONFIG['ALLSTAR']['NODE'])
         
 
