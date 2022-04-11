@@ -488,10 +488,13 @@ def stream_trimmer_loop():
                         else:
                             if 'loss' in _stream and 'packets' in _stream and _stream['packets']:
                                 loss = _stream['loss'] / _stream['packets'] * 100
-                                logger.info('(%s) *TIME OUT*   STREAM ID: %s SUB: %s PEER: %s TGID: %s TS 1 Duration: %.2f, Loss: %.2f%%', \
+                                #Only report this at INFO level if it has loss information as this will be a source
+                                #stream not a target stream
+                                #These represent streams where the stream has been lost - i.e. no TERM packet.
+                                logger.info('(%s) *TIME OUT - STREAM LOST*   STREAM ID: %s SUB: %s PEER: %s TGID: %s TS 1 Duration: %.2f, Loss: %.2f%%', \
                                     system, int_id(stream_id), get_alias(int_id(_stream['RFS']), subscriber_ids), get_alias(int_id(_stream['RX_PEER']), peer_ids), get_alias(int_id(_stream['TGID']), talkgroup_ids), _stream['LAST'] - _stream['START'],loss)
                             else:
-                                logger.info('(%s) *TIME OUT*   STREAM ID: %s SUB: %s PEER: %s TGID: %s TS 1 Duration: %.2f', \
+                                logger.debug('(%s) *TIME OUT*   STREAM ID: %s SUB: %s PEER: %s TGID: %s TS 1 Duration: %.2f', \
                                     system, int_id(stream_id), get_alias(int_id(_stream['RFS']), subscriber_ids), get_alias(int_id(_stream['RX_PEER']), peer_ids), get_alias(int_id(_stream['TGID']), talkgroup_ids), _stream['LAST'] - _stream['START'])
                             
                         if CONFIG['REPORTS']['REPORT']:
