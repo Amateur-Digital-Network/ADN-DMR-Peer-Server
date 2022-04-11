@@ -2647,7 +2647,7 @@ class routerHBP(HBSYSTEM):
                 call_duration = pkt_time - self.STATUS[_slot]['RX_START']
                 if call_duration:
                     packet_rate = self.STATUS[_slot]['packets'] / call_duration
-                    loss = (self.STATUS[_stream_id]['loss'] / self.STATUS[_stream_id]['packets']) * 100
+                    loss = (self.STATUS[_slot]['loss'] / self.STATUS[_slot]['packets']) * 100
                 logger.info('(%s) *CALL END*   STREAM ID: %s SUB: %s (%s) PEER: %s (%s) TGID %s (%s), TS %s, Duration: %.2f,  Packet rate: %.2f/s, LOSS: %.2f%%', \
                         self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot, call_duration, packet_rate, loss)
                 if CONFIG['REPORTS']['REPORT']:
