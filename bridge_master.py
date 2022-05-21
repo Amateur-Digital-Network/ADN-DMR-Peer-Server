@@ -2161,7 +2161,7 @@ class routerHBP(HBSYSTEM):
         systems[_target].send_system(_tmp_data,b'',_ber,_rssi,_source_server,_source_rptr)
         logger.debug('(%s) UNIT Data Bridged to OBP System: %s DST_ID: %s', self._system, _target,_int_dst_id)
         if CONFIG['REPORTS']['REPORT']:
-            systems[system]._report.send_bridgeEvent('UNIT DATA,DATA,TX,{},{},{},{},{},{},{},{}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']),int_id(_source_server),int_id(_source_rptr)).encode(encoding='utf-8', errors='ignore'))
+           systems[system]._report.send_bridgeEvent('UNIT DATA,DATA,TX,{},{},{},{},{},{},{},{}'.format(_target, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), 1, _int_dst_id, int_id(_source_server),int_id(_source_rptr)).encode(encoding='utf-8', errors='ignore'))
     
 
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
