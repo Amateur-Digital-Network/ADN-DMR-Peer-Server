@@ -1321,8 +1321,8 @@ class routerOBP(OPENBRIDGE):
                             'RFS':       _rf_src,
                             'TGID':      _dst_id,
                             'RX_PEER': _peer_id,
-                            '_source_server' : _source_server,
-                            '_source_rptr' : _source_rptr
+                            'source_server' : _source_server,
+                            'source_rptr' : _source_rptr
 
                         }
                         # Generate LCs (full and EMB) for the TX stream
