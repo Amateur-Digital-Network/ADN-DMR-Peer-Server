@@ -2064,7 +2064,7 @@ class routerHBP(HBSYSTEM):
                                 logger.debug('(%s) Generating TX FULL and EMB LCs for HomeBrew destination: System: %s, TS: %s, TGID: %s', self._system, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
                                 logger.debug('(%s) Conference Bridge: %s, Call Bridged to HBP System: %s TS: %s, TGID: %s', self._system, _bridge, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
                                 if CONFIG['REPORTS']['REPORT']:
-                                    systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,START,TX,{},{},{},{},{},{:.2f},{},{}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']),,int_id(_source_server),int_id(_source_rptr)).encode(encoding='utf-8', errors='ignore'))
+                                    systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,START,TX,{},{},{},{},{},{:.2f},{},{}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']),int_id(_source_server),int_id(_source_rptr)).encode(encoding='utf-8', errors='ignore'))
 
                         # Set other values for the contention handler to test next time there is a frame to forward
                         _target_status[_target['TS']]['TX_TIME'] = pkt_time
