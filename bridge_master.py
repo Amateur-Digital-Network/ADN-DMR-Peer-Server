@@ -550,7 +550,9 @@ def sendVoicePacket(self,pkt,_source_id,_dest_id,_slot):
         'CONTENTION':False,
         'RFS':       _source_id,
         'TGID':      _dest_id,
-        'LAST':      _pkt_time
+        'LAST':      _pkt_time,
+        'source_server': False,
+        'source_rptr': False
         }
         _slot['TX_TGID'] = _dest_id
     else:
@@ -1547,8 +1549,8 @@ class routerOBP(OPENBRIDGE):
                     'RX_PEER': _peer_id,
                     'packets': 0,
                     'crcs': set(),
-                    '_source_server' : _source_server,
-                    '_source_rptr' : _source_rptr
+                    'source_server' : _source_server,
+                    'source_rptr' : _source_rptr
 
                 }
             
@@ -1696,8 +1698,8 @@ class routerOBP(OPENBRIDGE):
                     'packets': 0,
                     'loss': 0,
                     'crcs': set(),
-                    '_source_server' : _source_server,
-                    '_source_rptr' : _source_rptr
+                    'source_server' : _source_server,
+                    'source_rptr' : _source_rptr
 
                 }
 
@@ -1978,8 +1980,8 @@ class routerHBP(HBSYSTEM):
                                 'RFS':       _rf_src,
                                 'TGID':      _dst_id,
                                 'RX_PEER':   _peer_id,
-                                '_source_server' : _source_server,
-                                '_source_rptr' : _source_rptr
+                                'source_server' : _source_server,
+                                'source_rptr' : _source_rptr
                             }
                             # Generate LCs (full and EMB) for the TX stream
                             dst_lc = b''.join([self.STATUS[_slot]['RX_LC'][0:3], _target['TGID'], _rf_src])
@@ -2139,8 +2141,8 @@ class routerHBP(HBSYSTEM):
                 'RFS':       _rf_src,
                 'TGID':      _dst_id,
                 'RX_PEER':   _peer_id,
-                '_source_server' : _source_server,
-                '_source_rptr' : _source_rptr
+                'source_server' : _source_server,
+                'source_rptr' : _source_rptr
             }
             
         # Record the time of this packet so we can later identify a stale stream
