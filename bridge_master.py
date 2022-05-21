@@ -2054,7 +2054,7 @@ class routerHBP(HBSYSTEM):
                                 _target_status[_target['TS']]['TX_STREAM_ID'] = _stream_id
                                 _target_status[_target['TS']]['TX_RFS'] = _rf_src
                                 _target_status[_target['TS']]['TX_PEER'] = _peer_id
-                                _target_staus[_target]['TS']['_source_server'] : _source_server
+                                _target_status[_target]['TS']['_source_server'] : _source_server
                                 _target_staus[_target]['TS']['_source_rptr'] : _source_rptr
                                 # Generate LCs (full and EMB) for the TX stream
                                 dst_lc = self.STATUS[_slot]['RX_LC'][0:3] + _target['TGID'] + _rf_src
