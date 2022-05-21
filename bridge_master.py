@@ -500,7 +500,7 @@ def stream_trimmer_loop():
                                     system, int_id(stream_id), get_alias(int_id(_stream['RFS']), subscriber_ids), get_alias(int_id(_stream['RX_PEER']), peer_ids), get_alias(int_id(_stream['TGID']), talkgroup_ids), _stream['LAST'] - _stream['START'])
                             
                         if CONFIG['REPORTS']['REPORT']:
-                                systems[system]._report.send_bridgeEvent('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f},{},{}'.format(system, int_id(stream_id), int_id(_stream['RX_PEER']), int_id(_stream['RFS']), 1, int_id(_stream['TGID']), _stream['LAST'] - _stream['START'], int_id(_stream['source_server']),int_id(_stream['source_rptr']))).encode(encoding='utf-8', errors='ignore'))
+                                systems[system]._report.send_bridgeEvent('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f},{},{}'.format(system, int_id(stream_id), int_id(_stream['RX_PEER']), int_id(_stream['RFS']), 1, int_id(_stream['TGID']), _stream['LAST'] - _stream['START'], int_id(_stream['source_server']),int_id(_stream['source_rptr']))).encode(encoding='utf-8', errors='ignore')
                                 
                         systems[system].STATUS[stream_id]['_to'] = True
                         continue
