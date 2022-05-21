@@ -69,8 +69,8 @@ class reportClient(NetstringReceiver):
             'slot'      : datalist[7],
             'dstid'     : datalist[8],
             'duration'  : 0,
-            'source_server': 0,
-            'source_rptr': 0
+            'source_server': datalist[-2],
+            'source_rptr': datalist[-1]
              }
 
         if len(datalist) > 11:
@@ -88,7 +88,7 @@ class reportClient(NetstringReceiver):
             except mysql.connector.Error as err:
                 print('(MYSQL) error on reconnect: {}'.format(err))    
                 
-        print("{} {} {} {} {} {} {} {} {} {} {} {} {}".format(event['type'],event['event'], event['trx'],event['system'],event['streamid'],event['peerid'],event['subid'],event['slot'],event['dstid'],event['duration'], event['source_server'],event['source_rptr']))
+        print("{} {} {} {} {} {} {} {} {} {} {} {}".format(event['type'],event['event'], event['trx'],event['system'],event['streamid'],event['peerid'],event['subid'],event['slot'],event['dstid'],event['duration'], event['source_server'],event['source_rptr']))
         _cursor = self.db.cursor()
         try:
             _cursor.execute("insert into feed values (NULL,'{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}','{}')".format(event['type'],event['event'], event['trx'],event['system'],event['streamid'],event['peerid'],event['subid'],event['slot'],event['dstid'],event['duration'],event['source_server'],event['source_rptr']))
