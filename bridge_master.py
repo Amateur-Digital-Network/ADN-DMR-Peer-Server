@@ -1321,6 +1321,8 @@ class routerOBP(OPENBRIDGE):
                             'RFS':       _rf_src,
                             'TGID':      _dst_id,
                             'RX_PEER': _peer_id,
+                            '_source_server' : _source_server,
+                            '_source_rptr' : _source_rptr
 
                         }
                         # Generate LCs (full and EMB) for the TX stream
@@ -1484,7 +1486,9 @@ class routerOBP(OPENBRIDGE):
                 'RFS':       _rf_src,
                 'TGID':      _dst_id,
                 'RX_PEER':   _peer_id,
-                'packets': 0
+                'packets': 0,
+                '_source_server' : _source_server,
+                '_source_rptr' : _source_rptr
             }
             
         # Record the time of this packet so we can later identify a stale stream
@@ -1691,7 +1695,9 @@ class routerOBP(OPENBRIDGE):
                     'RX_PEER': _peer_id,
                     'packets': 0,
                     'loss': 0,
-                    'crcs': set()
+                    'crcs': set(),
+                    '_source_server' : _source_server,
+                    '_source_rptr' : _source_rptr
 
                 }
 
@@ -1971,7 +1977,9 @@ class routerHBP(HBSYSTEM):
                                 'CONTENTION':False,
                                 'RFS':       _rf_src,
                                 'TGID':      _dst_id,
-                                'RX_PEER':   _peer_id
+                                'RX_PEER':   _peer_id,
+                                '_source_server' : _source_server,
+                                '_source_rptr' : _source_rptr
                             }
                             # Generate LCs (full and EMB) for the TX stream
                             dst_lc = b''.join([self.STATUS[_slot]['RX_LC'][0:3], _target['TGID'], _rf_src])
@@ -2046,6 +2054,8 @@ class routerHBP(HBSYSTEM):
                                 _target_status[_target['TS']]['TX_STREAM_ID'] = _stream_id
                                 _target_status[_target['TS']]['TX_RFS'] = _rf_src
                                 _target_status[_target['TS']]['TX_PEER'] = _peer_id
+                                _target_staus[_target]['TS']['_source_server'] : _source_server
+                                _target_staus[_target]['TS']['_source_rptr'] : _source_rptr
                                 # Generate LCs (full and EMB) for the TX stream
                                 dst_lc = self.STATUS[_slot]['RX_LC'][0:3] + _target['TGID'] + _rf_src
                                 _target_status[_target['TS']]['TX_H_LC'] = bptc.encode_header_lc(dst_lc)
@@ -2128,7 +2138,9 @@ class routerHBP(HBSYSTEM):
                 'CONTENTION':False,
                 'RFS':       _rf_src,
                 'TGID':      _dst_id,
-                'RX_PEER':   _peer_id
+                'RX_PEER':   _peer_id,
+                '_source_server' : _source_server,
+                '_source_rptr' : _source_rptr
             }
             
         # Record the time of this packet so we can later identify a stale stream
@@ -2512,6 +2524,8 @@ class routerHBP(HBSYSTEM):
                 self.STATUS[_slot]['packets'] = 0
                 self.STATUS[_slot]['loss'] = 0
                 self.STATUS[_slot]['crcs'] = set()
+                self.STATUS[_slot]['_source_server'] = _source_server
+                self.STATUS[_slot]['_source_rptr'] = _source_rptr
                 
                 if (self.STATUS[_slot]['RX_TYPE'] != HBPF_SLT_VTERM) and (pkt_time < (self.STATUS[_slot]['RX_TIME'] + STREAM_TO)) and (_rf_src != self.STATUS[_slot]['RX_RFS']):
                     logger.warning('(%s) Packet received with STREAM ID: %s <FROM> SUB: %s PEER: %s <TO> TGID %s, SLOT %s collided with existing call', self._system, int_id(_stream_id), int_id(_rf_src), int_id(_peer_id), int_id(_dst_id), _slot)
