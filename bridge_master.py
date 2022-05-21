@@ -552,8 +552,8 @@ def sendVoicePacket(self,pkt,_source_id,_dest_id,_slot):
         'RFS':       _source_id,
         'TGID':      _dest_id,
         'LAST':      _pkt_time,
-        'source_server': False,
-        'source_rptr': False
+        'source_server': self._CONFIG['GLOBAL']['SERVER_ID']
+        'source_rptr': int_id(5000)
         }
         _slot['TX_TGID'] = _dest_id
     else:
@@ -2113,6 +2113,8 @@ class routerHBP(HBSYSTEM):
     
     def sendDataToHBP(self,_d_system,_d_slot,_dst_id,_tmp_bits,_data,dmrpkt,_rf_src,_stream_id,_peer_id):
         #Assemble transmit HBP packet header
+        _source_server = self._CONFIG['GLOBAL']['SERVER_ID']
+        _source_rptr = _peer_id
         _int_dst_id = int_id(_dst_id)
         _tmp_data = b''.join([_data[:15], _tmp_bits.to_bytes(1, 'big'), _data[16:20]])
         _tmp_data = b''.join([_tmp_data, dmrpkt])
