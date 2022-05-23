@@ -450,6 +450,7 @@ class OPENBRIDGE(DatagramProtocol):
                     
                     #Discard bad source server 
                     if ((len(str(int.from_bytes(_source_server,'big'))) < 4) or (len(str(int.from_bytes(_source_server,'big'))) > 7)):
+                        if _stream_id not in self._laststrid:
                             logger.warning('(%s) Source Server should be  between 4 and 7 digits, discarding Src: %s', self._system, int.from_bytes(_source_server,'big'))
                             self.send_bcsq(_dst_id,_stream_id)
                             self._laststrid.append(_stream_id)
