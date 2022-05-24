@@ -33,8 +33,9 @@ TGID_TS1_ACL: PERMIT:ALL
 TGID_TS2_ACL: PERMIT:ALL
 GEN_STAT_BRIDGES: True
 ALLOW_NULL_PASSPHRASE: True
-ANNOUNCEMENT_LANGUAGES: en_GB,en_GB_2,en_US,es_ES,es_ES_2,fr_FR,de_DE,dk_DK,it_IT,no_NO,pl_PL,se_SE
+ANNOUNCEMENT_LANGUAGES:
 SERVER_ID: 0
+DATA_GATEWAY: False
 
 [REPORTS]
 REPORT: True
@@ -57,7 +58,10 @@ TGID_FILE: talkgroup_ids.json
 PEER_URL: https://www.radioid.net/static/rptrs.json
 SUBSCRIBER_URL: https://www.radioid.net/static/users.json
 TGID_URL: TGID_URL: http://downloads.freedmr.uk/downloads/talkgroup_ids.json
-STALE_DAYS: 7
+STALE_DAYS: 1
+SERVER_ID_URL: http://downloads.freedmr.uk/downloads/FreeDMR_Hosts.csv
+SERVER_ID_FILE: server_ids.tsv
+
 
 #Control server shared allstar instance via dial / AMI
 [ALLSTAR]
