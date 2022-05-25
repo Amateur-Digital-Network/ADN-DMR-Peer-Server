@@ -450,26 +450,25 @@ class OPENBRIDGE(DatagramProtocol):
                         logger.warning('(%s) Packet more than 5s old!, discarding', self._system)
                         return
                     
-                    if self._CONFIG['GLOBAL']['VALIDATE_SERVER_IDS']:
-                        #Discard bad source server 
-                        if ((len(str(int.from_bytes(_source_server,'big'))) < 4) or (len(str(int.from_bytes(_source_server,'big'))) > 7)):
-                            if _stream_id not in self._laststrid:
-                                logger.warning('(%s) Source Server should be  between 4 and 7 digits, discarding Src: %s', self._system, int.from_bytes(_source_server,'big'))
-                                self.send_bcsq(_dst_id,_stream_id)
-                                self._laststrid.append(_stream_id)
-                            return
-                        elif (len(str(int.from_bytes(_source_server,'big'))) == 4 or (len(str(int.from_bytes(_source_server,'big'))) == 5))  and ((str(int.from_bytes(_source_server,'big'))[:4]) not in self._CONFIG['_SERVER_IDS'] ):
-                            if _stream_id not in self._laststrid:
-                                logger.warning('(%s) Source Server ID is 4 or 5 digits but not in list: %s', self._system, int.from_bytes(_source_server,'big'))
-                                self.send_bcsq(_dst_id,_stream_id)
-                                self._laststrid.append(_stream_id)
-                            return
-                        elif len(str(int.from_bytes(_source_server,'big'))) > 5 and not self.validate_id(_source_server):
-                            if _stream_id not in self._laststrid:
-                                logger.warning('(%s) Source Server 6 or 7 digits but not a valid DMR ID, discarding Src: %s', self._system, int.from_bytes(_source_server,'big'))
-                                self.send_bcsq(_dst_id,_stream_id)
-                                self._laststrid.append(_stream_id)
-                            return
+                    #Discard bad source server 
+                    if ((len(str(int.from_bytes(_source_server,'big'))) < 4) or (len(str(int.from_bytes(_source_server,'big'))) > 7)):
+                        if _stream_id not in self._laststrid:
+                            logger.warning('(%s) Source Server should be  between 4 and 7 digits, discarding Src: %s', self._system, int.from_bytes(_source_server,'big'))
+                            self.send_bcsq(_dst_id,_stream_id)
+                            self._laststrid.append(_stream_id)
+                        return
+                    elif self._CONFIG['GLOBAL']['VALIDATE_SERVER_IDS'] and (len(str(int.from_bytes(_source_server,'big'))) == 4 or (len(str(int.from_bytes(_source_server,'big'))) == 5))  and ((str(int.from_bytes(_source_server,'big'))[:4]) not in self._CONFIG['_SERVER_IDS'] ):
+                        if _stream_id not in self._laststrid:
+                            logger.warning('(%s) Source Server ID is 4 or 5 digits but not in list: %s', self._system, int.from_bytes(_source_server,'big'))
+                            self.send_bcsq(_dst_id,_stream_id)
+                            self._laststrid.append(_stream_id)
+                        return
+                    elif len(str(int.from_bytes(_source_server,'big'))) > 5 and not self.validate_id(_source_server):
+                        if _stream_id not in self._laststrid:
+                            logger.warning('(%s) Source Server 6 or 7 digits but not a valid DMR ID, discarding Src: %s', self._system, int.from_bytes(_source_server,'big'))
+                            self.send_bcsq(_dst_id,_stream_id)
+                            self._laststrid.append(_stream_id)
+                        return
 
                     #Increment max hops
                     _inthops = _hops +1 
