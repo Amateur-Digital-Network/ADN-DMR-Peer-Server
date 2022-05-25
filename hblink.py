@@ -638,7 +638,6 @@ class OPENBRIDGE(DatagramProtocol):
                 else:
                     h,p = _sockaddr
                     logger.warning('(%s) FreeBridge HMAC failed, packet discarded - OPCODE: %s DATA: %s HMAC LENGTH: %s HMAC: %s SRC IP: %s SRC PORT: %s', self._system, _packet[:4], repr(_packet[:61]), len(_packet[61:]), repr(_packet[61:]),h,p) 
->>>>>>> parent of fd8bcf6 (end-of-life protocols 2 and 3)
 
         if self._config['ENHANCED_OBP']:
             if _packet[:2] == BC:    # Bridge Control packet (Extended OBP)
