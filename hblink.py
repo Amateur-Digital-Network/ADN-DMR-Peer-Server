@@ -532,10 +532,11 @@ class OPENBRIDGE(DatagramProtocol):
 
 
             elif _packet[:4] == DMRF:
+<<<<<<< HEAD
                 _stream_id = _packet[16:20]
 
+
                 if _stream_id not in self._laststrid:
-                    logger.warning('(%s) *ProtoControl* Protocols 2 and 3 are no longer supported',self._system)
                     self.send_bcsq(_dst_id,_stream_id)
                     self._laststrid.append(_stream_id)
                 return
