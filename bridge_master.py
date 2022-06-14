@@ -680,7 +680,7 @@ def ident():
             _slot  = systems[system].STATUS[2]
             #If slot is idle for RX and TX
             #print("RX:"+str(_slot['RX_TYPE'])+" TX:"+str(_slot['TX_TYPE'])+" TIME:"+str(time() - _slot['TX_TIME']))
-            if (_slot['RX_TYPE'] == HBPF_SLT_VTERM) and (_slot['TX_TYPE'] == HBPF_SLT_VTERM) and (time() - _slot['TX_TIME'] > CONFIG['SYSTEMS'][system]['GROUP_HANGTIME']):
+            if (_slot['RX_TYPE'] == HBPF_SLT_VTERM) and (_slot['TX_TYPE'] == HBPF_SLT_VTERM) and (time() - _slot['TX_TIME'] > 30 and time() - _slot['RX_TIME'] > 30):
                 #_stream_id = hex_str_4(1234567)
                 logger.info('(%s) System idle. Sending voice ident',system)
                 _say = [words[_lang]['silence']]
@@ -713,7 +713,8 @@ def ident():
                 #_say.append(AMBEobj.readSingleFile('alpha.ambe'))
                 _all_call = bytes_3(16777215)
                 _source_id= bytes_3(5000)
-                speech = pkt_gen(_source_id, _all_call, bytes_4(16777215), 1, _say)
+                _peer_id = bytes_4(self._CONFIG['GLOBAL']['SERVER_ID'])
+                speech = pkt_gen(_source_id, _all_call, _peer_id, 1, _say)
 
                 sleep(1)
                 _slot  = systems[system].STATUS[2]
