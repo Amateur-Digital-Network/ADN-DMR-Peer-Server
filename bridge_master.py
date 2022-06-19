@@ -771,7 +771,11 @@ def options_config():
                         _options['TS2_STATIC'] = _options.pop('TS2')
                     if 'IDENTTG' in _options:
                         _options['OVERRIDE_IDENT_TG'] = _options.pop('IDENTTG')
-                        
+                    elif 'VOICETG' in _options:
+                        _options['OVERRIDE_IDENT_TG'] = _options.pop('VOICETG')                         
+                    if 'IDENT' in _options:
+                        _options['VOICE'] = _options.pop('IDENT')
+                     
                     #DMR+ style options
                     if 'StartRef' in _options:
                         _options['DEFAULT_REFLECTOR'] = _options.pop('StartRef')
@@ -936,7 +940,7 @@ def options_config():
                         if CONFIG['SYSTEMS'][_system]['TS2_STATIC']:
                             ts2 = CONFIG['SYSTEMS'][_system]['TS2_STATIC'].split(',')
                             for tg in ts2:
-                                if not tg:
+                                if not tg or int(tg) == 0 or int(tg) >= 16777215:
                                     continue
                                 tg = int(tg)
                                 reset_static_tg(tg,2,_tmout,_system)
@@ -944,7 +948,7 @@ def options_config():
                         if _options['TS2_STATIC']:
                             ts2 = _options['TS2_STATIC'].split(',')
                             for tg in ts2:
-                                if not tg:
+                                if not tg or int(tg) == 0 or int(tg) >= 16777215:
                                     continue
                                 tg = int(tg)
                                 make_static_tg(tg,2,_tmout,_system)
@@ -953,8 +957,8 @@ def options_config():
                     CONFIG['SYSTEMS'][_system]['TS2_STATIC'] = _options['TS2_STATIC']
                     CONFIG['SYSTEMS'][_system]['DEFAULT_REFLECTOR'] = int(_options['DEFAULT_REFLECTOR'])
                     CONFIG['SYSTEMS'][_system]['DEFAULT_UA_TIMER'] = int(_options['DEFAULT_UA_TIMER'])
-        except Exception:
-            logger.exception('(OPTIONS) caught exception:')
+        except Exception as e:
+            logger.exception('(OPTIONS) caught exception: %s',e)
             continue
 
 def mysqlGetConfig():
