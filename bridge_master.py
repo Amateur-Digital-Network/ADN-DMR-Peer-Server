@@ -682,7 +682,16 @@ def ident():
             #print("RX:"+str(_slot['RX_TYPE'])+" TX:"+str(_slot['TX_TYPE'])+" TIME:"+str(time() - _slot['TX_TIME']))
             if (_slot['RX_TYPE'] == HBPF_SLT_VTERM) and (_slot['TX_TYPE'] == HBPF_SLT_VTERM) and (time() - _slot['TX_TIME'] > 30 and time() - _slot['RX_TIME'] > 30):
                 #_stream_id = hex_str_4(1234567)
-                logger.info('(%s) System idle. Sending voice ident',system)
+                _all_call = bytes_3(16777215)
+                _source_id= bytes_3(5000)
+
+                _dst_id = b''
+                
+                if CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG']:
+                    _dst_id = bytes_3(OVERRIDE_IDENT_TG)
+                else:
+                    _dst_id = _all_call
+                logger.info('(%s) System idle. Sending voice ident to TG',system,int_id(_dst_id))
                 _say = [words[_lang]['silence']]
                 _say.append(words[_lang]['silence'])
                 _say.append(words[_lang]['silence'])
@@ -711,15 +720,7 @@ def ident():
                 
                 #test 
                 #_say.append(AMBEobj.readSingleFile('alpha.ambe'))
-                _all_call = bytes_3(16777215)
-                _source_id= bytes_3(5000)
 
-                _dst_id = b''
-                
-                if CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG']:
-                    _dst_id = bytes_3(OVERRIDE_IDENT_TG)
-                else:
-                    _dst_id = _all_call
                     
                 _peer_id = CONFIG['GLOBAL']['SERVER_ID']
                 speech = pkt_gen(_source_id, _all_call, _peer_id, 1, _say)
