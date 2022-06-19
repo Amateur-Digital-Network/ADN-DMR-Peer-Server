@@ -688,7 +688,7 @@ def ident():
                 _dst_id = b''
                 
                 if 'OVERRIDE_IDENT_TG' in CONFIG['SYSTEMS'][system] and CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG']:
-                    _dst_id = bytes_3(OVERRIDE_IDENT_TG)
+                    _dst_id = bytes_3(CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG'])
                 else:
                     _dst_id = _all_call
                 logger.info('(%s) System idle. Sending voice ident to TG',system,int_id(_dst_id))
