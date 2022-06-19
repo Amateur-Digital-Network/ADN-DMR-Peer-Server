@@ -691,7 +691,7 @@ def ident():
                     _dst_id = bytes_3(CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG'])
                 else:
                     _dst_id = _all_call
-                logger.info('(%s) System idle. Sending voice ident to TG',system,int_id(_dst_id))
+                logger.info('(%s) System idle. Sending voice ident to TG %s',system,int_id(_dst_id))
                 _say = [words[_lang]['silence']]
                 _say.append(words[_lang]['silence'])
                 _say.append(words[_lang]['silence'])
