@@ -687,7 +687,7 @@ def ident():
 
                 _dst_id = b''
                 
-                if 'OVERRIDE_IDENT_TG' in CONFIG['SYSTEMS'][system] and CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG']:
+                if 'OVERRIDE_IDENT_TG' in CONFIG['SYSTEMS'][system] and CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG'] and int(CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG']) > 0 and int(CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG'] < 16777215):
                     _dst_id = bytes_3(CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG'])
                 else:
                     _dst_id = _all_call
@@ -839,9 +839,14 @@ def options_config():
                         CONFIG['SYSTEMS'][_system]['VOICE_IDENT'] = bool(int(_options['VOICE']))
                         logger.debug("(OPTIONS) %s - Setting voice ident to %s",_system,CONFIG['SYSTEMS'][_system]['VOICE_IDENT'])
                         
+                    if 'IDENTTG' in _options and _options['IDENTTG'] and (CONFIG['SYSTEMS'][_system]['OVERRIDE_IDENT_TG'] != int(_options['IDENTTG'])):
+                        CONFIG['SYSTEMS'][_system]['OVERRIDE_IDENT_TG'] = int(_options['IDENTTG'])
+                        logger.debug("(OPTIONS) %s - Setting OVERRIDE_IDENT_TG to %s",_system,CONFIG['SYSTEMS'][_system]['OVERRIDE_IDENT_TG'])
+                        
                     if 'LANG' in _options and _options['LANG'] in words and _options['LANG'] != CONFIG['SYSTEMS'][_system]['ANNOUNCEMENT_LANGUAGE'] :
                         CONFIG['SYSTEMS'][_system]['ANNOUNCEMENT_LANGUAGE'] = _options['LANG']
                         logger.debug("(OPTIONS) %s - Setting voice language to  %s",_system,CONFIG['SYSTEMS'][_system]['ANNOUNCEMENT_LANGUAGE'])
+                        
                         
                     if 'SINGLE' in _options and (CONFIG['SYSTEMS'][_system]['SINGLE_MODE'] != bool(int(_options['SINGLE']))):
                         CONFIG['SYSTEMS'][_system]['SINGLE_MODE'] = bool(int(_options['SINGLE']))
