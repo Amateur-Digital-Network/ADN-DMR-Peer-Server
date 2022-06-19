@@ -769,7 +769,7 @@ def options_config():
                         _options['TS1_STATIC'] = _options.pop('TS1')
                     if 'TS2' in _options:
                         _options['TS2_STATIC'] = _options.pop('TS2')
-                    if 'VOICETG' in _options:
+                    if 'IDENTTG' in _options:
                         _options['OVERRIDE_IDENT_TG'] = _options.pop('IDENTTG')
                         
                     #DMR+ style options
@@ -825,6 +825,9 @@ def options_config():
                         
                     if 'DEFAULT_REFLECTOR' not in _options:
                         _options['DEFAULT_REFLECTOR'] = 0
+                    
+                    if 'OVERRIDE_IDENT_TG' not in _options:
+                        _options['OVERRIDE_IDENT_TG'] = False
                         
                     if 'DEFAULT_UA_TIMER' not in _options:
                         _options['DEFAULT_UA_TIMER'] = CONFIG['SYSTEMS'][_system]['DEFAULT_UA_TIMER']
