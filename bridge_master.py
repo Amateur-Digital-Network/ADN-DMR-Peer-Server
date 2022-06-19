@@ -721,7 +721,7 @@ def ident():
                 else:
                     _dst_id = _all_call
                     
-                _peer_id = bytes_4(CONFIG['GLOBAL']['SERVER_ID'])
+                _peer_id = CONFIG['GLOBAL']['SERVER_ID']
                 speech = pkt_gen(_source_id, _all_call, _peer_id, 1, _say)
 
                 sleep(1)
@@ -769,7 +769,7 @@ def options_config():
                     if 'TS2' in _options:
                         _options['TS2_STATIC'] = _options.pop('TS2')
                     if 'VOICETG' in _options:
-                        _options['OVERRIDE_IDENT_TG'] = _options.pop('VOICETG')
+                        _options['OVERRIDE_IDENT_TG'] = _options.pop('IDENTTG')
                         
                     #DMR+ style options
                     if 'StartRef' in _options:
@@ -862,8 +862,13 @@ def options_config():
                             continue
                     
                     if isinstance(_options['DEFAULT_REFLECTOR'], str) and not _options['DEFAULT_REFLECTOR'].isdigit():
-                        logger.debug('(OPTIONS) %s - DEFAULT_UA_TIMER is not an integer, ignoring',_system)
+                        logger.debug('(OPTIONS) %s - DEFAULT_REFLECTOR is not an integer, ignoring',_system)
                         continue
+                    
+                    if isinstance(_options['OVERRIDE_IDENT_TG'], str) and not _options['OVERRIDE_IDENT_TG'].isdigit():
+                        logger.debug('(OPTIONS) %s - OVERRIDE_IDENT_TG is not an integer, ignoring',_system)
+                        continue
+                    
                     
                     if isinstance(_options['DEFAULT_UA_TIMER'], str) and not _options['DEFAULT_UA_TIMER'].isdigit():
                         logger.debug('(OPTIONS) %s - DEFAULT_REFLECTOR is not an integer, ignoring',_system)
