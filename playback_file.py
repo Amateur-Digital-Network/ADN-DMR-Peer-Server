@@ -76,8 +76,8 @@ def playFileOnRequest(system,fileName,dstTG,subid):
         _say.append(AMBEobj.readSingleFile(fileName))
         _say.append(SILENCE)
         _say.append(SILENCE)
-    except IOError:
-        logger.warning('(%s) cannot read file %s',system,fileName)
+    except IOError as err:
+        logger.warning('(%s) cannot read file %s: %s',system,fileName,err)
         return
     speech = pkt_gen(_source_id, _dst_id, bytes_4(5000), 0, _say)
     sleep(1)

@@ -713,6 +713,14 @@ def ident():
                 #_say.append(AMBEobj.readSingleFile('alpha.ambe'))
                 _all_call = bytes_3(16777215)
                 _source_id= bytes_3(5000)
+
+                _dst_id = b''
+                
+                if CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG']:
+                    _dst_id = bytes_3(OVERRIDE_IDENT_TG)
+                else:
+                    _dst_id = _all_call
+                    
                 _peer_id = bytes_4(CONFIG['GLOBAL']['SERVER_ID'])
                 speech = pkt_gen(_source_id, _all_call, _peer_id, 1, _say)
 
@@ -760,6 +768,8 @@ def options_config():
                         _options['TS1_STATIC'] = _options.pop('TS1')
                     if 'TS2' in _options:
                         _options['TS2_STATIC'] = _options.pop('TS2')
+                    if 'VOICETG' in _options:
+                        _options['OVERRIDE_IDENT_TG'] = _options.pop('VOICETG')
                         
                     #DMR+ style options
                     if 'StartRef' in _options:

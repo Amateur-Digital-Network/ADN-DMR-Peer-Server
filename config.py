@@ -336,7 +336,8 @@ def build_config(_config_file):
                         'GENERATOR': config.getint(section, 'GENERATOR'),
                         'ANNOUNCEMENT_LANGUAGE': config.get(section, 'ANNOUNCEMENT_LANGUAGE'),
                         'ALLOW_UNREG_ID': config.getboolean(section,'ALLOW_UNREG_ID'),
-                        'PROXY_CONTROL' : config.getboolean(section,'PROXY_CONTROL')
+                        'PROXY_CONTROL' : config.getboolean(section,'PROXY_CONTROL'),
+                        'OVERRIDE_IDENT_TG': config.get(section, 'OVERRIDE_IDENT_TG')
                     }})
                     CONFIG['SYSTEMS'][section].update({'PEERS': {}})
                     
