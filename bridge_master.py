@@ -839,8 +839,8 @@ def options_config():
                         CONFIG['SYSTEMS'][_system]['VOICE_IDENT'] = bool(int(_options['VOICE']))
                         logger.debug("(OPTIONS) %s - Setting voice ident to %s",_system,CONFIG['SYSTEMS'][_system]['VOICE_IDENT'])
                         
-                    if 'IDENTTG' in _options and _options['IDENTTG'] and (CONFIG['SYSTEMS'][_system]['OVERRIDE_IDENT_TG'] != int(_options['IDENTTG'])):
-                        CONFIG['SYSTEMS'][_system]['OVERRIDE_IDENT_TG'] = int(_options['IDENTTG'])
+                    if 'OVERRIDE_IDENT_TG' in _options and _options['OVERRIDE_IDENT_TG'] and (CONFIG['SYSTEMS'][_system]['OVERRIDE_IDENT_TG'] != int(_options['OVERRIDE_IDENT_TG'])):
+                        CONFIG['SYSTEMS'][_system]['OVERRIDE_IDENT_TG'] = int(_options['OVERRIDE_IDENT_TG'])
                         logger.debug("(OPTIONS) %s - Setting OVERRIDE_IDENT_TG to %s",_system,CONFIG['SYSTEMS'][_system]['OVERRIDE_IDENT_TG'])
                         
                     if 'LANG' in _options and _options['LANG'] in words and _options['LANG'] != CONFIG['SYSTEMS'][_system]['ANNOUNCEMENT_LANGUAGE'] :
