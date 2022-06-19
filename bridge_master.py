@@ -713,7 +713,7 @@ def ident():
                 #_say.append(AMBEobj.readSingleFile('alpha.ambe'))
                 _all_call = bytes_3(16777215)
                 _source_id= bytes_3(5000)
-                _peer_id = bytes_4(CONFIG['GLOBAL']['SERVER_ID'])
+                _peer_id = CONFIG['GLOBAL']['SERVER_ID']
                 speech = pkt_gen(_source_id, _all_call, _peer_id, 1, _say)
 
                 sleep(1)
