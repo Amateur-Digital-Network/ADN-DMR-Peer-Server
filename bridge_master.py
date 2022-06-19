@@ -682,7 +682,16 @@ def ident():
             #print("RX:"+str(_slot['RX_TYPE'])+" TX:"+str(_slot['TX_TYPE'])+" TIME:"+str(time() - _slot['TX_TIME']))
             if (_slot['RX_TYPE'] == HBPF_SLT_VTERM) and (_slot['TX_TYPE'] == HBPF_SLT_VTERM) and (time() - _slot['TX_TIME'] > 30 and time() - _slot['RX_TIME'] > 30):
                 #_stream_id = hex_str_4(1234567)
-                logger.info('(%s) System idle. Sending voice ident',system)
+                _all_call = bytes_3(16777215)
+                _source_id= bytes_3(5000)
+
+                _dst_id = b''
+                
+                if 'OVERRIDE_IDENT_TG' in CONFIG['SYSTEMS'][system] and CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG']:
+                    _dst_id = bytes_3(CONFIG['SYSTEMS'][system]['OVERRIDE_IDENT_TG'])
+                else:
+                    _dst_id = _all_call
+                logger.info('(%s) %s System idle. Sending voice ident to TG %s',_callsign,get_alias(system,_dst_id,talkgroup_ids))
                 _say = [words[_lang]['silence']]
                 _say.append(words[_lang]['silence'])
                 _say.append(words[_lang]['silence'])
@@ -711,8 +720,7 @@ def ident():
                 
                 #test 
                 #_say.append(AMBEobj.readSingleFile('alpha.ambe'))
-                _all_call = bytes_3(16777215)
-                _source_id= bytes_3(5000)
+
                 _peer_id = CONFIG['GLOBAL']['SERVER_ID']
                 speech = pkt_gen(_source_id, _all_call, _peer_id, 1, _say)
 
@@ -760,7 +768,13 @@ def options_config():
                         _options['TS1_STATIC'] = _options.pop('TS1')
                     if 'TS2' in _options:
                         _options['TS2_STATIC'] = _options.pop('TS2')
-                        
+                    if 'IDENTTG' in _options:
+                        _options['OVERRIDE_IDENT_TG'] = _options.pop('IDENTTG')
+                    elif 'VOICETG' in _options:
+                        _options['OVERRIDE_IDENT_TG'] = _options.pop('VOICETG')                         
+                    if 'IDENT' in _options:
+                        _options['VOICE'] = _options.pop('IDENT')
+                     
                     #DMR+ style options
                     if 'StartRef' in _options:
                         _options['DEFAULT_REFLECTOR'] = _options.pop('StartRef')
@@ -814,6 +828,9 @@ def options_config():
                         
                     if 'DEFAULT_REFLECTOR' not in _options:
                         _options['DEFAULT_REFLECTOR'] = 0
+                    
+                    if 'OVERRIDE_IDENT_TG' not in _options:
+                        _options['OVERRIDE_IDENT_TG'] = False
                         
                     if 'DEFAULT_UA_TIMER' not in _options:
                         _options['DEFAULT_UA_TIMER'] = CONFIG['SYSTEMS'][_system]['DEFAULT_UA_TIMER']
@@ -852,8 +869,13 @@ def options_config():
                             continue
                     
                     if isinstance(_options['DEFAULT_REFLECTOR'], str) and not _options['DEFAULT_REFLECTOR'].isdigit():
-                        logger.debug('(OPTIONS) %s - DEFAULT_UA_TIMER is not an integer, ignoring',_system)
+                        logger.debug('(OPTIONS) %s - DEFAULT_REFLECTOR is not an integer, ignoring',_system)
                         continue
+                    
+                    if isinstance(_options['OVERRIDE_IDENT_TG'], str) and not _options['OVERRIDE_IDENT_TG'].isdigit():
+                        logger.debug('(OPTIONS) %s - OVERRIDE_IDENT_TG is not an integer, ignoring',_system)
+                        continue
+                    
                     
                     if isinstance(_options['DEFAULT_UA_TIMER'], str) and not _options['DEFAULT_UA_TIMER'].isdigit():
                         logger.debug('(OPTIONS) %s - DEFAULT_REFLECTOR is not an integer, ignoring',_system)
@@ -917,7 +939,7 @@ def options_config():
                         if CONFIG['SYSTEMS'][_system]['TS2_STATIC']:
                             ts2 = CONFIG['SYSTEMS'][_system]['TS2_STATIC'].split(',')
                             for tg in ts2:
-                                if not tg:
+                                if not tg or int(tg) == 0 or int(tg) >= 16777215:
                                     continue
                                 tg = int(tg)
                                 reset_static_tg(tg,2,_tmout,_system)
@@ -925,7 +947,7 @@ def options_config():
                         if _options['TS2_STATIC']:
                             ts2 = _options['TS2_STATIC'].split(',')
                             for tg in ts2:
-                                if not tg:
+                                if not tg or int(tg) == 0 or int(tg) >= 16777215:
                                     continue
                                 tg = int(tg)
                                 make_static_tg(tg,2,_tmout,_system)
@@ -934,8 +956,8 @@ def options_config():
                     CONFIG['SYSTEMS'][_system]['TS2_STATIC'] = _options['TS2_STATIC']
                     CONFIG['SYSTEMS'][_system]['DEFAULT_REFLECTOR'] = int(_options['DEFAULT_REFLECTOR'])
                     CONFIG['SYSTEMS'][_system]['DEFAULT_UA_TIMER'] = int(_options['DEFAULT_UA_TIMER'])
-        except Exception:
-            logger.exception('(OPTIONS) caught exception:')
+        except Exception as e:
+            logger.exception('(OPTIONS) caught exception: %s',e)
             continue
 
 def mysqlGetConfig():
@@ -2814,7 +2836,7 @@ if __name__ == '__main__':
     if cli_args.LOG_LEVEL:
         CONFIG['LOGGER']['LOG_LEVEL'] = cli_args.LOG_LEVEL
     logger = log.config_logging(CONFIG['LOGGER'])
-    logger.info('\n\nCopyright (c) 2020, 2021 Simon G7RZU simon@gb7fr.org.uk')
+    logger.info('\n\nCopyright (c) 2020, 2021, 2022 Simon G7RZU simon@gb7fr.org.uk')
     logger.info('Copyright (c) 2013, 2014, 2015, 2016, 2018, 2019\n\tThe Regents of the K0USY Group. All rights reserved.\n')
     logger.debug('(GLOBAL) Logging system started, anything from here on gets logged')
 
