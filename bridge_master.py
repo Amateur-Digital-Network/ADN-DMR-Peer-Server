@@ -734,7 +734,7 @@ def ident():
                     
                     _stream_id = pkt[16:20]
                     _pkt_time = time()
-                    reactor.callFromThread(sendVoicePacket,systems[system],pkt,_source_id,_all_call,_slot)
+                    reactor.callFromThread(sendVoicePacket,systems[system],pkt,_source_id,_dst_id,_slot)
 
 def options_config():
     logger.debug('(OPTIONS) Running options parser')
