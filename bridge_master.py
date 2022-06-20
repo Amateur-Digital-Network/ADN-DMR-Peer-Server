@@ -678,10 +678,8 @@ def ident():
                 logger.debug("(IDENT) %s System has no peers or no recorded callsign (%s), skipping",system,_callsign)
                 continue
             _slot  = systems[system].STATUS[2]
-            #If slot is idle for RX and TX
-            #print("RX:"+str(_slot['RX_TYPE'])+" TX:"+str(_slot['TX_TYPE'])+" TIME:"+str(time() - _slot['TX_TIME']))
+            #If slot is idle for RX and TX for over 30 seconds
             if (_slot['RX_TYPE'] == HBPF_SLT_VTERM) and (_slot['TX_TYPE'] == HBPF_SLT_VTERM) and (time() - _slot['TX_TIME'] > 30 and time() - _slot['RX_TIME'] > 30):
-                #_stream_id = hex_str_4(1234567)
                 _all_call = bytes_3(16777215)
                 _source_id= bytes_3(5000)
 
@@ -722,7 +720,7 @@ def ident():
                 #_say.append(AMBEobj.readSingleFile('alpha.ambe'))
 
                 _peer_id = CONFIG['GLOBAL']['SERVER_ID']
-                speech = pkt_gen(_source_id, _all_call, _peer_id, 1, _say)
+                speech = pkt_gen(_source_id, _dst_id, _peer_id, 1, _say)
 
                 sleep(1)
                 _slot  = systems[system].STATUS[2]
