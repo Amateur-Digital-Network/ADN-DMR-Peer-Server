@@ -409,24 +409,6 @@ def subMapWrite():
     except:
         logger.warning('(SUBSCRIBER) Cannot write SUB_MAP to file')
         
-def configPickle():
-    try:
-        _fh = open('config.pkl','wb')
-        pickle.dump(CONFIG,_fh)
-        _fh.close()
-        logger.info('(GLOBAL) Writing CONFIG to disk')
-    except:
-        logger.warning('(GLOBAL) Cannot write config.pkl')
-  
-def bridgePickle():
-    try:
-        _fh = open('bridge.pkl','wb')
-        pickle.dump(BRIDGES,_fh)
-        _fh.close()
-        logger.info('(GLOBAL) Writing BRIDGES to disk')
-    except:
-        logger.warning('(GLOBAL) Cannot write bridge.pkl')
-        
 #Subscriber Map trimmer loop
 def SubMapTrimmer():
     logger.debug('(SUBSCRIBER) Subscriber Map trimmer loop started')
@@ -2846,20 +2828,8 @@ if __name__ == '__main__':
     if not cli_args.CONFIG_FILE:
         cli_args.CONFIG_FILE = os.path.dirname(os.path.abspath(__file__))+'/hblink.cfg'
 
-    file_exists = os.path.isfile('config.pkl') == True
-    if file_exists:
-        if os.path.getmtime('config.pkl') > (time() - 25):
-            try:
-                with open('config.pkl','rb') as _fh:
-                    CONFIG = pickle.load(_fh)
-                    print('(CONFIG) loaded config .pkl from previous shutdown')
-            except:
-                print('(CONFIG) Cannot load config.pkl file')
-                CONFIG = config.build_config(cli_args.CONFIG_FILE)
-        else:
-            os.unlink("config.pkl")
-    else:
-        CONFIG = config.build_config(cli_args.CONFIG_FILE)
+    # Call the external routine to build the configuration dictionary
+    CONFIG = config.build_config(cli_args.CONFIG_FILE)
 
     # Ensure we have a path for the rules file, if one wasn't specified, then use the default (top of file)
     if not cli_args.RULES_FILE:
@@ -2913,13 +2883,9 @@ if __name__ == '__main__':
         reactor.stop()
         if CONFIG['ALIASES']['SUB_MAP_FILE']:
             subMapWrite()
-        if _signal == signal.SIGHUP:
-            configPickle()
-            bridgePickle()
-            
 
     # Set signal handers so that we can gracefully exit if need be
-    for sig in [signal.SIGINT, signal.SIGTERM, signal.SIGHUP]:
+    for sig in [signal.SIGINT, signal.SIGTERM]:
         signal.signal(sig, sig_handler)
 
     # Create the name-number mapping dictionaries
@@ -2945,22 +2911,8 @@ if __name__ == '__main__':
     except (ImportError, FileNotFoundError):
         sys.exit('(ROUTER) TERMINATING: Routing bridges file not found or invalid: {}'.format(cli_args.RULES_FILE))
 
-    #Load pickle of bridges if it's less than 25 seconds old 
-    if os.path.isfile('bridge.pkl'):
-        if os.path.getmtime('config.pkl') > (time() - 25):
-            try:
-                with open('bridge.pkl','rb') as _fh:
-                    BRIDGES = pickle.load(_fh)
-                    logger.info('(BRIDGE) loaded bridge.pkl from previous shutdown')
-            except:
-                logger.warning('(BRIDGE) Cannot load bridge.pkl file')
-                BRIDGES = make_bridges(rules_module.BRIDGES)
-        else:
-            BRIDGES = make_bridges(rules_module.BRIDGES)
-        os.unlink("bridge.pkl")
-    else:
-       BRIDGES = make_bridges(rules_module.BRIDGES) 
-
+    # Build the routing rules file
+    BRIDGES = make_bridges(rules_module.BRIDGES)
     
     #Subscriber map for unit calls - complete with test entry
     #SUB_MAP = {bytes_3(73578):('REP-1',1,time())}
