@@ -2880,7 +2880,7 @@ if __name__ == '__main__':
         SQLCONFIG = {}
         sql = useMYSQL(CONFIG['MYSQL']['SERVER'], CONFIG['MYSQL']['USER'], CONFIG['MYSQL']['PASS'], CONFIG['MYSQL']['DB'],CONFIG['MYSQL']['TABLE'],logger)
         #Run it once immediately
-        if sql.con():
+        if sql.con() and os.path.getmtime('config.pkl') < (time() - 25):
             logger.info('(MYSQL) reading config from database')
             try:
                 SQLCONFIG = sql.getConfig()
