@@ -2846,6 +2846,7 @@ if __name__ == '__main__':
     if not cli_args.CONFIG_FILE:
         cli_args.CONFIG_FILE = os.path.dirname(os.path.abspath(__file__))+'/hblink.cfg'
 
+    configP = False
     file_exists = os.path.isfile('config.pkl') == True
     if file_exists:
         if os.path.getmtime('config.pkl') > (time() - 25):
@@ -2853,6 +2854,7 @@ if __name__ == '__main__':
                 with open('config.pkl','rb') as _fh:
                     CONFIG = pickle.load(_fh)
                     print('(CONFIG) loaded config .pkl from previous shutdown')
+                    configP = True
             except:
                 print('(CONFIG) Cannot load config.pkl file')
                 CONFIG = config.build_config(cli_args.CONFIG_FILE)
@@ -2880,7 +2882,7 @@ if __name__ == '__main__':
         SQLCONFIG = {}
         sql = useMYSQL(CONFIG['MYSQL']['SERVER'], CONFIG['MYSQL']['USER'], CONFIG['MYSQL']['PASS'], CONFIG['MYSQL']['DB'],CONFIG['MYSQL']['TABLE'],logger)
         #Run it once immediately
-        if sql.con() and os.path.getmtime('config.pkl') < (time() - 25):
+        if sql.con() and not configP:
             logger.info('(MYSQL) reading config from database')
             try:
                 SQLCONFIG = sql.getConfig()
