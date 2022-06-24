@@ -740,7 +740,7 @@ def options_config():
     logger.debug('(OPTIONS) Running options parser')
     for _system in CONFIG['SYSTEMS']:
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
-            logger.debug('(OPTIONS) Bridge reset for %s - no peers'._system)
+            logger.debug('(OPTIONS) Bridge reset for %s - no peers',_system)
             remove_bridge_system(_system)
             CONFIG['SYSTEMS'][_system]['_reset'] = False
         try:
