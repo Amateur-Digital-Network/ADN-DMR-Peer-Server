@@ -739,6 +739,10 @@ def ident():
 def options_config():
     logger.debug('(OPTIONS) Running options parser')
     for _system in CONFIG['SYSTEMS']:
+        if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
+            logger.debug('(OPTIONS) Bridge reset for %s - no peers'._system)
+            remove_bridge_system(_system)
+            CONFIG['SYSTEMS'][_system]['_reset'] = False
         try:
             if CONFIG['SYSTEMS'][_system]['MODE'] != 'MASTER':
                 continue
@@ -2828,7 +2832,22 @@ if __name__ == '__main__':
     if not cli_args.CONFIG_FILE:
         cli_args.CONFIG_FILE = os.path.dirname(os.path.abspath(__file__))+'/hblink.cfg'
 
-    # Call the external routine to build the configuration dictionary
+
+    #configP = False
+    #if os.path.isfile('config.pkl'):
+        #if os.path.getmtime('config.pkl') > (time() - 25):
+            #try:
+                #with open('config.pkl','rb') as _fh:
+                    #CONFIG = pickle.load(_fh)
+                    #print('(CONFIG) loaded config .pkl from previous shutdown')
+                    #configP = True
+            #except:
+                #print('(CONFIG) Cannot load config.pkl file')
+                #CONFIG = config.build_config(cli_args.CONFIG_FILE)
+        #else:
+            #os.unlink("config.pkl")
+    #else:
+    
     CONFIG = config.build_config(cli_args.CONFIG_FILE)
 
     # Ensure we have a path for the rules file, if one wasn't specified, then use the default (top of file)
@@ -2911,8 +2930,22 @@ if __name__ == '__main__':
     except (ImportError, FileNotFoundError):
         sys.exit('(ROUTER) TERMINATING: Routing bridges file not found or invalid: {}'.format(cli_args.RULES_FILE))
 
-    # Build the routing rules file
-    BRIDGES = make_bridges(rules_module.BRIDGES)
+    #Load pickle of bridges if it's less than 25 seconds old 
+    #if os.path.isfile('bridge.pkl'):
+        #if os.path.getmtime('config.pkl') > (time() - 25):
+            #try:
+                #with open('bridge.pkl','rb') as _fh:
+                    #BRIDGES = pickle.load(_fh)
+                    #logger.info('(BRIDGE) loaded bridge.pkl from previous shutdown')
+            #except:
+                #logger.warning('(BRIDGE) Cannot load bridge.pkl file')
+                #BRIDGES = make_bridges(rules_module.BRIDGES)
+        #else:
+            #BRIDGES = make_bridges(rules_module.BRIDGES)
+        #os.unlink("bridge.pkl")
+    #else:
+    
+    BRIDGES = make_bridges(rules_module.BRIDGES) 
     
     #Subscriber map for unit calls - complete with test entry
     #SUB_MAP = {bytes_3(73578):('REP-1',1,time())}
