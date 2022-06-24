@@ -779,7 +779,7 @@ class HBSYSTEM(DatagramProtocol):
                 self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
             else:
                 del self._CONFIG['SYSTEMS'][self._system]['OPTIONS']
-                self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
+                w
                 logger.info('(%s) Deleting HBP Options',self._system)
 
     # Aliased in __init__ to maintenance_loop if system is a peer
@@ -1076,9 +1076,11 @@ class HBSYSTEM(DatagramProtocol):
                         if '_default_options' in self._CONFIG['SYSTEMS'][self._system]:
                             self._CONFIG['SYSTEMS'][self._system]['OPTIONS'] = self._CONFIG['SYSTEMS'][self._system]['_default_options']
                             logger.info('(%s) Setting default Options: %s',self._system, self._CONFIG['SYSTEMS'][self._system]['_default_options'])
+                            self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
                         else:
                             logger.info('(%s) Deleting HBP Options',self._system)
                             del self._CONFIG['SYSTEMS'][self._system]['OPTIONS']
+                            self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
                     
             else:
                 _peer_id = _data[4:8]      # Configure Command
