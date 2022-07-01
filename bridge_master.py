@@ -402,7 +402,7 @@ def kaReporting():
 #Write SUB_MAP to disk 
 def subMapWrite():
     try:
-        _fh = open(CONFIG['ALIASES']['SUB_MAP_FILE'],'wb')
+        _fh = open(CONFIG['ALIASES']['PATH'] + CONFIG['ALIASES']['SUB_MAP_FILE'],'wb')
         pickle.dump(SUB_MAP,_fh)
         _fh.close()
         logger.info('(SUBSCRIBER) Writing SUB_MAP to disk')
@@ -782,6 +782,8 @@ def options_config():
                         _options['OVERRIDE_IDENT_TG'] = _options.pop('VOICETG')                         
                     if 'IDENT' in _options:
                         _options['VOICE'] = _options.pop('IDENT')
+                    if 'PASS' in _options:
+                        _options['KEY'] = _options.pop('PASS')
                      
                     #DMR+ style options
                     if 'StartRef' in _options:
@@ -839,9 +841,17 @@ def options_config():
                     
                     if 'OVERRIDE_IDENT_TG' not in _options:
                         _options['OVERRIDE_IDENT_TG'] = False
+                    
+                    if 'KEY' not in _options:
+                        _options['KEY'] = False
                         
                     if 'DEFAULT_UA_TIMER' not in _options:
                         _options['DEFAULT_UA_TIMER'] = CONFIG['SYSTEMS'][_system]['DEFAULT_UA_TIMER']
+                        
+                    if 'KEY' in _options and _options['KEY'] and str(_options['KEY']) != CONFIG['SYSTEMS'][_system]['_options_key']  :
+                        logger.debug("(OPTIONS) %s - Setting KEY ",_system)
+                        CONFIG['SYSTEMS'][_system]['_options_key'] = str(_options['KEY'])
+                        
                     
                     if 'VOICE' in _options and bool(_options['VOICE']) and (CONFIG['SYSTEMS'][_system]['VOICE_IDENT'] != bool(int(_options['VOICE']))):
                         CONFIG['SYSTEMS'][_system]['VOICE_IDENT'] = bool(int(_options['VOICE']))
@@ -2960,7 +2970,7 @@ if __name__ == '__main__':
     
     if CONFIG['ALIASES']['SUB_MAP_FILE']:
         try:
-            with open(CONFIG['ALIASES']['SUB_MAP_FILE'],'rb') as _fh:
+            with open(CONFIG['ALIASES']['PATH'] + CONFIG['ALIASES']['SUB_MAP_FILE'],'rb') as _fh:
                 SUB_MAP = pickle.load(_fh)
         except:
             logger.warning('(SUBSCRIBER) Cannot load SUB_MAP file')
