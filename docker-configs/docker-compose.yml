@@ -24,13 +24,11 @@ services:
         mem_reservation: 600m
         volumes:
             - '/etc/freedmr/freedmr.cfg:/opt/freedmr/freedmr.cfg'
-            - '/var/log/freedmr/freedmr.log:/opt/freedmr/freedmr.log'
+            - '/var/log/freedmr/:/opt/freedmr/log/'
             - '/etc/freedmr/rules.py:/opt/freedmr/rules.py'
             #Write JSON files outside of container
-            - '/etc/freedmr/json/talkgroup_ids.json:/opt/freedmr/talkgroup_ids.json'
-            - '/etc/freedmr/json/subscriber_ids.json:/opt/freedmr/subscriber_ids.json'
-            - '/etc/freedmr/json/peer_ids.json:/opt/freedmr/peer_ids.json'
-            - '/etc/freedmr/json/sub_map.pkl:/opt/freedmr/sub_map.pkl'
+            - '/etc/freedmr/json/:/opt/freedmr/json/'
+
         ports:
             - '62031:62031/udp'
             #Change the below to inlude ports used for your OBP(s)
@@ -62,12 +60,9 @@ services:
         volumes:
             #This should be kept to a manageable size from
             #cron or logrotate outisde of the container.
-            - '/var/log/FreeDMRmonitor/lastheard.log:/opt/FreeDMRmonitor/log/lastheard.log'
-            - '/var/log/FreeDMRmonitor/hbmon.log:/opt/FreeDMRmonitor/log/hbmon.log'
+            - '/var/log/FreeDMRmonitor/:/opt/FreeDMRmonitor/log/'
             #Write JSON files outside of container
-            - '/etc/freedmr/json/talkgroup_ids.json:/opt/FreeDMRmonitor/talkgroup_ids.json'
-            - '/etc/freedmr/json/subscriber_ids.json:/opt/FreeDMRmonitor/subscriber_ids.json'
-            - '/etc/freedmr/json/peer_ids.json:/opt/FreeDMRmonitor/peer_ids.json'
+            - '/etc/freedmr/json/:/opt/FreeDMRmonitor/json/'
 
         #Override config file
         #    - '/etc/freedmr/config.py:/opt/FreeDMRmonitor/config.py'
