@@ -402,7 +402,7 @@ def kaReporting():
 #Write SUB_MAP to disk 
 def subMapWrite():
     try:
-        _fh = open(CONFIG['ALIASES']['SUB_MAP_FILE'],'wb')
+        _fh = open(CONFIG['ALIASES']['PATH'] + CONFIG['ALIASES']['SUB_MAP_FILE'],'wb')
         pickle.dump(SUB_MAP,_fh)
         _fh.close()
         logger.info('(SUBSCRIBER) Writing SUB_MAP to disk')
@@ -2954,7 +2954,7 @@ if __name__ == '__main__':
     
     if CONFIG['ALIASES']['SUB_MAP_FILE']:
         try:
-            with open(CONFIG['ALIASES']['SUB_MAP_FILE'],'rb') as _fh:
+            with open(CONFIG['ALIASES']['PATH'] + CONFIG['ALIASES']['SUB_MAP_FILE'],'rb') as _fh:
                 SUB_MAP = pickle.load(_fh)
         except:
             logger.warning('(SUBSCRIBER) Cannot load SUB_MAP file')
