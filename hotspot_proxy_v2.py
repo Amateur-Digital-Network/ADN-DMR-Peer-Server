@@ -154,7 +154,7 @@ class Proxy(DatagramProtocol):
                 # Remove the client after send a MSTN or MSTC packet
                 if _command in (MSTN,MSTC):
                     # Give time to the client for a reply to prevent port reassignment 
-                    self.peerTrack[_peer_id]['timer'].reset(5)
+                    self.peerTrack[_peer_id]['timer'].reset(15)
  
             return
             
