@@ -769,9 +769,7 @@ class HBSYSTEM(DatagramProtocol):
                 remove_list.append(peer)
         for peer in remove_list:
             logger.info('(%s) Peer %s (%s) has timed out and is being removed', self._system, self._peers[peer]['CALLSIGN'], self._peers[peer]['RADIO_ID'])
-            #First, MSTCL the peer - three times
-            self.transport.write(b''.join([MSTCL, _peer_id]),self._CONFIG['SYSTEMS'][self._system]['PEERS'][peer]['SOCKADDR'])
-            self.transport.write(b''.join([MSTCL, _peer_id]),self._CONFIG['SYSTEMS'][self._system]['PEERS'][peer]['SOCKADDR'])
+            #First, MSTCL the peer
             self.transport.write(b''.join([MSTCL, _peer_id]),self._CONFIG['SYSTEMS'][self._system]['PEERS'][peer]['SOCKADDR'])
             # Remove any timed out peers from the configuration
             del self._CONFIG['SYSTEMS'][self._system]['PEERS'][peer]
@@ -1389,12 +1387,13 @@ def try_download(_path, _file, _url, _stale,):
             result = 'ID ALIAS MAPPER: \'{}\' successfully downloaded'.format(_file)
         except IOError:
             result = 'ID ALIAS MAPPER: \'{}\' could not be downloaded due to an IOError'.format(_file)
-        try:
-            with open(_path+_file, 'wb') as outfile:
-                outfile.write(data)
-                outfile.close()
-        except IOError:
-            result = 'ID ALIAS mapper \'{}\' file could not be written due to an IOError'.format(_file)
+        else:
+            try:
+                with open(_path+_file, 'wb') as outfile:
+                    outfile.write(data)
+                    outfile.close()
+            except IOError:
+                result = 'ID ALIAS mapper \'{}\' file could not be written due to an IOError'.format(_file)
     else:
         result = 'ID ALIAS MAPPER: \'{}\' is current, not downloaded'.format(_file)
     
