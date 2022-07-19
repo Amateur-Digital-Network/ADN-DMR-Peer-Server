@@ -37,14 +37,7 @@ chmod 755 /etc/freedmr &&
 
 echo make json directory...
 mkdir -p /etc/freedmr/json &&
-
-echo get json files...
-cd /etc/freedmr/json &&
-curl http://downloads.freedmr.uk/downloads/local_subscriber_ids.json -o subscriber_ids.json &&
-curl http://downloads.freedmr.uk/downloads/talkgroup_ids.json -o talkgroup_ids.json &&
-curl https://www.radioid.net/static/rptrs.json -o peer_ids.json &&
-touch /etc/freedmr/json/sub_map.pkl &&
-chmod -R 777 /etc/freedmr/json &&
+chown 54000:54000 /etc/freedmr/json &&
 
 echo Install /etc/freedmr/freedmr.cfg ... 
 cat << EOF > /etc/freedmr/freedmr.cfg
@@ -70,21 +63,21 @@ REPORT_PORT: 4321
 REPORT_CLIENTS: *
 
 [LOGGER]
-LOG_FILE: freedmr.log
+LOG_FILE: log/freedmr.log
 LOG_HANDLERS: file-timed
 LOG_LEVEL: INFO
 LOG_NAME: FreeDMR
 
 [ALIASES]
-TRY_DOWNLOAD: False
-PATH: ./
+TRY_DOWNLOAD: True
+PATH: ./json/
 PEER_FILE: peer_ids.json
 SUBSCRIBER_FILE: subscriber_ids.json
 TGID_FILE: talkgroup_ids.json
 PEER_URL: https://www.radioid.net/static/rptrs.json
 SUBSCRIBER_URL: http://downloads.freedmr.uk/downloads/local_subscriber_ids.json
-TGID_URL: TGID_URL: http://downloads.freedmr.uk/downloads/talkgroup_ids.json
-STALE_DAYS: 7
+TGID_URL: TGID_URL: https://freedmr.cymru/talkgroups/talkgroup_ids_json.php
+STALE_DAYS: 1
 LOCAL_SUBSCRIBER_FILE: local_subcriber_ids.json
 SUB_MAP_FILE: sub_map.pkl
 

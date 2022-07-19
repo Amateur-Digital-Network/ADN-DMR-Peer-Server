@@ -2637,7 +2637,7 @@ class routerHBP(HBSYSTEM):
                             self.STATUS[_slot]['LOOPLOG'] = True
                         self.STATUS[_slot]['LAST'] = pkt_time
                         
-                        if CONFIG['SYSTEMS'][self._system]['ENHANCED_OBP'] and '_bcsq' not in self.STATUS[_slot]:
+                        if 'ENHANCED_OBP' in CONFIG['SYSTEMS'][self._system] and CONFIG['SYSTEMS'][self._system]['ENHANCED_OBP'] and '_bcsq' not in self.STATUS[_slot]:
                             systems[self._system].send_bcsq(_dst_id,_stream_id)
                             self.STATUS[_slot]['_bcsq'] = True
                         return
