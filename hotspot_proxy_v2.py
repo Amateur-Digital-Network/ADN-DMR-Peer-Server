@@ -16,10 +16,11 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 ###############################################################################
 
-from twisted.internet.protocol import DatagramProtocol
+from twisted.internet.protocol import DatagramProtocol,Factory, Protocol
+from twisted.protocols.basic import NetstringReceiver
 from twisted.internet import reactor, task
 from time import time
-from dmr_utils3.utils import int_id
+from dmr_utils3.utils import int_id,bytes_4
 import random
 import ipaddress
 import os
@@ -218,7 +219,55 @@ class Proxy(DatagramProtocol):
                     print(data)
                 return
 
+class APIFactory(Factory):
+    def __init__(self, master,debug,peertrack):
+        self.master = master
+        self.debug = debug
+        self.peertrack = peertrack
+        
+    def buildProtocol(self, addr):
+        if self.debug:
+            print('(API) connection attempt from: {}:{}'.format(addr.host, addr.port))
+        return API(self,self.master,self.debug,self.peertrack)
+    
+class API(NetstringReceiver):
+    def __init__(self, factory,master,debug,peertrack):
+        self._factory = factory
+        self.master = master
+        self.debug = debug
+        self.peerTrack = peertrack
 
+    def connectionMade(self):
+        self._factory.clients.append(self)
+        self.transport.setTcpKeepAlive(1)
+        if self.debug:
+            print('(API) client connected: {}'.format(self.transport.getPeer()))
+
+    def connectionLost(self, reason):
+        self._factory.clients.remove(self)
+        if self.debug:
+            print('(API) client disconnected: {}'.format( self.transport.getPeer()))
+        
+    def stringReceived(self, data):
+        self.process_message(data)
+
+    def process_message(self, _message):
+        if self.debug:
+            print('(API) client sent: {}'.format(_message))
+        _dmrid = _message[:10]
+        #_dmrid.rstrip('_')
+        _dmrid = int(_dmrid)
+        _dmrid = bytes_4(_dmrid)
+        _options = _message[10:]
+        _cmd = _message[11:15]
+        
+        if _cmd == RPTO and (_dmrid in self.peerTrack):
+            if self.debug:
+                print("(API) Passing options line for ID {} to server".format(int_id(peer_id)))
+            _dport = self.peerTrack[_peer_id]['dport']
+            self.transport.write(b''.join([RPTO,_options]), (self.master,_dport))
+                
+        
 if __name__ == '__main__':
     
     import signal
@@ -278,7 +327,7 @@ if __name__ == '__main__':
         DestPortEnd = 54100
         Timeout = 30
         Stats = False
-        Debug = False
+        Debug = True
         ClientInfo = False
         BlackList = [1234567]
         #e.g. {10.0.0.1: 0, 10.0.0.2: 0}
@@ -362,6 +411,10 @@ if __name__ == '__main__':
     blacklist_task = task.LoopingCall(blackListTrimmer)
     blacklista = blacklist_task.start(15)
     blacklista.addErrback(loopingErrHandle)
+    
+    api_server = APIFactory(Master,Debug,PEERTRACK)
+    api_server.clients = []
+    reactor.listenTCP(6969, api_server)
     
     reactor.run()
     
