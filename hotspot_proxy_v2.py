@@ -229,7 +229,7 @@ class APIFactory(Factory):
     def buildProtocol(self, addr):
         if self.debug:
             print('(API) connection attempt from: {}:{}'.format(addr.host, addr.port))
-        return API(self,self.master,self.debug,self.peertrack,self,proxy)
+        return API(self,self.master,self.debug,self.peertrack,self.proxy)
     
 class API(NetstringReceiver):
     def __init__(self, factory,master,debug,peertrack,proxy):
