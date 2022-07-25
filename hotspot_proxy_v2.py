@@ -261,7 +261,7 @@ class API(NetstringReceiver):
         _options = _message[10:]
         _cmd = _message[11:15]
         
-        if _cmd == RPTO and (_dmrid in self.peerTrack):
+        if _cmd == b'RPTO' and (_dmrid in self.peerTrack):
             if self.debug:
                 print("(API) Passing options line for ID {} to server".format(int_id(peer_id)))
             _dport = self.peerTrack[_peer_id]['dport']
