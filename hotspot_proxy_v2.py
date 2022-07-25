@@ -229,14 +229,15 @@ class APIFactory(Factory):
     def buildProtocol(self, addr):
         if self.debug:
             print('(API) connection attempt from: {}:{}'.format(addr.host, addr.port))
-        return API(self,self.master,self.debug,self.peertrack)
+        return API(self,self.master,self.debug,self.peertrack,self,proxy)
     
 class API(NetstringReceiver):
-    def __init__(self, factory,master,debug,peertrack):
+    def __init__(self, factory,master,debug,peertrack,proxy):
         self._factory = factory
         self.master = master
         self.debug = debug
         self.peerTrack = peertrack
+        self.proxy = proxy
 
     def connectionMade(self):
         self._factory.clients.append(self)
