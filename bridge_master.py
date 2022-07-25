@@ -763,7 +763,7 @@ def options_config():
                     logger.debug('(OPTIONS) Options found for %s',_system)
                     
                     if '_default_options' in CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_default_options'] != CONFIG['SYSTEMS'][_system]['OPTIONS']:
-                        if  _options_key in CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_options_key'] and 'KEY' in _options and CONFIG['SYSTEMS'][_system]['_options_key'] != _options['KEY']:
+                        if  '_options_key' in CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_options_key'] and 'KEY' in _options and CONFIG['SYSTEMS'][_system]['_options_key'] != _options['KEY']:
                             logger.warning('(OPTIONS) for system %s, options key does not match, ignoring',_system)
                             continue    
                             
