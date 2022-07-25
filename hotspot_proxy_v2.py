@@ -220,10 +220,11 @@ class Proxy(DatagramProtocol):
                 return
 
 class APIFactory(Factory):
-    def __init__(self, master,debug,peertrack):
+    def __init__(self, master,debug,peertrack,proxy):
         self.master = master
         self.debug = debug
         self.peertrack = peertrack
+        self.proxy = proxy
         
     def buildProtocol(self, addr):
         if self.debug:
@@ -264,8 +265,8 @@ class API(NetstringReceiver):
             if self.debug:
                 print("(API) Passing options line for ID {} to server".format(int_id(_dmrid)))
             _dport = self.peerTrack[_dmrid]['dport']
-            #self.transport.write(_options, (self.master,_dport))
-            print(_options, (self.master,_dport))
+            proxy.transport.write(_options, (self.master,_dport))
+
                 
         
 if __name__ == '__main__':
@@ -371,7 +372,7 @@ if __name__ == '__main__':
     if ListenIP == '::' and IsIPv4Address(Master):
         Master = '::ffff:' + Master
 
-    reactor.listenUDP(ListenPort,Proxy(Master,ListenPort,CONNTRACK,PEERTRACK,BlackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd),interface=ListenIP)
+    proxy = reactor.listenUDP(ListenPort,Proxy(Master,ListenPort,CONNTRACK,PEERTRACK,BlackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd),interface=ListenIP)
 
     def loopingErrHandle(failure):
         print('(GLOBAL) STOPPING REACTOR TO AVOID MEMORY LEAK: Unhandled error innowtimed loop.\n {}'.format(failure))
@@ -412,7 +413,7 @@ if __name__ == '__main__':
     blacklista = blacklist_task.start(15)
     blacklista.addErrback(loopingErrHandle)
     
-    api_server = APIFactory(Master,Debug,PEERTRACK)
+    api_server = APIFactory(Master,Debug,PEERTRACK,proxy)
     api_server.clients = []
     reactor.listenTCP(6969, api_server)
     
