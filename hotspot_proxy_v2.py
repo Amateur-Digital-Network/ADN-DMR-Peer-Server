@@ -244,6 +244,8 @@ class API(NetstringReceiver):
         self.transport.setTcpKeepAlive(1)
         if self.debug:
             print('(API) client connected: {}'.format(self.transport.getPeer()))
+        self.sendString(b'VERSION/0.1')
+        self.sendString(b'READY')
 
     def connectionLost(self, reason):
         self._factory.clients.remove(self)
@@ -256,17 +258,28 @@ class API(NetstringReceiver):
     def process_message(self, _message):
         if self.debug:
             print('(API) client sent: {}'.format(_message))
-        _dmrid = _message[:10]
-        #_dmrid.rstrip('_')
-        _dmrid = int(_dmrid)
-        _dmrid = bytes_4(_dmrid)
-        _options = _message[10:]
-        _cmd = _message[10:14]      
-        if _cmd == b'RPTO' and (_dmrid in self.peerTrack):
+        try:
+            _peer_id = _message[:10]
+            _peer_id = int(_peer_id)
+            _peer_id = bytes_4(_peer_id)
+            _options = _message[10:]
+            _cmd = _message[10:14]
+        except:
+           self.sendString(b'NAK')
+           return
+        if not _peer_id or not _cmd:
+            self.sendString(b'NAK')
+        if _cmd == b'RPTO' and (_peer_id in self.peerTrack):
             if self.debug:
-                print("(API) Passing options line for ID {} to server".format(int_id(_dmrid)))
-            _dport = self.peerTrack[_dmrid]['dport']
-            self.proxy.transport.write(_options, (self.master,_dport))
+                print("(API) Passing options line for ID {} to server".format(int_id(_peer_id)))
+            _dport = self.peerTrack[_peer_id]['dport']
+            try:
+                self.proxy.transport.write(_options, (self.master,_dport))
+            except:
+                self.sendString(b'NAK')
+            self.sendString(b'OK')
+        else:
+           self.sendString(b'NAK') 
 
                 
         
@@ -314,6 +327,9 @@ if __name__ == '__main__':
         ClientInfo = config.getboolean('PROXY','ClientInfo')
         BlackList = json.loads(config.get('PROXY','BlackList'))
         IPBlackList = json.loads(config.get('PROXY','IPBlackList'))
+        APIPort = config.get('PROXY','APIPort')
+        APIEnabled = config.getboolean('PROXY','APIEnabled')
+        APIDebug = config.getboolean('PROXY','APIDebug')
         
     except configparser.Error as err:
         print('Error processing configuration file -- {}'.format(err))
@@ -334,6 +350,9 @@ if __name__ == '__main__':
         BlackList = [1234567]
         #e.g. {10.0.0.1: 0, 10.0.0.2: 0}
         IPBlackList = {}
+        APIEnabled = True
+        APIPort = 6969
+        APIDebug = True
         
 #*******************        
     
@@ -373,7 +392,8 @@ if __name__ == '__main__':
     if ListenIP == '::' and IsIPv4Address(Master):
         Master = '::ffff:' + Master
 
-    proxy = reactor.listenUDP(ListenPort,Proxy(Master,ListenPort,CONNTRACK,PEERTRACK,BlackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd),interface=ListenIP)
+    proxy = Proxy(Master,ListenPort,CONNTRACK,PEERTRACK,BlackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd)
+    reactor.listenUDP(ListenPort,proxy,interface=ListenIP)
 
     def loopingErrHandle(failure):
         print('(GLOBAL) STOPPING REACTOR TO AVOID MEMORY LEAK: Unhandled error innowtimed loop.\n {}'.format(failure))
@@ -405,7 +425,7 @@ if __name__ == '__main__':
                 print('Remove dynamic blacklist entry for {}'.format(delete))
 
         
-    if Stats == True:
+    if Stats:
         stats_task = task.LoopingCall(stats)
         statsa = stats_task.start(30)
         statsa.addErrback(loopingErrHandle)
@@ -414,9 +434,10 @@ if __name__ == '__main__':
     blacklista = blacklist_task.start(15)
     blacklista.addErrback(loopingErrHandle)
     
-    api_server = APIFactory(Master,Debug,PEERTRACK,proxy)
-    api_server.clients = []
-    reactor.listenTCP(6969, api_server)
+    if APIEnabled:
+        api_server = APIFactory(Master,APIDebug,PEERTRACK,proxy)
+        api_server.clients = []
+        reactor.listenTCP(APIPort, api_server)
     
     reactor.run()
     
