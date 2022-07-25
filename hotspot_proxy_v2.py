@@ -265,7 +265,7 @@ class API(NetstringReceiver):
             if self.debug:
                 print("(API) Passing options line for ID {} to server".format(int_id(peer_id)))
             _dport = self.peerTrack[_peer_id]['dport']
-            self.transport.write(b''.join([RPTO,_options]), (self.master,_dport))
+            self.transport.write(b''.join([b'RPTO',_options]), (self.master,_dport))
                 
         
 if __name__ == '__main__':
