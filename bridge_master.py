@@ -2132,7 +2132,8 @@ class routerHBP(HBSYSTEM):
             
     def sendDataToOBP(self,_target,_data,dmrpkt,pkt_time,_stream_id,_dst_id,_peer_id,_rf_src,_bits,_slot,_hops = b'',_ber = b'\x00', _rssi = b'\x00',_source_server = b'\x00\x00\x00\x00', _source_rptr = b'\x00\x00\x00\x00'):
  #       _sysIgnore = sysIgnore
-        _source_server = self._CONFIG['GLOBAL']['SERVER_ID'] 
+        _source_server = self._CONFIG['GLOBAL']['SERVER_ID']
+        _source_rptr = _peer_id
         _int_dst_id = int_id(_dst_id)
         _target_status = systems[_target].STATUS
         _target_system = self._CONFIG['SYSTEMS'][_target]
