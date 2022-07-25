@@ -327,7 +327,7 @@ if __name__ == '__main__':
         ClientInfo = config.getboolean('PROXY','ClientInfo')
         BlackList = json.loads(config.get('PROXY','BlackList'))
         IPBlackList = json.loads(config.get('PROXY','IPBlackList'))
-        APIPort = config.get('PROXY','APIPort')
+        APIPort = config.getint('PROXY','APIPort')
         APIEnabled = config.getboolean('PROXY','APIEnabled')
         APIDebug = config.getboolean('PROXY','APIDebug')
         
