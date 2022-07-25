@@ -259,8 +259,7 @@ class API(NetstringReceiver):
         _dmrid = int(_dmrid)
         _dmrid = bytes_4(_dmrid)
         _options = _message[10:]
-        _cmd = _message[10:14]
-        print(_cmd)        
+        _cmd = _message[10:14]      
         if _cmd == b'RPTO' and (_dmrid in self.peerTrack):
             if self.debug:
                 print("(API) Passing options line for ID {} to server".format(int_id(_dmrid)))
