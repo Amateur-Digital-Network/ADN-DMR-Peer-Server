@@ -538,6 +538,26 @@ def stream_trimmer_loop():
                 else:
                     logger.debug('(%s) Attemped to remove OpenBridge Stream ID %s not in the Stream ID list: %s', system, int_id(stream_id), [id for id in systems[system].STATUS])
 
+def topoTrimmer():
+    logger.debug('(TOPO) Trimming stale entries')
+    _now = time()
+    _toprem = []
+    for _src in TOPO:
+        _dstrem = []
+        for _dst in TOPO[_src]:
+            if TOPO[_src][_dst]['time'] - +now > 1800:
+                _dstrem.append(_dst)
+        for _remove in _dstrem:
+            TOPO[_src].pop(_remove)
+        if len(TOPO[_src]) == 0:
+            _toprem.append(_src)
+    for _remove in _toprem:
+        TOPO.pop(_remove)
+        
+    print(TOPO)
+            
+                
+
 def sendVoicePacket(self,pkt,_source_id,_dest_id,_slot):
     _stream_id = pkt[16:20]
     _pkt_time = time()
@@ -1876,6 +1896,13 @@ class routerOBP(OPENBRIDGE):
                    self.STATUS[_stream_id]['_fin'] = True
                    
                 self.STATUS[_stream_id]['lastSeq'] = False
+    
+    def process_bcto(self,_src,_dst,_ver):
+            TOPO[_src][_dst] = {
+                                'ver'   : _ver,
+                                'time'  : time()
+                            }
+        
 
 class routerHBP(HBSYSTEM):
 
@@ -2850,6 +2877,8 @@ if __name__ == '__main__':
             #os.unlink("config.pkl")
     #else:
     
+    TOPO = {}
+    
     CONFIG = config.build_config(cli_args.CONFIG_FILE)
 
     # Ensure we have a path for the rules file, if one wasn't specified, then use the default (top of file)
@@ -3117,6 +3146,12 @@ if __name__ == '__main__':
     sub_trimmer_task = task.LoopingCall(SubMapTrimmer)
     sub_trimmer = sub_trimmer_task.start(3600)#3600
     sub_trimmer.addErrback(loopingErrHandle)
+    
+    #topography trimmer
+    topo_trimmer_task = task.LoopingCall(topoTrimmer)
+    topo_trimmer = topo_trimmer_task.start(610)
+    topo_trimmer.addErrback(loopingErrHandle)
+    
     
     #more threads
     reactor.suggestThreadPoolSize(100)

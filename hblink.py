@@ -163,6 +163,11 @@ class OPENBRIDGE(DatagramProtocol):
             self._bcve = self._bcve_task.start(60)
             self._bcve.addErrback(self.loopingErrHandle)
             
+            logger.debug('(%s) *BridgeControl* starting topography timer',self._system)
+            self._bcto_task = task.LoopingCall(self.send_my_bcto)
+            self._bcto = self._bcto_task.start(600)
+            self._bcto.addErrback(self.loopingErrHandle)
+            
 
     def dereg(self):
         logger.info('(%s) is mode OPENBRIDGE. No De-Registration required, continuing shutdown', self._system)
@@ -262,12 +267,44 @@ class OPENBRIDGE(DatagramProtocol):
             logger.trace('(%s) *BridgeControl* sent BCVE. Ver: %s',self._system,VER)
         else:
             logger.trace('(%s) *BridgeControl* not sending BCVE, TARGET_IP currently not known',self._system) 
+
+    def send_my_bcto(self):
+        for system in self._CONFIG['SYSTEMS']:
+            if self._CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE' and self._CONFIG['SYSTEMS'][system]['VER'] > 5:
+                if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
+                    _packet = b''.join([BCTO,self._CONFIG['GLOBAL']['SERVER_ID'],self._CONFIG['SYSTEMS'][system]['NETWORK_ID'],self._CONFIG['SYSTEMS'][system]['VER'].to_bytes(1,"big")])
+                    _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
+                    _h.update(_packet)
+                    _hash = _h.digest()
+                    _packet = b''.join([_packet,_hash])
+                    self.transport.write(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
+                    logger.trace('(%s) *BridgeControl* sent BCTO. DST: %s, VER: %s ',self._system,int_id(self._CONFIG['SYSTEMS'][system]['NETWORK_ID']),self._CONFIG['SYSTEMS'][system]['VER'])
+                else:
+                    logger.trace('(%s) *BridgeControl* not sending BCTO, TARGET_IP currently not known. DST: %s, VER: %s ',self._system,int_id(self._CONFIG['SYSTEMS'][system]['NETWORK_ID']),self._CONFIG['SYSTEMS'][system]['VER'])
+                
+                
+    def retransmit_bcto(self,_string):
+        for system in self._CONFIG['SYSTEMS']:
+            if self._CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE' and self._CONFIG['SYSTEMS'][system]['VER'] > 5:
+                if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
+                    _packet = b''.join([BCTO,_string])
+                    _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
+                    _h.update(_packet)
+                    _hash = _h.digest()
+                    _packet = b''.join([_packet,_hash])
+                    self.transport.write(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
+                    logger.trace('(%s) *BridgeControl* retransmitted BCTO.')
+                else:
+                    logger.trace('(%s) *BridgeControl* not retransmitting BCTO, TARGET_IP currently not known.',self._system)
             
     
 
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash,_hops = b'', _source_server = b'\x00\x00\x00\x00', _ber = b'\x00', _rssi = b'\x00', _source_rptr = b'\x00\x00\x00\x00'):
         pass
         #print(int_id(_peer_id), int_id(_rf_src), int_id(_dst_id), int_id(_seq), _slot, _call_type, _frame_type, repr(_dtype_vseq), int_id(_stream_id))
+        
+    def process_bcto(self,src,dst,ver):
+        pass
 
     def datagramReceived(self, _packet, _sockaddr):
         # Keep This Line Commented Unless HEAVILY Debugging!
@@ -289,7 +326,7 @@ class OPENBRIDGE(DatagramProtocol):
                 if compare_digest(_hash, _ckhs) and (_sockaddr == self._config['TARGET_SOCK'] or self._config['RELAX_CHECKS']):
                     _peer_id = _data[11:15]
                     if self._config['NETWORK_ID'] != _peer_id:
-                        logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
+                        logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Server ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
                         return
                     
                     #This is a v1 packet, so all the extended stuff we can set to default
@@ -704,6 +741,24 @@ class OPENBRIDGE(DatagramProtocol):
                     else:
                         h,p = _sockaddr
                         logger.warning('(%s) *ProtoControl* BCVE invalid, packet discarded - OPCODE: %s DATA: %s HMAC LENGTH: %s HMAC: %s SRC IP: %s SRC PORT: %s', self._system, _packet[:4], repr(_packet[:53]), len(_packet[53:]), repr(_packet[53:]),h,p) 
+                        
+                if _packet[:4] == BCTO:
+                    if self._config['VER'] > 5:
+                        _hash = _packet[13:]
+                        _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
+                        _h.update(_packet[:13])
+                        _hash2 = _h.digest()
+                        _src[4:8]
+                        _dst[8:12]
+                        _ver[12:13]
+                        if _hash == _hash2:
+                            logger.trace('(%s) *ProtoControl* BCTO received: %s connected to %s with proto ver. %s'. self._system, int_id(_src), int_id(_dst), int.from_bytes_ver,'big')
+                            self.retransmit_bcto(_packet[:13])
+                            self.process_bcto(src,dst,ver)
+                        else:
+                            h,p = _sockaddr
+                            logger.warning('(%s) *ProtoControl* BCTO invalid, packet discarded - OPCODE: %s DATA: %s HMAC LENGTH: %s HMAC: %s SRC IP: %s SRC PORT: %s', self._system, _packet[:4], repr(_packet[:53]), len(_packet[53:]),repr(_packet[53:]),h,p)
+                        
                 
                 
                 
