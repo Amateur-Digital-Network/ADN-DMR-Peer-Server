@@ -555,7 +555,7 @@ def topoTrimmer():
     for _src in TOPO:
         _dstrem = []
         for _dst in TOPO[_src]:
-            if TOPO[_src][_dst]['time'] - +now > 1800:
+            if TOPO[_src][_dst]['time'] - + _now > 1800:
                 _dstrem.append(_dst)
         for _remove in _dstrem:
             TOPO[_src].pop(_remove)
