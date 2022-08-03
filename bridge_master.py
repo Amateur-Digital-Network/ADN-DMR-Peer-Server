@@ -1907,10 +1907,12 @@ class routerOBP(OPENBRIDGE):
                 self.STATUS[_stream_id]['lastSeq'] = False
     
     def process_bcto(self,_src,_dst,_ver):
-            TOPO[_src][_dst] = {
-                                'ver'   : _ver,
-                                'time'  : time()
-                            }
+        if _src not in TOPO:
+            TOPO[_src] = {}
+        TOPO[_src][_dst] = {
+                            'ver'   : _ver,
+                            'time'  : time()
+                        }
         
 
 class routerHBP(HBSYSTEM):
