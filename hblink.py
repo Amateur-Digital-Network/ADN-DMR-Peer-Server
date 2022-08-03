@@ -762,7 +762,7 @@ class OPENBRIDGE(DatagramProtocol):
                                 self.retransmit_bcto(_packet[:14],int.from_bytes(_hops,'big'))
                             else:
                                 logger.trace('(%s) *BridgeControl* not retransmitting BCTO - hop count exceeded',self._system)
-                            self.process_bcto(src,dst,ver)
+                            self.process_bcto(_src,_dst,_ver)
                         else:
                             h,p = _sockaddr
                             logger.warning('(%s) *ProtoControl* BCTO invalid, packet discarded - OPCODE: %s DATA: %s HMAC LENGTH: %s HMAC: %s SRC IP: %s SRC PORT: %s', self._system, _packet[:4], repr(_packet[:53]), len(_packet[53:]),repr(_packet[53:]),h,p)
