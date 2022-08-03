@@ -1909,7 +1909,7 @@ class routerOBP(OPENBRIDGE):
     
     def process_bcto(self,_src,_dst,_ver):
         _src = int_id(_src)
-        _src = int_id(_dst)
+        _dst = int_id(_dst)
         _ver = int.from_bytes(_ver,'big')
         if _src not in TOPO:
             TOPO[_src] = {}
