@@ -165,7 +165,7 @@ class OPENBRIDGE(DatagramProtocol):
             
             logger.debug('(%s) *BridgeControl* starting topography timer',self._system)
             self._bcto_task = task.LoopingCall(self.send_my_bcto)
-            self._bcto = self._bcto_task.start(10)#600
+            self._bcto = self._bcto_task.start(602)#600
             self._bcto.addErrback(self.loopingErrHandle)
             
 
@@ -758,7 +758,7 @@ class OPENBRIDGE(DatagramProtocol):
                         _ver = _packet[12:13]
                         _hops = _packet[13:14]
                         if _hash == _hash2:
-                            logger.trace('(%s) *ProtoControl* BCTO received: %s connected to %s with proto ver. %s. HOPS: ',self._system, int_id(_src), int_id(_dst), int.from_bytes(_ver,'big'), int.from_bytes(_hops,'big')
+                            logger.trace('(%s) *ProtoControl* BCTO received: %s connected to %s with proto ver. %s. HOPS: ',self._system, int_id(_src), int_id(_dst), int.from_bytes(_ver,'big'), int.from_bytes(_hops,'big'))
                             if int.from_bytes(_hops,'big') < 10 and _src != self._CONFIG['GLOBAL']['SERVER_ID']:
                                 self.retransmit_bcto(_packet[4:13],int.from_bytes(_hops,'big'))
                             else:

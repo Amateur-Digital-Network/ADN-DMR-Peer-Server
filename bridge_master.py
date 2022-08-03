@@ -3166,7 +3166,7 @@ if __name__ == '__main__':
     
     #topography trimmer
     topo_trimmer_task = task.LoopingCall(topoTrimmer)
-    topo_trimmer = topo_trimmer_task.start(10)#610
+    topo_trimmer = topo_trimmer_task.start(610)#610
     topo_trimmer.addErrback(loopingErrHandle)
     
     
