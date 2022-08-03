@@ -752,10 +752,10 @@ class OPENBRIDGE(DatagramProtocol):
                         _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
                         _h.update(_packet[:13])
                         _hash2 = _h.digest()
-                        _src[4:8]
-                        _dst[8:12]
-                        _ver[12:13]
-                        _hops[13:14]
+                        _src = _packet[4:8]
+                        _dst = _packet[8:12]
+                        _ver = _packet[12:13]
+                        _hops = _packet[13:14]
                         if _hash == _hash2:
                             logger.trace('(%s) *ProtoControl* BCTO received: %s connected to %s with proto ver. %s'. self._system, int_id(_src), int_id(_dst), int.from_bytes_ver,'big')
                             if (int(_hops.from_bytes('big')) < 10):
