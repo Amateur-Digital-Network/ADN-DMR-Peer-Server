@@ -165,7 +165,7 @@ class OPENBRIDGE(DatagramProtocol):
             
             logger.debug('(%s) *BridgeControl* starting topography timer',self._system)
             self._bcto_task = task.LoopingCall(self.send_my_bcto)
-            self._bcto = self._bcto_task.start(600)
+            self._bcto = self._bcto_task.start(10)#600
             self._bcto.addErrback(self.loopingErrHandle)
             
 
