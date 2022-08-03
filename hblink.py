@@ -272,7 +272,7 @@ class OPENBRIDGE(DatagramProtocol):
         _hops = 1
         _hops = _hops.to_bytes(1,'big')
         for system in self._CONFIG['SYSTEMS']:
-            if self._CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE' and self._CONFIG['SYSTEMS'][system]['VER'] > 5:
+            if self._CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
                 if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
                     _packet = b''.join([BCTO,self._CONFIG['GLOBAL']['SERVER_ID'],self._CONFIG['SYSTEMS'][system]['NETWORK_ID'],self._CONFIG['SYSTEMS'][system]['VER'].to_bytes(1,"big"),_hops])
                     _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
