@@ -758,11 +758,11 @@ class OPENBRIDGE(DatagramProtocol):
                         _ver = _packet[12:13]
                         _hops = _packet[13:14]
                         if _hash == _hash2:
-                            logger.trace('(%s) *ProtoControl* BCTO received: %s connected to %s with proto ver. %s',self._system, int_id(_src), int_id(_dst), int.from_bytes(_ver,'big'))
+                            logger.trace('(%s) *ProtoControl* BCTO received: %s connected to %s with proto ver. %s. HOPS: ',self._system, int_id(_src), int_id(_dst), int.from_bytes(_ver,'big'), int.from_bytes(_hops,'big')
                             if (int.from_bytes(_hops,'big') < 10 and _src != self._CONFIG['GLOBAL']['SERVER_ID']):
                                 self.retransmit_bcto(_packet[4:13],int.from_bytes(_hops,'big'))
                             else:
-                                logger.trace('(%s) *BridgeControl* not retransmitting BCTO - hop count exceeded',self._system)
+                                logger.trace('(%s) *BridgeControl* not retransmitting BCTO - hop count exceeded or my packet',self._system)
                             self.process_bcto(_src,_dst,_ver)
                         else:
                             h,p = _sockaddr

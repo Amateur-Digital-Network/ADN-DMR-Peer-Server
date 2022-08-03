@@ -563,7 +563,6 @@ def topoTrimmer():
             _toprem.append(_src)
     for _remove in _toprem:
         TOPO.pop(_remove)
-    print(TOPO)
     topoWrite()
             
                 
