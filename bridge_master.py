@@ -1911,7 +1911,7 @@ class routerOBP(OPENBRIDGE):
         _src = int_id(_src)
         _src = int_id(_dst)
         _ver = int.from_bytes(_ver,'big')
-        if int_id_src not in TOPO:
+        if _src not in TOPO:
             TOPO[_src] = {}
         TOPO[_src][_dst] = {
                             'ver'   : _ver,
