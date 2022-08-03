@@ -759,7 +759,7 @@ class OPENBRIDGE(DatagramProtocol):
                         if _hash == _hash2:
                             logger.trace('(%s) *ProtoControl* BCTO received: %s connected to %s with proto ver. %s',self._system, int_id(_src), int_id(_dst), int.from_bytes(_ver,'big'))
                             if (int.from_bytes(_hops,'big') < 10):
-                                retransmit_bcto(_packet[:14])
+                                self.retransmit_bcto(_packet[:14])
                             else:
                                 if _hops > 10:
                                     logger.trace('(%s) *BridgeControl* not retransmitting BCTO - hop count exceeded',self._system)
