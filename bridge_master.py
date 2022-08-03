@@ -562,7 +562,8 @@ def topoTrimmer():
         if len(TOPO[_src]) == 0:
             _toprem.append(_src)
     for _remove in _toprem:
-        TOPO.pop(_remove)        
+        TOPO.pop(_remove)
+    print(TOPO)
     topoWrite()
             
                 
@@ -1907,7 +1908,10 @@ class routerOBP(OPENBRIDGE):
                 self.STATUS[_stream_id]['lastSeq'] = False
     
     def process_bcto(self,_src,_dst,_ver):
-        if _src not in TOPO:
+        _src = int_id(_src)
+        _src = int_id(_dst)
+        _ver = int.from_bytes(_ver,'big')
+        if int_id_src not in TOPO:
             TOPO[_src] = {}
         TOPO[_src][_dst] = {
                             'ver'   : _ver,
