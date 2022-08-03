@@ -269,10 +269,12 @@ class OPENBRIDGE(DatagramProtocol):
             logger.trace('(%s) *BridgeControl* not sending BCVE, TARGET_IP currently not known',self._system) 
 
     def send_my_bcto(self):
+        _hops = 1
+        _hops = _hops.to_bytes(1,'big')
         for system in self._CONFIG['SYSTEMS']:
             if self._CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE' and self._CONFIG['SYSTEMS'][system]['VER'] > 5:
                 if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
-                    _packet = b''.join([BCTO,self._CONFIG['GLOBAL']['SERVER_ID'],self._CONFIG['SYSTEMS'][system]['NETWORK_ID'],self._CONFIG['SYSTEMS'][system]['VER'].to_bytes(1,"big")])
+                    _packet = b''.join([BCTO,self._CONFIG['GLOBAL']['SERVER_ID'],self._CONFIG['SYSTEMS'][system]['NETWORK_ID'],self._CONFIG['SYSTEMS'][system]['VER'].to_bytes(1,"big"),_hops])
                     _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
                     _h.update(_packet)
                     _hash = _h.digest()
@@ -283,17 +285,19 @@ class OPENBRIDGE(DatagramProtocol):
                     logger.trace('(%s) *BridgeControl* not sending BCTO, TARGET_IP currently not known. DST: %s, VER: %s ',self._system,int_id(self._CONFIG['SYSTEMS'][system]['NETWORK_ID']),self._CONFIG['SYSTEMS'][system]['VER'])
                 
                 
-    def retransmit_bcto(self,_string):
+    def retransmit_bcto(self,_string,_hops):
+        _hops += 1
+        _hops = _hops.to_bytes(1,'big')
         for system in self._CONFIG['SYSTEMS']:
             if self._CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE' and self._CONFIG['SYSTEMS'][system]['VER'] > 5:
                 if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
-                    _packet = b''.join([BCTO,_string])
+                    _packet = b''.join([BCTO,_string,_hops])
                     _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
                     _h.update(_packet)
                     _hash = _h.digest()
                     _packet = b''.join([_packet,_hash])
                     self.transport.write(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
-                    logger.trace('(%s) *BridgeControl* retransmitted BCTO.')
+                    logger.trace('(%s) *BridgeControl* retransmitted BCTO.',self._system)
                 else:
                     logger.trace('(%s) *BridgeControl* not retransmitting BCTO, TARGET_IP currently not known.',self._system)
             
@@ -751,9 +755,14 @@ class OPENBRIDGE(DatagramProtocol):
                         _src[4:8]
                         _dst[8:12]
                         _ver[12:13]
+                        _hops[13:14]
                         if _hash == _hash2:
                             logger.trace('(%s) *ProtoControl* BCTO received: %s connected to %s with proto ver. %s'. self._system, int_id(_src), int_id(_dst), int.from_bytes_ver,'big')
-                            self.retransmit_bcto(_packet[:13])
+                            if (int(_hops.from_bytes('big')) < 10):
+                                retransmit_bcto(_packet[:14])
+                            else:
+                                if _hops > 10:
+                                    logger.trace('(%s) *BridgeControl* not retransmitting BCTO - hop count exceeded',self._system)
                             self.process_bcto(src,dst,ver)
                         else:
                             h,p = _sockaddr

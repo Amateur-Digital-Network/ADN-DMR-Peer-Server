@@ -38,6 +38,7 @@ from time import time,sleep,perf_counter
 import importlib.util
 import re
 import copy
+import json
 from setproctitle import setproctitle
 
 #from crccheck.crc import Crc32
@@ -409,6 +410,15 @@ def subMapWrite():
     except:
         logger.warning('(SUBSCRIBER) Cannot write SUB_MAP to file')
         
+def topoWrite():
+    try:
+        _fh = open(CONFIG['ALIASES']['PATH'] + CONFIG['ALIASES']['TOPO_FILE'],'w')
+        json.dump(TOPO,_fh)
+        _fh.close()
+        logger.info('(TOPO) Writing topography file to disk')
+    except:
+        logger.warning('(TOPO) Cannot write topography file to disk')
+        
 #Subscriber Map trimmer loop
 def SubMapTrimmer():
     logger.debug('(SUBSCRIBER) Subscriber Map trimmer loop started')
@@ -552,9 +562,8 @@ def topoTrimmer():
         if len(TOPO[_src]) == 0:
             _toprem.append(_src)
     for _remove in _toprem:
-        TOPO.pop(_remove)
-        
-    print(TOPO)
+        TOPO.pop(_remove)        
+    topoWrite()
             
                 
 
@@ -2933,6 +2942,9 @@ if __name__ == '__main__':
         reactor.stop()
         if CONFIG['ALIASES']['SUB_MAP_FILE']:
             subMapWrite()
+        if CONFIG['ALIASES']['TOPO_FILE']:
+            topoWrite()
+        
 
     # Set signal handers so that we can gracefully exit if need be
     for sig in [signal.SIGINT, signal.SIGTERM]:
@@ -3149,7 +3161,7 @@ if __name__ == '__main__':
     
     #topography trimmer
     topo_trimmer_task = task.LoopingCall(topoTrimmer)
-    topo_trimmer = topo_trimmer_task.start(610)
+    topo_trimmer = topo_trimmer_task.start(10)#610
     topo_trimmer.addErrback(loopingErrHandle)
     
     
