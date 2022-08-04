@@ -148,7 +148,8 @@ def build_config(_config_file):
                     'ANNOUNCEMENT_LANGUAGES': config.get(section, 'ANNOUNCEMENT_LANGUAGES'),
                     'SERVER_ID': config.getint(section, 'SERVER_ID').to_bytes(4, 'big'),
                     'DATA_GATEWAY': config.getboolean(section, 'DATA_GATEWAY'),
-                    'VALIDATE_SERVER_IDS': config.getboolean(section, 'VALIDATE_SERVER_IDS')
+                    'VALIDATE_SERVER_IDS': config.getboolean(section, 'VALIDATE_SERVER_IDS'),
+                    'ISO_COUNTRY_CODE' : config.get(section, 'ISO_COUNTRY_CODE'),
                     
                 })
                 if not CONFIG['GLOBAL']['ANNOUNCEMENT_LANGUAGES']:
