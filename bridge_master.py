@@ -127,6 +127,7 @@ def config_reports(_config, _factory):
                     i = i +1
             logger.info('(REPORT) %s systems have at least one peer',i)
             logger.info('(REPORT) Subscriber Map has %s entries',len(SUB_MAP))
+            logger.info('(REPORT) %s SERVER_ID\'s seen by topography system', len(TOPO))
             
         logger.info('(REPORT) HBlink TCP reporting server configured')
 
