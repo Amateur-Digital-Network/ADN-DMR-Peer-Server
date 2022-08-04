@@ -277,7 +277,8 @@ class OPENBRIDGE(DatagramProtocol):
                     if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
                         if '_bcka' in self._CONFIG['SYSTEMS'][system] and self._CONFIG['SYSTEMS'][system]['_bcka'] < time() - 60:
                             continue
-                        _packet = b''.join([BCTO,self._CONFIG['GLOBAL']['SERVER_ID'],self._CONFIG['SYSTEMS'][system]['NETWORK_ID'],self._CONFIG['SYSTEMS'][system]['VER'].to_bytes(1,"big"),_hops])
+                        _uid = bytes_4(randint(0x00, 0xFFFFFFFF))
+                        _packet = b''.join([BCTO,_uid,self._CONFIG['GLOBAL']['SERVER_ID'],self._CONFIG['SYSTEMS'][system]['NETWORK_ID'],self._CONFIG['SYSTEMS'][system]['VER'].to_bytes(1,"big"),_hops])
                         _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
                         _h.update(_packet)
                         _hash = _h.digest()
@@ -755,17 +756,19 @@ class OPENBRIDGE(DatagramProtocol):
                         _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
                         _h.update(_packet[:14])
                         _hash2 = _h.digest()
-                        _src = _packet[4:8]
-                        _dst = _packet[8:12]
-                        _ver = _packet[12:13]
-                        _hops = _packet[13:14]
+                        _uid = _packet[4:8]
+                        _src = _packet[8:12]
+                        _dst = _packet[12:16]
+                        _ver = _packet[16:17]
+                        _hops = _packet[17:18]
                         if _hash == _hash2:
                             logger.trace('(%s) *ProtoControl* BCTO received: %s connected to %s with proto ver. %s. HOPS: %s ',self._system, int_id(_src), int_id(_dst), int.from_bytes(_ver,'big'), int.from_bytes(_hops,'big'))
-                            if int.from_bytes(_hops,'big') < 10 and _src != self._CONFIG['GLOBAL']['SERVER_ID']:
-                                self.retransmit_bcto(_packet[4:13],int.from_bytes(_hops,'big'))
+                            if int.from_bytes(_hops,'big') < 10 and _src != self._CONFIG['GLOBAL']['SERVER_ID'] and not self.check_bcto_uid(_uid):
+                                self.retransmit_bcto(_packet[4:17],int.from_bytes(_hops,'big'))
                             else:
-                                logger.trace('(%s) *BridgeControl* not retransmitting BCTO - hop count exceeded or my packet',self._system)
-                            self.process_bcto(_src,_dst,_ver)
+                                logger.trace('(%s) *BridgeControl* not retransmitting BCTO - hop count exceeded, already seen or my packet',self._system)
+                            if not self.check_bcto_uid(_uid):
+                                self.process_bcto(_uid,_src,_dst,_ver,_hops)
                         else:
                             h,p = _sockaddr
                             logger.warning('(%s) *ProtoControl* BCTO invalid, packet discarded - OPCODE: %s DATA: %s HMAC LENGTH: %s HMAC: %s SRC IP: %s SRC PORT: %s', self._system, _packet[:4], repr(_packet[:53]), len(_packet[53:]),repr(_packet[53:]),h,p)
