@@ -297,7 +297,7 @@ class OPENBRIDGE(DatagramProtocol):
                     _h.update(_packet)
                     _hash = _h.digest()
                     _packet = b''.join([_packet,_hash])
-                    self.transport.write(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
+                    self.transport.write(_packet, (self._CONFIG['SYSTEMS'][system]['TARGET_IP'], self._CONFIG['SYSTEMS'][system]['TARGET_PORT']))
                     logger.trace('(%s) *BridgeControl* retransmitted BCTO.',self._system)
                 else:
                     logger.trace('(%s) *BridgeControl* not retransmitting BCTO, TARGET_IP currently not known.',self._system)
