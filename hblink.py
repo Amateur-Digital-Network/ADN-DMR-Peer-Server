@@ -165,7 +165,7 @@ class OPENBRIDGE(DatagramProtocol):
             
             logger.debug('(%s) *BridgeControl* starting topography timer',self._system)
             self._bcto_task = task.LoopingCall(self.send_my_bcto)
-            self._bcto = self._bcto_task.start(602)#600
+            self._bcto = self._bcto_task.start(10)#600
             self._bcto.addErrback(self.loopingErrHandle)
             
 
@@ -269,7 +269,7 @@ class OPENBRIDGE(DatagramProtocol):
             logger.trace('(%s) *BridgeControl* not sending BCVE, TARGET_IP currently not known',self._system) 
 
     def send_my_bcto(self):
-        if self._config['VER'] > 5:
+        if self._config['VER'] > 4:
             _hops = 1
             _hops = _hops.to_bytes(1,'big')
             for system in self._CONFIG['SYSTEMS']:
