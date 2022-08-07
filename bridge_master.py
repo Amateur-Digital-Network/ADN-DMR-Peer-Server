@@ -1908,7 +1908,7 @@ class routerOBP(OPENBRIDGE):
                 self.STATUS[_stream_id]['lastSeq'] = False
     
     def process_bcto(self,_uid,_src,_dst,_ver,_hops):
-        _uid = int_id(uid)
+        _uid = int_id(_uid)
         _src = int_id(_src)
         _dst = int_id(_dst)
         _ver = int.from_bytes(_ver,'big')
