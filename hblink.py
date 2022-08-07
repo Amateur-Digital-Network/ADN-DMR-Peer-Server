@@ -165,7 +165,7 @@ class OPENBRIDGE(DatagramProtocol):
             
             logger.debug('(%s) *BridgeControl* starting topography timer',self._system)
             self._bcto_task = task.LoopingCall(self.send_my_bcto)
-            self._bcto = self._bcto_task.start(10)#600
+            self._bcto = self._bcto_task.start(604)#600
             self._bcto.addErrback(self.loopingErrHandle)
             
 
@@ -269,7 +269,7 @@ class OPENBRIDGE(DatagramProtocol):
             logger.trace('(%s) *BridgeControl* not sending BCVE, TARGET_IP currently not known',self._system) 
 
     def send_my_bcto(self):
-        if self._config['VER'] > 4:
+        if self._config['VER'] > 5:
             _hops = 1
             _hops = _hops.to_bytes(1,'big')
             for system in self._CONFIG['SYSTEMS']:
@@ -771,7 +771,7 @@ class OPENBRIDGE(DatagramProtocol):
                                 self.process_bcto(_uid,_src,_dst,_ver,_hops)
                         else:
                             h,p = _sockaddr
-                            logger.warning('(%s) *ProtoControl* BCTO invalid, packet discarded - OPCODE: %s DATA: %s HMAC LENGTH: %s HMAC: %s SRC IP: %s SRC PORT: %s', self._system, _packet[:4], repr(_packet[:53]), len(_packet[53:]),repr(_packet[53:]),h,p)
+                            logger.warning('(%s) *ProtoControl* BCTO invalid, packet discarded - OPCODE: %s DATA: %s HMAC LENGTH: %s HMAC: %s SRC IP: %s SRC PORT: %s', self._system, _packet[:4], repr(_packet[:18]), len(_packet[18:]),repr(_packet[18:]),h,p)
                         
                 
                 
