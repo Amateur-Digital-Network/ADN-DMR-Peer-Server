@@ -752,9 +752,9 @@ class OPENBRIDGE(DatagramProtocol):
                         
                 if _packet[:4] == BCTO:
                     if self._config['VER'] > 5:
-                        _hash = _packet[14:]
+                        _hash = _packet[18:]
                         _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
-                        _h.update(_packet[:14])
+                        _h.update(_packet[:18])
                         _hash2 = _h.digest()
                         _uid = _packet[4:8]
                         _src = _packet[8:12]
