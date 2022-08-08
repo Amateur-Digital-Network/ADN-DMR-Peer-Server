@@ -273,7 +273,7 @@ class OPENBRIDGE(DatagramProtocol):
             _hops = 1
             _hops = _hops.to_bytes(1,'big')
             for system in self._CONFIG['SYSTEMS']:
-                if self._CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
+                if self._CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE' and self._CONFIG['SYSTEMS'][system]['ENABLED']:
                     if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
                         if '_bcka' in self._CONFIG['SYSTEMS'][system] and self._CONFIG['SYSTEMS'][system]['_bcka'] < time() - 60:
                             continue
