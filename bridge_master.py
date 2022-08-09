@@ -421,9 +421,9 @@ def topoWrite():
         logger.warning('(TOPO) Cannot write topography file to disk')
         
 def topoRead():
+    _topo = {}
     try:
         _fh = open(CONFIG['ALIASES']['PATH'] + CONFIG['ALIASES']['TOPO_FILE'],'r')
-        _topo = {}
         _topo = json.load(_fh)
         _fh.close()
         logger.info('(TOPO) Reading topography file from disk')
