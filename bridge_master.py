@@ -38,6 +38,7 @@ from time import time,sleep,perf_counter
 import importlib.util
 import re
 import copy
+import json
 from setproctitle import setproctitle
 
 #from crccheck.crc import Crc32
@@ -126,6 +127,7 @@ def config_reports(_config, _factory):
                     i = i +1
             logger.info('(REPORT) %s systems have at least one peer',i)
             logger.info('(REPORT) Subscriber Map has %s entries',len(SUB_MAP))
+            logger.info('(REPORT) %s SERVER_ID\'s seen by topography system', len(TOPO))
             
         logger.info('(REPORT) HBlink TCP reporting server configured')
 
@@ -409,6 +411,27 @@ def subMapWrite():
     except:
         logger.warning('(SUBSCRIBER) Cannot write SUB_MAP to file')
         
+def topoWrite():
+    try:
+        _fh = open(CONFIG['ALIASES']['PATH'] + CONFIG['ALIASES']['TOPO_FILE'],'w')
+        json.dump(TOPO,_fh)
+        _fh.close()
+        logger.info('(TOPO) Writing topography file to disk')
+    except:
+        logger.warning('(TOPO) Cannot write topography file to disk')
+        
+def topoRead():
+    try:
+        _fh = open(CONFIG['ALIASES']['PATH'] + CONFIG['ALIASES']['TOPO_FILE'],'r')
+        _topo = {}
+        _topo = json.load(_fh)
+        _fh.close()
+        logger.info('(TOPO) Reading topography file from disk')
+    except:
+        logger.warning('(TOPO) Cannot read topography file from disk')
+    finally:
+        return(_topo)
+        
 #Subscriber Map trimmer loop
 def SubMapTrimmer():
     logger.debug('(SUBSCRIBER) Subscriber Map trimmer loop started')
@@ -537,6 +560,25 @@ def stream_trimmer_loop():
                         pass
                 else:
                     logger.debug('(%s) Attemped to remove OpenBridge Stream ID %s not in the Stream ID list: %s', system, int_id(stream_id), [id for id in systems[system].STATUS])
+
+def topoTrimmer():
+    logger.debug('(TOPO) Trimming stale entries')
+    _now = time()
+    _toprem = []
+    for _src in TOPO:
+        _dstrem = []
+        for _dst in TOPO[_src]:
+            if _now - TOPO[_src][_dst]['time'] > 1800:
+                _dstrem.append(_dst)
+        for _remove in _dstrem:
+            TOPO[_src].pop(_remove)
+        if len(TOPO[_src]) == 0:
+            _toprem.append(_src)
+    for _remove in _toprem:
+        TOPO.pop(_remove)
+    topoWrite()
+            
+                
 
 def sendVoicePacket(self,pkt,_source_id,_dest_id,_slot):
     _stream_id = pkt[16:20]
@@ -1876,6 +1918,30 @@ class routerOBP(OPENBRIDGE):
                    self.STATUS[_stream_id]['_fin'] = True
                    
                 self.STATUS[_stream_id]['lastSeq'] = False
+    
+    def process_bcto(self,_uid,_src,_dst,_ver,_hops):
+        _uid = int_id(_uid)
+        _src = int_id(_src)
+        _dst = int_id(_dst)
+        _ver = int.from_bytes(_ver,'big')
+        _hops = int.from_bytes(_hops,'big')
+        if _src not in TOPO:
+            TOPO[_src] = {}
+        TOPO[_src][_dst] = {
+                            'ver'   : _ver,
+                            'time'  : time(),
+                            'uid'   : _uid,
+                            'hops'  : _hops,
+                        }
+        
+    def check_bcto_uid(self,_uid):
+        _uid = int_id(_uid)
+        for src in TOPO:
+            for dst in TOPO[src]:
+                if TOPO[src][dst]['uid'] == _uid:
+                    return(True)
+        return(False)
+        
 
 class routerHBP(HBSYSTEM):
 
@@ -2904,6 +2970,9 @@ if __name__ == '__main__':
         reactor.stop()
         if CONFIG['ALIASES']['SUB_MAP_FILE']:
             subMapWrite()
+        if CONFIG['ALIASES']['TOPO_FILE']:
+            topoWrite()
+        
 
     # Set signal handers so that we can gracefully exit if need be
     for sig in [signal.SIGINT, signal.SIGTERM]:
@@ -2921,7 +2990,7 @@ if __name__ == '__main__':
     CONFIG['_LOCAL_SUBSCRIBER_IDS'] = local_subscriber_ids
     CONFIG['_SERVER_IDS'] = server_ids
     
-    
+    TOPO = topoRead()
     
     # Import the ruiles file as a module, and create BRIDGES from it
     spec = importlib.util.spec_from_file_location("module.name", cli_args.RULES_FILE)
@@ -3117,6 +3186,12 @@ if __name__ == '__main__':
     sub_trimmer_task = task.LoopingCall(SubMapTrimmer)
     sub_trimmer = sub_trimmer_task.start(3600)#3600
     sub_trimmer.addErrback(loopingErrHandle)
+    
+    #topography trimmer
+    topo_trimmer_task = task.LoopingCall(topoTrimmer)
+    topo_trimmer = topo_trimmer_task.start(610)#610
+    topo_trimmer.addErrback(loopingErrHandle)
+    
     
     #more threads
     reactor.suggestThreadPoolSize(100)
