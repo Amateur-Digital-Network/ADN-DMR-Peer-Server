@@ -420,6 +420,18 @@ def topoWrite():
     except:
         logger.warning('(TOPO) Cannot write topography file to disk')
         
+def topoRead():
+    try:
+        _fh = open(CONFIG['ALIASES']['PATH'] + CONFIG['ALIASES']['TOPO_FILE'],'r')
+        _topo = {}
+        _topo = json.load(_fh)
+        _fh.close()
+        logger.info('(TOPO) Reading topography file from disk')
+    except:
+        logger.warning('(TOPO) Cannot read topography file from disk')
+    finally:
+        return(_topo)
+        
 #Subscriber Map trimmer loop
 def SubMapTrimmer():
     logger.debug('(SUBSCRIBER) Subscriber Map trimmer loop started')
@@ -2904,8 +2916,6 @@ if __name__ == '__main__':
             #os.unlink("config.pkl")
     #else:
     
-    TOPO = {}
-    
     CONFIG = config.build_config(cli_args.CONFIG_FILE)
 
     # Ensure we have a path for the rules file, if one wasn't specified, then use the default (top of file)
@@ -2980,7 +2990,7 @@ if __name__ == '__main__':
     CONFIG['_LOCAL_SUBSCRIBER_IDS'] = local_subscriber_ids
     CONFIG['_SERVER_IDS'] = server_ids
     
-    
+    TOPO = topoRead()
     
     # Import the ruiles file as a module, and create BRIDGES from it
     spec = importlib.util.spec_from_file_location("module.name", cli_args.RULES_FILE)
