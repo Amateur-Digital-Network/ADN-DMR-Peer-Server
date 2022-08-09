@@ -278,6 +278,8 @@ class OPENBRIDGE(DatagramProtocol):
                         if '_bcka' in self._CONFIG['SYSTEMS'][system] and self._CONFIG['SYSTEMS'][system]['_bcka'] < time() - 60:
                             continue
                         _uid = bytes_4(randint(0x00, 0xFFFFFFFF))
+                        #add data from this packet to our local TOPO view
+                        self.process_bcto(self._CONFIG['GLOBAL']['SERVER_ID'],self._CONFIG['SYSTEMS'][system]['NETWORK_ID'],self._CONFIG['SYSTEMS'][system]['VER'].to_bytes(1,"big"),_hops)
                         _packet = b''.join([BCTO,_uid,self._CONFIG['GLOBAL']['SERVER_ID'],self._CONFIG['SYSTEMS'][system]['NETWORK_ID'],self._CONFIG['SYSTEMS'][system]['VER'].to_bytes(1,"big"),_hops])
                         _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
                         _h.update(_packet)
