@@ -492,7 +492,10 @@ class OPENBRIDGE(DatagramProtocol):
                         
                     #Discard old packets
                     if (int.from_bytes(_timestamp,'big')/1000000000) < (time() - 5):
-                        logger.warning('(%s) Packet more than 5s old!, discarding', self._system)
+                        if _stream_id not in self._laststrid:
+                            logger.warning('(%s) Packet from server % more than 5s old!, discarding', self._system,int.from_bytes(_source_server,'big'))
+                            self.send_bcsq(_dst_id,_stream_id)
+                            self._laststrid.append(_stream_id)
                         return
                     
                     #Discard bad source server 
