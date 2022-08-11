@@ -262,50 +262,6 @@ class OPENBRIDGE(DatagramProtocol):
             logger.trace('(%s) *BridgeControl* sent BCVE. Ver: %s',self._system,VER)
         else:
             logger.trace('(%s) *BridgeControl* not sending BCVE, TARGET_IP currently not known',self._system) 
-<<<<<<< HEAD
-
-    def send_my_bcto(self):
-        if self._config['VER'] > 5:
-            _hops = 1
-            _hops = _hops.to_bytes(1,'big')
-            for system in self._CONFIG['SYSTEMS']:
-                if self._CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE' and self._CONFIG['SYSTEMS'][system]['ENABLED']:
-                    if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
-                        if '_bcka' in self._CONFIG['SYSTEMS'][system] and self._CONFIG['SYSTEMS'][system]['_bcka'] < time() - 60:
-                            continue
-                        _uid = bytes_4(randint(0x00, 0xFFFFFFFF))
-                        #add data from this packet to our local TOPO view
-                        self.process_bcto(self._CONFIG['GLOBAL']['SERVER_ID'],self._CONFIG['SYSTEMS'][system]['NETWORK_ID'],self._CONFIG['SYSTEMS'][system]['VER'].to_bytes(1,"big"),_hops)
-                        _packet = b''.join([BCTO,_uid,self._CONFIG['GLOBAL']['SERVER_ID'],self._CONFIG['SYSTEMS'][system]['NETWORK_ID'],self._CONFIG['SYSTEMS'][system]['VER'].to_bytes(1,"big"),_hops])
-                        _h = blake2b(key=self._config['PASSPHRASE'], digest_size=16)
-                        _h.update(_packet)
-                        _hash = _h.digest()
-                        _packet = b''.join([_packet,_hash])
-                        self.transport.write(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
-                        logger.trace('(%s) *BridgeControl* sent BCTO. DST: %s, VER: %s ',self._system,int_id(self._CONFIG['SYSTEMS'][system]['NETWORK_ID']),self._CONFIG['SYSTEMS'][system]['VER'])
-                    else:
-                        logger.trace('(%s) *BridgeControl* not sending BCTO, TARGET_IP currently not known. DST: %s, VER: %s ',self._system,int_id(self._CONFIG['SYSTEMS'][system]['NETWORK_ID']),self._CONFIG['SYSTEMS'][system]['VER'])
-                
-                
-    def retransmit_bcto(self,_string,_hops):
-        _hops += 1
-        _hops = _hops.to_bytes(1,'big')
-        for system in self._CONFIG['SYSTEMS']:
-            if self._CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE' and self._CONFIG['SYSTEMS'][system]['VER'] > 5:
-                if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
-                    _packet = b''.join([BCTO,_string,_hops])
-                    _h = blake2b(key=self._CONFIG['SYSTEMS'][system]['PASSPHRASE'], digest_size=16)
-                    _h.update(_packet)
-                    _hash = _h.digest()
-                    _packet = b''.join([_packet,_hash])
-                    self.transport.write(_packet, (self._CONFIG['SYSTEMS'][system]['TARGET_IP'], self._CONFIG['SYSTEMS'][system]['TARGET_PORT']))
-                    logger.trace('(%s) *BridgeControl* retransmitted BCTO.',self._system)
-                else:
-                    logger.trace('(%s) *BridgeControl* not retransmitting BCTO, TARGET_IP currently not known.',self._system)
-=======
->>>>>>> parent of 7eccd3e (Auto topography discovery system:)
-            
-    
 
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash,_hops = b'', _source_server = b'\x00\x00\x00\x00', _ber = b'\x00', _rssi = b'\x00', _source_rptr = b'\x00\x00\x00\x00'):
         pass
