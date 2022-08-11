@@ -300,7 +300,8 @@ class OPENBRIDGE(DatagramProtocol):
                     _h.update(_packet)
                     _hash = _h.digest()
                     _packet = b''.join([_packet,_hash])
-                    self.transport.write(_packet, (self._CONFIG['SYSTEMS'][system]['TARGET_IP'], self._CONFIG['SYSTEMS'][system]['TARGET_PORT']))
+
+                    systems[system].transport.write(_packet, (self._CONFIG['SYSTEMS'][system]['TARGET_IP'], self._CONFIG['SYSTEMS'][system]['TARGET_PORT']))
                     logger.trace('(%s) *BridgeControl* retransmitted BCTO.',self._system)
                 else:
                     logger.trace('(%s) *BridgeControl* not retransmitting BCTO, TARGET_IP currently not known.',self._system)
@@ -492,7 +493,10 @@ class OPENBRIDGE(DatagramProtocol):
                         
                     #Discard old packets
                     if (int.from_bytes(_timestamp,'big')/1000000000) < (time() - 5):
-                        logger.warning('(%s) Packet more than 5s old!, discarding', self._system)
+                        if _stream_id not in self._laststrid:
+                            logger.warning('(%s) Packet from server %s more than 5s old!, discarding', self._system,int.from_bytes(_source_server,'big'))
+                            self.send_bcsq(_dst_id,_stream_id)
+                            self._laststrid.append(_stream_id)
                         return
                     
                     #Discard bad source server 
