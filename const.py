@@ -83,10 +83,9 @@ BCKA    = b'BCKA'
 BCSQ    = b'BCSQ'
 BCST    = b'BCST'
 BCVE    = b'BCVE'
-BCTO    = b'BCTO'
 
 #Protocol version
-VER     = 6
+VER     = 5
 
 # Higheset peer ID permitted by HBP
 PEER_MAX = 4294967295
