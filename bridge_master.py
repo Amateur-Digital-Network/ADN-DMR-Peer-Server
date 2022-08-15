@@ -1783,7 +1783,7 @@ class routerOBP(OPENBRIDGE):
                 hr_times = None
                 
                 if not fi:
-                    logger.warning("(%s) OBP *LoopControl* fi is empty for some reason : %s, STREAM ID: %s, TG: %s, TS: %s",self._system, int_id(_stream_id), int_id(_dst_id),_sysslot)
+                    logger.warning("(%s) OBP *LoopControl* fi is empty for some reason : STREAM ID: %s, TG: %s, TS: %s",self._system, int_id(_stream_id), int_id(_dst_id),_sysslot)
                     return
                 
                 if self._system != fi:             
