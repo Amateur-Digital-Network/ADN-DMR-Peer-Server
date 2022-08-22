@@ -85,7 +85,7 @@ from AMI import AMI
 #debugging and profiling
 import gc
 
-gc.set_debug(gc.DEBUG_LEAK, gc.DEBUG_STATS)
+gc.set_debug(gc.DEBUG_LEAK | gc.DEBUG_STATS)
 
 ##from hmac import new as hmac_new, compare_digest
 ##from hashlib import sha256, hash
