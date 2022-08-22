@@ -2901,14 +2901,13 @@ if __name__ == '__main__':
 
     # Set up the signal handler
     def sig_handler(_signal, _frame):
+        print("<<<<<<<<<<garbage",gc.garbage)
         logger.info('(GLOBAL) SHUTDOWN: CONFBRIDGE IS TERMINATING WITH SIGNAL %s', str(_signal))
         hblink_handler(_signal, _frame)
         logger.info('(GLOBAL) SHUTDOWN: ALL SYSTEM HANDLERS EXECUTED - STOPPING REACTOR')
         reactor.stop()
         if CONFIG['ALIASES']['SUB_MAP_FILE']:
             subMapWrite()
-            
-        print("<<<<<<<<<<garbage",gc.garbage)
 
     # Set signal handers so that we can gracefully exit if need be
     for sig in [signal.SIGINT, signal.SIGTERM]:
