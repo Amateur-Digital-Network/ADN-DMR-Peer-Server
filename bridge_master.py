@@ -2908,7 +2908,7 @@ if __name__ == '__main__':
         if CONFIG['ALIASES']['SUB_MAP_FILE']:
             subMapWrite()
             
-        print(gc.garbage)
+        print("<<<<<<<<<<garbage",gc.garbage)
 
     # Set signal handers so that we can gracefully exit if need be
     for sig in [signal.SIGINT, signal.SIGTERM]:
