@@ -392,6 +392,9 @@ def statTrimmer():
         logger.debug('(ROUTER) STAT bridge %s removed',_bridgerem)
     if CONFIG['REPORTS']['REPORT']:
         report_server.send_clients(b'bridge updated')
+        
+    #Run garbage collector manually
+    gc.collect()
 
 def kaReporting():
     logger.debug('(ROUTER) KeepAlive reporting loop started')
