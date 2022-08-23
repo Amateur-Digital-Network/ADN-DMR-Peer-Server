@@ -933,7 +933,7 @@ def options_config():
                         if _options['TS1_STATIC']:
                             ts1 = _options['TS1_STATIC'].split(',')
                             for tg in ts1:
-                                if not tg or int(tg) == 0 or int(tg) >= 16777215 or tg == _options['_DEFAULT_REFLECTOR']:
+                                if not tg or int(tg) == 0 or int(tg) >= 16777215 or tg == _options['DEFAULT_REFLECTOR']:
                                     logger.debug('(OPTIONS) %s not setting TS1 Static %s. Bad TG or conflict with DIAL',_system,tg)
                                     continue
                                 tg = int(tg)
@@ -946,7 +946,7 @@ def options_config():
                         if CONFIG['SYSTEMS'][_system]['TS2_STATIC']:
                             ts2 = CONFIG['SYSTEMS'][_system]['TS2_STATIC'].split(',')
                             for tg in ts2:
-                                if not tg or int(tg) == 0 or int(tg) >= 16777215 or tg == _options['_DEFAULT_REFLECTOR']:
+                                if not tg or int(tg) == 0 or int(tg) >= 16777215 or tg == _options['DEFAULT_REFLECTOR']:
                                     logger.debug('(OPTIONS) %s not setting TS2 Static %s. Bad TG or conflict DIAL',_system,tg)
                                     continue
                                 tg = int(tg)
