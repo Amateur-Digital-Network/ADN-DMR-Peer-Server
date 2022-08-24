@@ -39,7 +39,6 @@ import importlib.util
 import re
 import copy
 from setproctitle import setproctitle
-from collections import deque
 
 #from crccheck.crc import Crc32
 from hashlib import blake2b
@@ -233,7 +232,7 @@ def make_default_reflector(reflector,_tmout,system):
     if bridge not in BRIDGES:
         BRIDGES[bridge] = []
         make_single_reflector(bytes_3(reflector),_tmout, system)
-    bridgetemp = deque()
+    bridgetemp = set()
     for bridgesystem in BRIDGES[bridge]:
         if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:
             bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': True,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'OFF','OFF': [],'ON': [bytes_3(reflector),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
@@ -246,7 +245,7 @@ def make_static_tg(tg,ts,_tmout,system):
     #_tmout = CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER']
     if str(tg) not in BRIDGES:
         make_single_bridge(bytes_3(tg),system,ts,_tmout)
-    bridgetemp = deque()
+    bridgetemp = set()
     for bridgesystem in BRIDGES[str(tg)]:
         if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == ts:
             bridgetemp.append({'SYSTEM': system, 'TS': ts, 'TGID': bytes_3(tg),'ACTIVE': True,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'OFF','OFF': [],'ON': [bytes_3(tg),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
@@ -257,7 +256,7 @@ def make_static_tg(tg,ts,_tmout,system):
     
 def reset_static_tg(tg,ts,_tmout,system):
     #_tmout = CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER']
-    bridgetemp = deque()
+    bridgetemp = set()
     try:
         for bridgesystem in BRIDGES[str(tg)]:
             if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == ts:
@@ -276,7 +275,7 @@ def reset_default_reflector(reflector,_tmout,system):
     if bridge not in BRIDGES:
         BRIDGES[bridge] = []
         make_single_reflector(bytes_3(reflector),_tmout, system)
-    bridgetemp = deque()
+    bridgetemp = set()
     for bridgesystem in BRIDGES[bridge]:
         if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:
             bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(reflector),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
@@ -318,7 +317,7 @@ def remove_bridge_system(system):
 def rule_timer_loop():
     logger.debug('(ROUTER) routerHBP Rule timer loop started')
     _now = time()
-    _remove_bridges = deque()
+    _remove_bridges = set()
     for _bridge in BRIDGES:
         _bridge_used = False
         for _system in BRIDGES[_bridge]:
@@ -368,7 +367,7 @@ def rule_timer_loop():
 
 def statTrimmer():
     logger.debug('(ROUTER) STAT trimmer loop started')
-    _remove_bridges = deque()
+    _remove_bridges = set()
     for _bridge in BRIDGES:
         _bridge_stat = False
         _in_use = False
@@ -412,7 +411,7 @@ def subMapWrite():
 def SubMapTrimmer():
     logger.debug('(SUBSCRIBER) Subscriber Map trimmer loop started')
     _sub_time = time()
-    _remove_list = deque()
+    _remove_list = set()
     for _subscriber in SUB_MAP:
         if SUB_MAP[_subscriber][2] < (_sub_time - 86400):
             _remove_list.append(_subscriber)
@@ -461,8 +460,8 @@ def stream_trimmer_loop():
         # OBP systems
         # We can't delete items from a dicationry that's being iterated, so we have to make a temporarly list of entrys to remove later
         if CONFIG['SYSTEMS'][system]['MODE'] == 'OPENBRIDGE':
-            remove_list = deque()
-            fin_list = deque()
+            remove_list = set()
+            fin_list = set()
             for stream_id in systems[system].STATUS:
                 
                 #if stream already marked as finished, just remove it
@@ -524,7 +523,7 @@ def stream_trimmer_loop():
                     removed = systems[system].STATUS.pop(stream_id)
                 
                     try:
-                        _bcsq_remove = deque()
+                        _bcsq_remove = set()
                         for tgid in _sysconfig['_bcsq']:
                             if _sysconfig['_bcsq'][tgid] == stream_id:
                                 _bcsq_remove.append(tgid)
@@ -1852,7 +1851,7 @@ class routerOBP(OPENBRIDGE):
                     logger.debug('(%s) Bridge for STAT TG %s does not exist. Creating',self._system, int_id(_dst_id))
                     make_stat_bridge(_dst_id)
             
-            _sysIgnore = deque()
+            _sysIgnore = set()
             for _bridge in BRIDGES:
                     for _system in BRIDGES[_bridge]:
                         
@@ -2658,7 +2657,7 @@ class routerHBP(HBSYSTEM):
             #Save this packet
             self.STATUS[_slot]['lastData'] = _data
                           
-            _sysIgnore = deque()
+            _sysIgnore = set()
             for _bridge in BRIDGES:
                 #if _bridge[0:1] != '#':
                 if True:
@@ -2967,7 +2966,7 @@ if __name__ == '__main__':
     
     #Generator
     generator = {}
-    systemdelete = deque()
+    systemdelete = set()
     for system in CONFIG['SYSTEMS']:
         if CONFIG['SYSTEMS'][system]['ENABLED']:
             if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER' and (CONFIG['SYSTEMS'][system]['GENERATOR'] > 1):
