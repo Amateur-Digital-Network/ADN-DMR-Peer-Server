@@ -256,7 +256,7 @@ class OPENBRIDGE(DatagramProtocol):
             
     def send_bcve(self):
         if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
-            _packet = BCVE + VER.to_bytes(1,'big')
+            _packet = b''.join([BCVE,VER.to_bytes(1,'big')])
             _packet = b''.join([_packet, (hmac_new(self._config['PASSPHRASE'],_packet[4:5],sha1).digest())])
             self.transport.write(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
             logger.trace('(%s) *BridgeControl* sent BCVE. Ver: %s',self._system,VER)
@@ -872,11 +872,11 @@ class HBSYSTEM(DatagramProtocol):
 
     def master_dereg(self):
         for _peer in self._peers:
-            self.send_peer(_peer, MSTCL + _peer)
+            self.send_peer(_peer, b''.join([MSTCL,_peer]))
             logger.info('(%s) De-Registration sent to Peer: %s (%s)', self._system, self._peers[_peer]['CALLSIGN'], self._peers[_peer]['RADIO_ID'])
 
     def peer_dereg(self):
-        self.send_master(RPTCL + self._config['RADIO_ID'])
+        self.send_master(b''.join([RPTCL,self._config['RADIO_ID']]))
         logger.info('(%s) De-Registration sent to Master: %s:%s', self._system, self._config['MASTER_SOCKADDR'][0], self._config['MASTER_SOCKADDR'][1])
         
     def proxy_IPBlackList(self,peer_id,sockaddr):
@@ -1376,9 +1376,9 @@ class reportFactory(Factory):
 def try_download(_path, _file, _url, _stale,):
     no_verify = ssl._create_unverified_context()
     now = time()
-    file_exists = isfile(_path+_file) == True
+    file_exists = isfile(''.join([_path,_file])) == True
     if file_exists:
-        file_old = (getmtime(_path+_file) + _stale) < now
+        file_old = (getmtime(''.join([_path,_file])) + _stale) < now
     if not file_exists or (file_exists and file_old):
         try:
             with urlopen(_url, context=no_verify) as response:
@@ -1391,7 +1391,7 @@ def try_download(_path, _file, _url, _stale,):
         else:
             if data and (data != b'{}'):
                 try:
-                    with open(_path+_file, 'wb') as outfile:
+                    with open(''.join([_path,_file]), 'wb') as outfile:
                         outfile.write(data)
                         outfile.close()
                 except IOError:
@@ -1408,7 +1408,7 @@ def try_download(_path, _file, _url, _stale,):
 def mk_server_dict(path,filename):
     server_ids = {}
     try:
-        with open(path+filename,newline='') as csvfile:
+        with open(''.join([path,filename]),newline='') as csvfile:
             reader = csv.DictReader(csvfile,dialect='excel-tab')
             for _row in reader:
                 server_ids[_row['OPB Net ID']] = _row['Country']

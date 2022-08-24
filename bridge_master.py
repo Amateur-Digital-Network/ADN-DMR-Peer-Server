@@ -234,7 +234,7 @@ def make_stat_bridge(_tgid):
         
 
 def make_default_reflector(reflector,_tmout,system):
-    bridge = '#'+str(reflector)
+    bridge = ''.join(['#',str(reflector)])
     #_tmout = CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER']
     if bridge not in BRIDGES:
         BRIDGES[bridge] = []
@@ -277,7 +277,7 @@ def reset_static_tg(tg,ts,_tmout,system):
         return
         
 def reset_default_reflector(reflector,_tmout,system):
-    bridge = '#'+str(reflector)
+    bridge = ''.join(['#',str(reflector)])
     #_tmout = CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER']
     if bridge not in BRIDGES:
         BRIDGES[bridge] = []
@@ -292,7 +292,7 @@ def reset_default_reflector(reflector,_tmout,system):
             
 def make_single_reflector(_tgid,_tmout,_sourcesystem):
     _tgid_s = str(int_id(_tgid))
-    _bridge = '#' + _tgid_s
+    _bridge = ''.join(['#',_tgid_s])
     #1 min timeout for echo
     if _tgid_s == '9990':
         _tmout = 1
@@ -627,7 +627,7 @@ def playFileOnRequest(self,fileNumber):
     sleep(1)
     _say = []
     try:
-        _say.append(AMBEobj.readSingleFile('/'+_lang+'/ondemand/'+str(fileNumber)+'.ambe'))
+        _say.append(AMBEobj.readSingleFile(''.join(['/',_lang,'/ondemand/',str(fileNumber),'.ambe'])))
     except IOError:
         logger.warning('(%s) cannot read file for number %s',system,fileNumber)
         return
@@ -791,39 +791,39 @@ def options_config():
                     if 'TS1_1' in _options:
                         _options['TS1_STATIC'] = _options.pop('TS1_1')
                         if 'TS1_2' in _options:
-                            _options['TS1_STATIC'] = _options['TS1_STATIC'] + ',' + _options.pop('TS1_2')
+                            _options['TS1_STATIC'] = ''.join([_options['TS1_STATIC'],',',_options.pop('TS1_2')])
                         if 'TS1_3' in _options:
-                            _options['TS1_STATIC'] = _options['TS1_STATIC'] + ',' + _options.pop('TS1_3')
+                            _options['TS1_STATIC'] = ''.join([_options['TS1_STATIC'],',',_options.pop('TS1_3')])
                         if 'TS1_4' in _options:
-                            _options['TS1_STATIC'] = _options['TS1_STATIC'] + ',' + _options.pop('TS1_4')
+                            _options['TS1_STATIC'] = ''.join([_options['TS1_STATIC'],',',_options.pop('TS1_4')])
                         if 'TS1_5' in _options:
-                            _options['TS1_STATIC'] = _options['TS1_STATIC'] + ',' + _options.pop('TS1_5')
+                            _options['TS1_STATIC'] = ''.join([_options['TS1_STATIC'],',',_options.pop('TS1_5')])
                         if 'TS1_6' in _options:
-                            _options['TS1_STATIC'] = _options['TS1_STATIC'] + ',' + _options.pop('TS1_6')
+                            _options['TS1_STATIC'] = ''.join([_options['TS1_STATIC'],',',_options.pop('TS1_6')])
                         if 'TS1_7' in _options:
-                            _options['TS1_STATIC'] = _options['TS1_STATIC'] + ',' + _options.pop('TS1_7')
+                            _options['TS1_STATIC'] = ''.join([_options['TS1_STATIC'],',',_options.pop('TS1_7')])
                         if 'TS1_8' in _options:
-                            _options['TS1_STATIC'] = _options['TS1_STATIC'] + ',' + _options.pop('TS1_8')
+                            _options['TS1_STATIC'] = ''.join([_options['TS1_STATIC'],',',_options.pop('TS1_8')])
                         if 'TS1_9' in _options:
-                            _options['TS1_STATIC'] = _options['TS1_STATIC'] + ',' + _options.pop('TS1_9')
+                            _options['TS1_STATIC'] = ''.join([_options['TS1_STATIC'],',',_options.pop('TS1_9')])
                     if 'TS2_1' in _options:
                         _options['TS2_STATIC'] = _options.pop('TS2_1')
                         if 'TS2_2' in _options:
-                            _options['TS2_STATIC'] = _options['TS2_STATIC'] + ',' + _options.pop('TS2_2')
+                            _options['TS2_STATIC'] = ''.join([_options['TS2_STATIC'],','. _options.pop('TS2_2')])
                         if 'TS2_3' in _options:
-                            _options['TS2_STATIC'] = _options['TS2_STATIC'] + ',' + _options.pop('TS2_3')
+                            _options['TS2_STATIC'] = ''.join([_options['TS2_STATIC'],',',_options.pop('TS2_3')])
                         if 'TS2_4' in _options:
-                            _options['TS2_STATIC'] = _options['TS2_STATIC'] + ',' + _options.pop('TS2_4')
+                            _options['TS2_STATIC'] = ''.join([_options['TS2_STATIC'],',',_options.pop('TS2_4')])
                         if 'TS2_5' in _options:
-                            _options['TS2_STATIC'] = _options['TS2_STATIC'] + ',' + _options.pop('TS2_5')
+                            _options['TS2_STATIC'] = ''.join([_options['TS2_STATIC'],',',_options.pop('TS2_5')])
                         if 'TS2_6' in _options:
-                            _options['TS2_STATIC'] = _options['TS2_STATIC'] + ',' + _options.pop('TS2_6')
+                            _options['TS2_STATIC'] = ''.join([_options['TS2_STATIC'],',',_options.pop('TS2_6')])
                         if 'TS2_7' in _options:
-                            _options['TS2_STATIC'] = _options['TS2_STATIC'] + ',' + _options.pop('TS2_7')
+                            _options['TS2_STATIC'] = ''.join([_options['TS2_STATIC'],',',_options.pop('TS2_7')])
                         if 'TS2_8' in _options:
-                            _options['TS2_STATIC'] = _options['TS2_STATIC'] + ',' + _options.pop('TS2_8')
+                            _options['TS2_STATIC'] = ''.join([_options['TS2_STATIC'],',',_options.pop('TS2_8')])
                         if 'TS2_9' in _options:
-                            _options['TS2_STATIC'] = _options['TS2_STATIC'] + ',' + _options.pop('TS2_9')
+                            _options['TS2_STATIC'] = ''.join([_options['TS2_STATIC'],',',_options.pop('TS2_9')])
 
                     if 'UserLink' in _options:
                         _options.pop('UserLink')
@@ -940,7 +940,8 @@ def options_config():
                         if _options['TS1_STATIC']:
                             ts1 = _options['TS1_STATIC'].split(',')
                             for tg in ts1:
-                                if not tg:
+                                if not tg or int(tg) == 0 or int(tg) >= 16777215 or tg == _options['DEFAULT_REFLECTOR']:
+                                    logger.debug('(OPTIONS) %s not setting TS1 Static %s. Bad TG or conflict with DIAL',_system,tg)
                                     continue
                                 tg = int(tg)
                                 make_static_tg(tg,1,_tmout,_system)
@@ -952,7 +953,8 @@ def options_config():
                         if CONFIG['SYSTEMS'][_system]['TS2_STATIC']:
                             ts2 = CONFIG['SYSTEMS'][_system]['TS2_STATIC'].split(',')
                             for tg in ts2:
-                                if not tg or int(tg) == 0 or int(tg) >= 16777215:
+                                if not tg or int(tg) == 0 or int(tg) >= 16777215 or tg == _options['DEFAULT_REFLECTOR'] or (tg and ts1 and tg in ts1):
+                                    logger.debug('(OPTIONS) %s not setting TS2 Static %s. Bad TG or conflict with DIAL or TS1',_system,tg)
                                     continue
                                 tg = int(tg)
                                 reset_static_tg(tg,2,_tmout,_system)
@@ -1735,7 +1737,7 @@ class routerOBP(OPENBRIDGE):
                 # If we don't have a voice header then don't wait to decode the Embedded LC
                 # just make a new one from the HBP header. This is good enough, and it saves lots of time
                 else:
-                    self.STATUS[_stream_id]['LC'] = LC_OPT + _dst_id + _rf_src
+                    self.STATUS[_stream_id]['LC'] = b''.join([LC_OPT,_dst_id,_rf_src])
 
                 _inthops = 0 
                 if _hops:
@@ -2075,7 +2077,7 @@ class routerHBP(HBSYSTEM):
                                 _target_status[_target['TS']]['TX_RFS'] = _rf_src
                                 _target_status[_target['TS']]['TX_PEER'] = _peer_id
                                 # Generate LCs (full and EMB) for the TX stream
-                                dst_lc = self.STATUS[_slot]['RX_LC'][0:3] + _target['TGID'] + _rf_src
+                                dst_lc = b''.join([self.STATUS[_slot]['RX_LC'][0:3],_target['TGID'],_rf_src])
                                 _target_status[_target['TS']]['TX_H_LC'] = bptc.encode_header_lc(dst_lc)
                                 _target_status[_target['TS']]['TX_T_LC'] = bptc.encode_terminator_lc(dst_lc)
                                 _target_status[_target['TS']]['TX_EMB_LC'] = bptc.encode_emblc(dst_lc)
@@ -2378,7 +2380,7 @@ class routerHBP(HBSYSTEM):
                 
                 logger.info('(%s) Reflector: Private call from %s to %s',self._system, int_id(_rf_src), _int_dst_id)
                 if _int_dst_id >= 5 and _int_dst_id != 8  and _int_dst_id != 9 and _int_dst_id <= 999999:
-                    _bridgename = '#'+ str(_int_dst_id)
+                    _bridgename = ''.join(['#',str(_int_dst_id)])
                     if _bridgename not in BRIDGES and not (_int_dst_id >= 4000 and _int_dst_id <= 5000) and not (_int_dst_id >=9991 and _int_dst_id <= 9999):
                             logger.info('(%s) [A] Reflector for TG %s does not exist. Creating as User Activated. Timeout: %s',self._system, _int_dst_id,CONFIG['SYSTEMS'][self._system]['DEFAULT_UA_TIMER'])
                             make_single_reflector(_dst_id,CONFIG['SYSTEMS'][self._system]['DEFAULT_UA_TIMER'],self._system)
@@ -2574,7 +2576,7 @@ class routerHBP(HBSYSTEM):
                 # If we don't have a voice header then don't wait to decode it from the Embedded LC
                 # just make a new one from the HBP header. This is good enough, and it saves lots of time
                 else:
-                    self.STATUS[_slot]['RX_LC'] = LC_OPT + _dst_id + _rf_src
+                    self.STATUS[_slot]['RX_LC'] = b''.join([LC_OPT,_dst_id,_rf_src])
 
             #Create default bridge for unknown TG
                 if int_id(_dst_id) >= 5 and int_id(_dst_id) != 9 and int_id(_dst_id) != 4000 and int_id(_dst_id) != 5000  and (str(int_id(_dst_id)) not in BRIDGES):
@@ -2677,7 +2679,7 @@ class routerHBP(HBSYSTEM):
                             if _bridge[0:1] == '#':
                                 _bridge = _bridge[1:]
                             else:
-                                _bridge = '#'+_bridge
+                                _bridge = ''.join(['#',_bridge])
                             if _bridge in BRIDGES:
                                 _sysIgnore = self.to_target(_peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data, pkt_time, dmrpkt, _bits,_bridge,_system,False,_sysIgnore,_source_server,_ber,_rssi,_source_rptr)
 
@@ -2799,12 +2801,12 @@ class bridgeReportFactory(reportFactory):
 
     def send_bridge(self):
         serialized = pickle.dumps(BRIDGES, protocol=2) #.decode("utf-8", errors='ignore')
-        self.send_clients(REPORT_OPCODES['BRIDGE_SND']+serialized)
+        self.send_clients(b''.join([REPORT_OPCODES['BRIDGE_SND'],serialized]))
 
     def send_bridgeEvent(self, _data):
         if isinstance(_data, str):
             _data = _data.decode('utf-8', error='ignore')
-        self.send_clients(REPORT_OPCODES['BRDG_EVENT']+_data)
+        self.send_clients(b''.join([REPORT_OPCODES['BRDG_EVENT'],_data]))
 
 
 #************************************************
@@ -2979,7 +2981,7 @@ if __name__ == '__main__':
         if CONFIG['SYSTEMS'][system]['ENABLED']:
             if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER' and (CONFIG['SYSTEMS'][system]['GENERATOR'] > 1):
                 for count in range(CONFIG['SYSTEMS'][system]['GENERATOR']):
-                    _systemname = system+'-'+str(count)
+                    _systemname = ''.join([system,'-',str(count)])
                     generator[_systemname] = copy.deepcopy(CONFIG['SYSTEMS'][system])
                     generator[_systemname]['PORT'] = generator[_systemname]['PORT'] + count
                     generator[_systemname]['_default_options'] = "TS1_STATIC={};TS2_STATIC={};SINGLE={};DEFAULT_UA_TIMER={};DEFAULT_REFLECTOR={};VOICE={};LANG={}".format(generator[_systemname]['TS1_STATIC'],generator[_systemname]['TS2_STATIC'],int(generator[_systemname]['SINGLE_MODE']),generator[_systemname]['DEFAULT_UA_TIMER'],generator[_systemname]['DEFAULT_REFLECTOR'],int(generator[_systemname]['VOICE_IDENT']), generator[_systemname]['ANNOUNCEMENT_LANGUAGE'])
