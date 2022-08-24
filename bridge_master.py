@@ -83,13 +83,6 @@ from binascii import b2a_hex as ahex
 
 from AMI import AMI
 
-#debugging and profiling
-#import gc
-
-#gc.set_debug(gc.DEBUG_LEAK | gc.DEBUG_STATS)
-
-##from hmac import new as hmac_new, compare_digest
-##from hashlib import sha256, hash
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Cortney T. Buffington, N0MJS, Forked by Simon Adlem - G7RZU'
@@ -393,9 +386,6 @@ def statTrimmer():
         logger.debug('(ROUTER) STAT bridge %s removed',_bridgerem)
     if CONFIG['REPORTS']['REPORT']:
         report_server.send_clients(b'bridge updated')
-        
-    #Run garbage collector manually
-    #gc.collect()
 
 def kaReporting():
     logger.debug('(ROUTER) KeepAlive reporting loop started')
