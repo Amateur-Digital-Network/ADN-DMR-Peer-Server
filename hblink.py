@@ -91,7 +91,7 @@ def config_reports(_config, _factory):
     logger.info('(GLOBAL) HBlink TCP reporting server configured')
 
     report_server = _factory(_config)
-    report_server.clients = set()
+    report_server.clients = deque()
     reactor.listenTCP(_config['REPORTS']['REPORT_PORT'], report_server)
 
     reporting = task.LoopingCall(reporting_loop, logger, report_server)
@@ -762,7 +762,7 @@ class HBSYSTEM(DatagramProtocol):
     # Aliased in __init__ to maintenance_loop if system is a master
     def master_maintenance_loop(self):
         logger.debug('(%s) Master maintenance loop started', self._system)
-        remove_list = set()
+        remove_list = deque()
         for peer in self._peers:
             _this_peer = self._peers[peer]
             # Check to see if any of the peers have been quiet (no ping) longer than allowed
