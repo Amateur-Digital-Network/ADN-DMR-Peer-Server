@@ -93,7 +93,7 @@ class useMYSQL:
                 CONFIG['SYSTEMS'][callsign].update({'PEERS': {}})
             except TypeError:
                 logger.info('(MYSQL) Problem with data from MySQL - TypeError, carrying on to next row')
-                    
+        _cursor.close()            
         return(CONFIG['SYSTEMS'])
             
 
