@@ -128,7 +128,6 @@ def build_config(_config_file):
     CONFIG['LOGGER'] = {}
     CONFIG['ALIASES'] = {}
     CONFIG['SYSTEMS'] = {}
-    CONFIG['MYSQL'] = {}
     CONFIG['ALLSTAR'] = {}
 
     try:
@@ -190,16 +189,6 @@ def build_config(_config_file):
                     
                 })
                 
-            elif section == 'MYSQL':
-                CONFIG['MYSQL'].update({
-                    'USE_MYSQL': config.getboolean(section, 'USE_MYSQL'),
-                    'USER': config.get(section, 'USER'),
-                    'PASS': config.get(section, 'PASS'),
-                    'DB': config.get(section, 'DB'),
-                    'SERVER': config.get(section, 'SERVER'),
-                    'PORT': config.getint(section,'PORT'),
-                    'TABLE': config.get(section, 'TABLE')
-            })
                 
             elif section == 'ALLSTAR':
                 CONFIG['ALLSTAR'].update({
