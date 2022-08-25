@@ -915,11 +915,11 @@ def options_config():
                         else:
                             logger.debug('(OPTIONS) %s default reflector disabled, updating',_system) 
                             reset_default_reflector(int(_options['DEFAULT_REFLECTOR']),_tmout,_system)
-                            
+                    
+                    ts1 = []
                     if _options['TS1_STATIC'] != CONFIG['SYSTEMS'][_system]['TS1_STATIC']:
                         _tmout = int(_options['DEFAULT_UA_TIMER'])
                         logger.debug('(OPTIONS) %s TS1 static TGs changed, updating',_system)
-                        ts1 = []
                         if CONFIG['SYSTEMS'][_system]['TS1_STATIC']:
                             ts1 = CONFIG['SYSTEMS'][_system]['TS1_STATIC'].split(',')
                             for tg in ts1:
@@ -927,7 +927,6 @@ def options_config():
                                     continue
                                 tg = int(tg)
                                 reset_static_tg(tg,1,_tmout,_system)   
-                        ts1 = []
                         if _options['TS1_STATIC']:
                             ts1 = _options['TS1_STATIC'].split(',')
                             for tg in ts1:
@@ -936,11 +935,10 @@ def options_config():
                                     continue
                                 tg = int(tg)
                                 make_static_tg(tg,1,_tmout,_system)
-                                
+                    ts2 = []
                     if _options['TS2_STATIC'] != CONFIG['SYSTEMS'][_system]['TS2_STATIC']:
                         _tmout = int(_options['DEFAULT_UA_TIMER'])
                         logger.debug('(OPTIONS) %s TS2 static TGs changed, updating',_system)
-                        ts2 = []
                         if CONFIG['SYSTEMS'][_system]['TS2_STATIC']:
                             ts2 = CONFIG['SYSTEMS'][_system]['TS2_STATIC'].split(',')
                             for tg in ts2:
