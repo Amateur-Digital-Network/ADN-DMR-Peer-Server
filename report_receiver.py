@@ -69,10 +69,16 @@ class reportClient(NetstringReceiver):
         
     def bridgeSend(self,data):
         self.BRIDGES = pickle.loads(data)
-        if cli_args.WATCH and cli_args.WATCH in self.BRIDGES:
-            pprint(self.BRIDGES[cli_args.WATCH], compact=True)
+        if cli_args.STATS:
+            print('There are currently {} active bridges in the bridge table:\n\n'.format(len(self.BRIDGES)))
+            for _bridge in self.BRIDGES:
+                print('{},'.format({_bridge}))
+            
         else:
-            pprint(self.BRIDGES, compact=True, indent=4)
+            if cli_args.WATCH and cli_args.WATCH in self.BRIDGES:
+                pprint(self.BRIDGES[cli_args.WATCH], compact=True)
+            else:
+                pprint(self.BRIDGES, compact=True, indent=4)
         
     def configSend(self,data):
         self.CONFIG = pickle.loads(data)
@@ -128,7 +134,7 @@ if __name__ == '__main__':
     parser.add_argument('-w', '--watch', action='store', dest='WATCH', help='watch bridge <name>')
     parser.add_argument('-o', '--host', action='store', dest='HOST', help='host to connect to <ip address>')
     parser.add_argument('-p', '--port', action='store', dest='PORT', help='port to connect to <port>')
-    
+    parser.add_argument('-s', '--stats', action='store', dest='STATS', help='print stats only') 
     
     cli_args = parser.parse_args()
 

@@ -202,8 +202,6 @@ def build_config(_config_file):
                 
             elif section == 'PROXY':
                 pass
-            
-                
 
             elif config.getboolean(section, 'ENABLED'):
                 if config.get(section, 'MODE') == 'PEER':
