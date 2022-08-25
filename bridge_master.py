@@ -120,6 +120,9 @@ def config_reports(_config, _factory):
                     i = i +1
             logger.info('(REPORT) %s systems have at least one peer',i)
             logger.info('(REPORT) Subscriber Map has %s entries',len(SUB_MAP))
+            logger.info('(DEBUG REPORT) CONFIG has size %s',sys.getsizeof(CONFIG))
+            logger.info('(DEBUG REPORT) BRIDGES has size %s',sys.getsizeof(BRIDGES))
+            
             
         logger.info('(REPORT) HBlink TCP reporting server configured')
 
