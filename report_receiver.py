@@ -72,7 +72,7 @@ class reportClient(NetstringReceiver):
         if cli_args.STATS:
             print('There are currently {} active bridges in the bridge table:\n'.format(len(self.BRIDGES)))
             for _bridge in self.BRIDGES.keys():
-                print('{},'.format({_bridge}))
+                print('{},'.format({str(_bridge)}))
             
         else:
             if cli_args.WATCH and cli_args.WATCH in self.BRIDGES:
