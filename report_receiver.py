@@ -71,7 +71,7 @@ class reportClient(NetstringReceiver):
         self.BRIDGES = pickle.loads(data)
         if cli_args.STATS:
             print('There are currently {} active bridges in the bridge table:\n'.format(len(self.BRIDGES)))
-            for _bridge in keys(self.BRIDGES):
+            for _bridge in self.BRIDGES.keys():
                 print('{},'.format({_bridge}))
             
         else:
