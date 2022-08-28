@@ -62,6 +62,8 @@ import ssl
 from os.path import isfile, getmtime
 from urllib.request import urlopen
 
+import csv
+
 
 logging.TRACE = 5
 logging.addLevelName(logging.TRACE, 'TRACE')
@@ -70,7 +72,7 @@ logging.trace = partial(logging.log, logging.TRACE)
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Cortney T. Buffington, N0MJS, Forked by Simon Adlem - G7RZU'
-__copyright__  = 'Copyright (c) 2016-2019 Cortney T. Buffington, N0MJS and the K0USY Group, Simon Adlem, G7RZU 2020,2021'
+__copyright__  = 'Copyright (c) 2016-2019 Cortney T. Buffington, N0MJS and the K0USY Group, Simon Adlem, G7RZU 2020,2021,2022'
 __credits__    = 'Colin Durbridge, G4EML, Steve Zingman, N4IRS; Mike Zingman, N4IRR; Jonathan Naylor, G4KLX; Hans Barthen, DL5DI; Torsten Shultze, DG1HT; Jon Lee, G4TSN; Norman Williams, M6NBP'
 __license__    = 'GNU GPLv3'
 __maintainer__ = 'Simon Adlem G7RZU'
@@ -89,7 +91,7 @@ def config_reports(_config, _factory):
     logger.info('(GLOBAL) HBlink TCP reporting server configured')
 
     report_server = _factory(_config)
-    report_server.clients = []
+    report_server.clients = deque()
     reactor.listenTCP(_config['REPORTS']['REPORT_PORT'], report_server)
 
     reporting = task.LoopingCall(reporting_loop, logger, report_server)
@@ -254,14 +256,12 @@ class OPENBRIDGE(DatagramProtocol):
             
     def send_bcve(self):
         if self._config['ENHANCED_OBP'] and self._config['TARGET_IP']:
-            _packet = BCVE + VER.to_bytes(1,'big')
+            _packet = b''.join([BCVE,VER.to_bytes(1,'big')])
             _packet = b''.join([_packet, (hmac_new(self._config['PASSPHRASE'],_packet[4:5],sha1).digest())])
             self.transport.write(_packet, (self._config['TARGET_IP'], self._config['TARGET_PORT']))
             logger.trace('(%s) *BridgeControl* sent BCVE. Ver: %s',self._system,VER)
         else:
             logger.trace('(%s) *BridgeControl* not sending BCVE, TARGET_IP currently not known',self._system) 
-            
-    
 
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data,_hash,_hops = b'', _source_server = b'\x00\x00\x00\x00', _ber = b'\x00', _rssi = b'\x00', _source_rptr = b'\x00\x00\x00\x00'):
         pass
@@ -445,13 +445,22 @@ class OPENBRIDGE(DatagramProtocol):
                         
                     #Discard old packets
                     if (int.from_bytes(_timestamp,'big')/1000000000) < (time() - 5):
-                        logger.warning('(%s) Packet more than 5s old!, discarding', self._system)
+                        if _stream_id not in self._laststrid:
+                            logger.warning('(%s) Packet from server %s more than 5s old!, discarding',  self._system,int.from_bytes(_source_server,'big'))
+                            self.send_bcsq(_dst_id,_stream_id)
+                            self._laststrid.append(_stream_id)
                         return
                     
                     #Discard bad source server 
-                    if ((len(str(int.from_bytes(_source_server,'big'))) < 4) or (len(str(int.from_bytes(_source_server,'big'))) > 7)) and int.from_bytes(_source_server,'big') > 0:
+                    if ((len(str(int.from_bytes(_source_server,'big'))) < 4) or (len(str(int.from_bytes(_source_server,'big'))) > 7)):
                         if _stream_id not in self._laststrid:
                             logger.warning('(%s) Source Server should be  between 4 and 7 digits, discarding Src: %s', self._system, int.from_bytes(_source_server,'big'))
+                            self.send_bcsq(_dst_id,_stream_id)
+                            self._laststrid.append(_stream_id)
+                        return
+                    elif self._CONFIG['GLOBAL']['VALIDATE_SERVER_IDS'] and (len(str(int.from_bytes(_source_server,'big'))) == 4 or (len(str(int.from_bytes(_source_server,'big'))) == 5))  and ((str(int.from_bytes(_source_server,'big'))[:4]) not in self._CONFIG['_SERVER_IDS'] ):
+                        if _stream_id not in self._laststrid:
+                            logger.warning('(%s) Source Server ID is 4 or 5 digits but not in list: %s', self._system, int.from_bytes(_source_server,'big'))
                             self.send_bcsq(_dst_id,_stream_id)
                             self._laststrid.append(_stream_id)
                         return
@@ -466,7 +475,7 @@ class OPENBRIDGE(DatagramProtocol):
                     _inthops = _hops +1 
                     
                     if _inthops > 10:
-                        logger.warning('(%s) MAX HOPS exceed, dropping. Hops: %s, DST: %s', self._system, _inthops, _int_dst_id)
+                        logger.warning('(%s) MAX HOPS exceed, dropping. Hops: %s, DST: %s, SRC: %s', self._system, _inthops, _int_dst_id, int.from_bytes(_source_server,'big'))
                         self.send_bcsq(_dst_id,_stream_id)
                         return
                     
@@ -753,7 +762,7 @@ class HBSYSTEM(DatagramProtocol):
     # Aliased in __init__ to maintenance_loop if system is a master
     def master_maintenance_loop(self):
         logger.debug('(%s) Master maintenance loop started', self._system)
-        remove_list = []
+        remove_list = deque()
         for peer in self._peers:
             _this_peer = self._peers[peer]
             # Check to see if any of the peers have been quiet (no ping) longer than allowed
@@ -761,6 +770,8 @@ class HBSYSTEM(DatagramProtocol):
                 remove_list.append(peer)
         for peer in remove_list:
             logger.info('(%s) Peer %s (%s) has timed out and is being removed', self._system, self._peers[peer]['CALLSIGN'], self._peers[peer]['RADIO_ID'])
+            #First, MSTCL the peer
+            self.transport.write(b''.join([MSTCL, peer]),self._CONFIG['SYSTEMS'][self._system]['PEERS'][peer]['SOCKADDR'])
             # Remove any timed out peers from the configuration
             del self._CONFIG['SYSTEMS'][self._system]['PEERS'][peer]
         if 'PEERS' not in self._CONFIG['SYSTEMS'][self._system] and 'OPTIONS' in self._CONFIG['SYSTEMS'][self._system]:
@@ -768,8 +779,10 @@ class HBSYSTEM(DatagramProtocol):
             if '_default_options' in self._CONFIG['SYSTEMS'][self._system]:
                 logger.info('(%s) Setting default Options: %s',self._system, self._CONFIG['SYSTEMS'][self._system]['_default_options'])
                 self._CONFIG['SYSTEMS'][self._system]['OPTIONS'] = self._CONFIG['SYSTEMS'][self._system]['_default_options']
+                self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
             else:
                 del self._CONFIG['SYSTEMS'][self._system]['OPTIONS']
+                w
                 logger.info('(%s) Deleting HBP Options',self._system)
 
     # Aliased in __init__ to maintenance_loop if system is a peer
@@ -859,11 +872,11 @@ class HBSYSTEM(DatagramProtocol):
 
     def master_dereg(self):
         for _peer in self._peers:
-            self.send_peer(_peer, MSTCL + _peer)
+            self.send_peer(_peer, b''.join([MSTCL,_peer]))
             logger.info('(%s) De-Registration sent to Peer: %s (%s)', self._system, self._peers[_peer]['CALLSIGN'], self._peers[_peer]['RADIO_ID'])
 
     def peer_dereg(self):
-        self.send_master(RPTCL + self._config['RADIO_ID'])
+        self.send_master(b''.join([RPTCL,self._config['RADIO_ID']]))
         logger.info('(%s) De-Registration sent to Master: %s:%s', self._system, self._config['MASTER_SOCKADDR'][0], self._config['MASTER_SOCKADDR'][1])
         
     def proxy_IPBlackList(self,peer_id,sockaddr):
@@ -1066,9 +1079,11 @@ class HBSYSTEM(DatagramProtocol):
                         if '_default_options' in self._CONFIG['SYSTEMS'][self._system]:
                             self._CONFIG['SYSTEMS'][self._system]['OPTIONS'] = self._CONFIG['SYSTEMS'][self._system]['_default_options']
                             logger.info('(%s) Setting default Options: %s',self._system, self._CONFIG['SYSTEMS'][self._system]['_default_options'])
+                            self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
                         else:
                             logger.info('(%s) Deleting HBP Options',self._system)
                             del self._CONFIG['SYSTEMS'][self._system]['OPTIONS']
+                            self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
                     
             else:
                 _peer_id = _data[4:8]      # Configure Command
@@ -1361,9 +1376,9 @@ class reportFactory(Factory):
 def try_download(_path, _file, _url, _stale,):
     no_verify = ssl._create_unverified_context()
     now = time()
-    file_exists = isfile(_path+_file) == True
+    file_exists = isfile(''.join([_path,_file])) == True
     if file_exists:
-        file_old = (getmtime(_path+_file) + _stale) < now
+        file_old = (getmtime(''.join([_path,_file])) + _stale) < now
     if not file_exists or (file_exists and file_old):
         try:
             with urlopen(_url, context=no_verify) as response:
@@ -1373,21 +1388,44 @@ def try_download(_path, _file, _url, _stale,):
             result = 'ID ALIAS MAPPER: \'{}\' successfully downloaded'.format(_file)
         except IOError:
             result = 'ID ALIAS MAPPER: \'{}\' could not be downloaded due to an IOError'.format(_file)
-        try:
-            with open(_path+_file, 'wb') as outfile:
-                outfile.write(data)
-                outfile.close()
-        except IOError:
-            result = 'ID ALIAS mapper \'{}\' file could not be written due to an IOError'.format(_file)
+        else:
+            if data and (data != b'{}'):
+                try:
+                    with open(''.join([_path,_file]), 'wb') as outfile:
+                        outfile.write(data)
+                        outfile.close()
+                except IOError:
+                    result = 'ID ALIAS mapper \'{}\' file could not be written due to an IOError'.format(_file)
+            else:
+                result = 'ID ALIAS mapper \'{}\' file not written because downloaded data is empty for some reason'.format(_file)
+                
     else:
         result = 'ID ALIAS MAPPER: \'{}\' is current, not downloaded'.format(_file)
     
     return result
 
+#Read list of listed servers from CSV (actually TSV) file 
+def mk_server_dict(path,filename):
+    server_ids = {}
+    try:
+        with open(''.join([path,filename]),newline='') as csvfile:
+            reader = csv.DictReader(csvfile,dialect='excel-tab')
+            for _row in reader:
+                server_ids[_row['OPB Net ID']] = _row['Country']
+        return(server_ids)
+    except IOError as err:
+        logger.warning('ID ALIAS MAPPER: %s could not be read due to IOError: %s',filename,err)
+        return(False)
+
 
 # ID ALIAS CREATION
 # Download
 def mk_aliases(_config):
+    peer_ids = {}
+    subscriber_ids = {}
+    local_subscriber_ids = {}
+    talkgroup_ids = {}
+    server_ids = {}
     if _config['ALIASES']['TRY_DOWNLOAD'] == True:
         # Try updating peer aliases file
         result = try_download(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'], _config['ALIASES']['PEER_URL'], _config['ALIASES']['STALE_TIME'])
@@ -1398,32 +1436,53 @@ def mk_aliases(_config):
         #Try updating tgid aliases file
         result = try_download(_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE'], _config['ALIASES']['TGID_URL'], _config['ALIASES']['STALE_TIME'])
         logger.info('(ALIAS) %s', result)
+        #Try updating server ids file
+        result = try_download(_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE'], _config['ALIASES']['SERVER_ID_URL'], _config['ALIASES']['STALE_TIME'])
+        logger.info('(ALIAS) %s', result)
         
-
     # Make Dictionaries
-    peer_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'])
-    if peer_ids:
-        logger.info('(ALIAS) ID ALIAS MAPPER: peer_ids dictionary is available')
+    try:
+        peer_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'])
+    except Exception as e:
+        logger.error('(ALIAS) ID ALIAS MAPPER: problem with data in peer_ids dictionary, not updating: %s',e)
+    else:
+        if peer_ids:
+            logger.info('(ALIAS) ID ALIAS MAPPER: peer_ids dictionary is available')
 
-    subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE'])
-    #Add special IDs to DB
-    subscriber_ids[900999] = 'D-APRS'
-    subscriber_ids[4294967295] = 'SC'
+    try:
+        subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE'])
+    except Exception as e:
+        logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in subscriber_ids dictionary, not updating: %s',e)
+    else:
+        #Add special IDs to DB
+        subscriber_ids[900999] = 'D-APRS'
+        subscriber_ids[4294967295] = 'SC'
 
-    if subscriber_ids:
-        logger.info('(ALIAS) ID ALIAS MAPPER: subscriber_ids dictionary is available')
-
-    talkgroup_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE'])
-    if talkgroup_ids:
-        logger.info('(ALIAS) ID ALIAS MAPPER: talkgroup_ids dictionary is available')
+        if subscriber_ids:
+            logger.info('(ALIAS) ID ALIAS MAPPER: subscriber_ids dictionary is available')
+    try:
+        talkgroup_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE'])
+    except Exception as e:
+        logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in talkgroup_ids dictionary, not updating: %s',e)
+    else:
+        if talkgroup_ids:
+            logger.info('(ALIAS) ID ALIAS MAPPER: talkgroup_ids dictionary is available')
+    try:   
+        local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'])
+    except Exception as e:
+        logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in local_subscriber_ids dictionary, not updating: %s',e)
+    else:
+        if subscriber_ids:
+            logger.info('(ALIAS) ID ALIAS MAPPER: local_subscriber_ids dictionary is available')
+    try:        
+        server_ids = mk_server_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE'])
+    except Exception as e:
+        logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in server_ids dictionary, not updating: %s',e)
+    if server_ids:
+        logger.info('(ALIAS) ID ALIAS MAPPER: server_ids dictionary is available')
         
-    local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'])
-    if subscriber_ids:
-        logger.info('(ALIAS) ID ALIAS MAPPER: local_subscriber_ids dictionary is available')
-    
         
-        
-    return peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids
+    return peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids, server_ids
 
 
 #************************************************
