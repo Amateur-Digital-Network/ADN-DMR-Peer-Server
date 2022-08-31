@@ -81,7 +81,7 @@ from AMI import AMI
 
 #garbage collector debugging 
 import gc
-gc.set_debug(gc.DEBUG_UNCOLLECTABLE)
+gc.set_debug(gc.DEBUG_UNCOLLECTABLE |gc.DEBUG_STATS)
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Cortney T. Buffington, N0MJS, Forked by Simon Adlem - G7RZU'
