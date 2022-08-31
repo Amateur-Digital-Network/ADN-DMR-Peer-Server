@@ -53,7 +53,7 @@ build-testing:       # This job runs in the build stage, which runs first.
   script:
     - echo "Compiling the code..."
     - cd docker-configs
-    - docker buildx build --no-cache -f Dockerfile-proxy -t gitlab.hacknix.net:5050/hacknix/freedmr:testing --platform linux/arm64 --push .
+    - docker buildx build --no-cache -f Dockerfile-proxy -t gitlab.hacknix.net:5050/hacknix/freedmr:testing --platform linux/amd64 --push .
   only:
     - testing
 
@@ -64,7 +64,7 @@ build-debug:       # This job runs in the build stage, which runs first.
   script:
     - echo "Compiling the code..."
     - cd docker-configs
-    - docker buildx build --no-cache -f Dockerfile-proxy -t gitlab.hacknix.net:5050/hacknix/freedmr:debug --platform linux/arm64 --push .
+    - docker buildx build --no-cache -f Dockerfile-proxy -t gitlab.hacknix.net:5050/hacknix/freedmr:debug --platform linux/amd64 --push .
   only:
     - debug
 
