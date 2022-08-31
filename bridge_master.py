@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 #
 ###############################################################################
-# Copyright (C) 2020 Simon Adlem, G7RZU <g7rzu@gb7fr.org.uk>  
+# Copyright (C) 2020-2022 Simon Adlem, G7RZU <g7rzu@gb7fr.org.uk>  
 # Copyright (C) 2016-2019 Cortney T. Buffington, N0MJS <n0mjs@me.com>
 #
 #   This program is free software; you can redistribute it and/or modify
@@ -79,6 +79,9 @@ from binascii import b2a_hex as ahex
 
 from AMI import AMI
 
+#garbage collector debugging 
+import gc
+gc.set_debug(gc.DEBUG_UNCOLLECTABLE)
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Cortney T. Buffington, N0MJS, Forked by Simon Adlem - G7RZU'
