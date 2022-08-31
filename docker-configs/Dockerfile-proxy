@@ -26,7 +26,7 @@ RUN adduser -D -u 54000 radio && \
         git clone https://gitlab.hacknix.net/hacknix/FreeDMR.git freedmr && \
         cd /opt/freedmr && \
         git checkout debug && \
-        pip install fil-profile && \
+        pip install filprofiler && \
 	pip install --no-cache-dir -r requirements.txt && \
         apk del git gcc musl-dev && \
         chown -R radio: /opt/freedmr
