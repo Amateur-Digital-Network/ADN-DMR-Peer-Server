@@ -287,7 +287,9 @@ class OPENBRIDGE(DatagramProtocol):
                 if compare_digest(_hash, _ckhs) and (_sockaddr == self._config['TARGET_SOCK'] or self._config['RELAX_CHECKS']):
                     _peer_id = _data[11:15]
                     if self._config['NETWORK_ID'] != _peer_id:
-                        logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
+                        f _stream_id not in self._laststrid:
+                            logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
+                            self._laststrid.append(_stream_id)
                         return
                     
                     #This is a v1 packet, so all the extended stuff we can set to default
