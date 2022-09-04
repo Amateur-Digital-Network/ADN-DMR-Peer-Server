@@ -287,7 +287,9 @@ class OPENBRIDGE(DatagramProtocol):
                 if compare_digest(_hash, _ckhs) and (_sockaddr == self._config['TARGET_SOCK'] or self._config['RELAX_CHECKS']):
                     _peer_id = _data[11:15]
                     if self._config['NETWORK_ID'] != _peer_id:
-                        logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
+                        if _stream_id not in self._laststrid:
+                            logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
+                            self._laststrid.append(_stream_id)
                         return
                     
                     #This is a v1 packet, so all the extended stuff we can set to default
@@ -412,11 +414,15 @@ class OPENBRIDGE(DatagramProtocol):
                     _h.update(_packet[:69])
                     
                 _ckhs = _h.digest()
+                
+                _stream_id = _data[16:20]
 
                 if compare_digest(_hash, _ckhs) and (_sockaddr == self._config['TARGET_SOCK'] or self._config['RELAX_CHECKS']):
                     _peer_id = _data[11:15]
                     if self._config['NETWORK_ID'] != _peer_id:
-                        logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
+                        if _stream_id not in self._laststrid:
+                            logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
+                            self._laststrid.append(_stream_id)
                         return
                     _seq = _data[4]
                     _rf_src = _data[5:8]
@@ -433,7 +439,6 @@ class OPENBRIDGE(DatagramProtocol):
                         _call_type = 'group'
                     _frame_type = (_bits & 0x30) >> 4
                     _dtype_vseq = (_bits & 0xF) # data, 1=voice header, 2=voice terminator; voice, 0=burst A ... 5=burst F
-                    _stream_id = _data[16:20]
                     #logger.debug('(%s) DMRD - Seqence: %s, RF Source: %s, Destination ID: %s', self._system, int_id(_seq), int_id(_rf_src), int_id(_dst_id))
                     
                     #Don't do anything if we are STUNned
@@ -548,7 +553,9 @@ class OPENBRIDGE(DatagramProtocol):
                 if compare_digest(_hash, _ckhs) and (_sockaddr == self._config['TARGET_SOCK'] or self._config['RELAX_CHECKS']):
                     _peer_id = _data[11:15]
                     if self._config['NETWORK_ID'] != _peer_id:
-                        logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
+                        if _stream_id not in self._laststrid:
+                            logger.error('(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s', self._system, int_id(self._config['NETWORK_ID']), int_id(_peer_id))
+                            self._laststrid.append(_stream_id)
                         return
                     _seq = _data[4]
                     _rf_src = _data[5:8]
