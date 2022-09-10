@@ -21,9 +21,29 @@
 echo FreeDMR Docker installer...
 
 echo Installing required packages...
-apt-get -y install docker.io && 
+#apt-get -y install docker.io && 
+#apt-get -y install docker-compose &&
+#apt-get -y  install conntrack &&
+
+echo Install Docker Community Edition...
+apt-get remove docker docker-engine docker.io &&
+apt-get -y update &&
+apt-get install \
+     apt-transport-https \
+     ca-certificates \
+     curl \
+     gnupg2 \
+     software-properties-common &&
+curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add - &&
+add-apt-repository \
+   "deb [arch=amd64] https://download.docker.com/linux/debian \
+   $(lsb_release -cs) \
+   stable" &&
+apt-get -y update &&
+apt-get -y install docker-ce &&
+
+echo Install Docker Compose...
 apt-get -y install docker-compose &&
-apt-get -y  install conntrack &&
 
 echo Set userland-proxy to false...
 echo '{ "userland-proxy": false}' > /etc/docker/daemon.json &&
@@ -54,6 +74,8 @@ GEN_STAT_BRIDGES: True
 ALLOW_NULL_PASSPHRASE: True
 ANNOUNCEMENT_LANGUAGES:
 SERVER_ID: 0
+DATA_GATEWAY: False
+VALIDATE_SERVER_IDS: True
 
 
 [REPORTS]
@@ -63,8 +85,8 @@ REPORT_PORT: 4321
 REPORT_CLIENTS: *
 
 [LOGGER]
-LOG_FILE: log/freedmr.log
-LOG_HANDLERS: file-timed
+LOG_FILE: /dev/null
+LOG_HANDLERS: console-timed
 LOG_LEVEL: INFO
 LOG_NAME: FreeDMR
 
@@ -75,20 +97,24 @@ PEER_FILE: peer_ids.json
 SUBSCRIBER_FILE: subscriber_ids.json
 TGID_FILE: talkgroup_ids.json
 PEER_URL: https://www.radioid.net/static/rptrs.json
-SUBSCRIBER_URL: http://downloads.freedmr.uk/downloads/local_subscriber_ids.json
-TGID_URL: TGID_URL: https://freedmr.cymru/talkgroups/talkgroup_ids_json.php
+SUBSCRIBER_URL: https://www.radioid.net/static/users.json
+TGID_URL: http://downloads.freedmr.uk/downloads/talkgroup_ids.json
+LOCAL_SUBSCRIBER_FILE: local_subscriber_ids.json
 STALE_DAYS: 1
-LOCAL_SUBSCRIBER_FILE: local_subcriber_ids.json
 SUB_MAP_FILE: sub_map.pkl
+SERVER_ID_URL: http://downloads.freedmr.uk/downloads/FreeDMR_Hosts.csv
+SERVER_ID_FILE: server_ids.tsv
+TOPO_FILE: topography.json
 
-[MYSQL]
-USE_MYSQL: False
-USER: hblink
-PASS: mypassword
-DB: hblink
-SERVER: 127.0.0.1
-PORT: 3306
-TABLE: repeaters
+
+#Control server shared allstar instance via dial / AMI
+[ALLSTAR]
+ENABLED: True
+USER:admin
+PASS: password
+SERVER: asl.example.com
+PORT: 5038
+NODE: 11111
 
 [OBP-TEST]
 MODE: OPENBRIDGE
@@ -132,6 +158,7 @@ ANNOUNCEMENT_LANGUAGE: en_GB
 GENERATOR: 100
 ALLOW_UNREG_ID: False
 PROXY_CONTROL: True
+OVERRIDE_IDENT_TG:
 
 [ECHO]
 MODE: PEER
