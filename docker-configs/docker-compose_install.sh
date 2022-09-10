@@ -26,7 +26,7 @@ echo Installing required packages...
 #apt-get -y  install conntrack &&
 
 echo Install Docker Community Edition...
-apt-get remove docker docker-engine docker.io &&
+#apt-get remove docker docker-engine docker.io &&
 apt-get -y update &&
 apt-get install \
      apt-transport-https \
