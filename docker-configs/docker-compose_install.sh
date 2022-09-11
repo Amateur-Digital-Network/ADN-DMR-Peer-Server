@@ -22,7 +22,7 @@ echo FreeDMR Docker installer...
 
 echo Installing required packages...
 echo Install Docker Community Edition...
-apt-get remove docker docker-engine docker.io &&
+apt-get -y remove docker docker-engine docker.io &&
 apt-get -y update &&
 apt-get -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common &&
 curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add - &&
@@ -204,7 +204,7 @@ echo Get docker-compose.yml...
 cd /etc/freedmr &&
 curl https://gitlab.hacknix.net/hacknix/FreeDMR/-/raw/master/docker-configs/docker-compose.yml -o docker-compose.yml &&
 echo Install crontab...
-cat << EOF > /etc/cron.daily/lastheard
+cat << EOF > /etc/cron.daily/lastheard &&
 #!/bin/bash
 mv /var/log/FreeDMRmonitor/lastheard.log /var/log/FreeDMRmonitor/lastheard.log.save
 /usr/bin/tail -150 /var/log/FreeDMRmonitor/lastheard.log.save > /var/log/FreeDMRmonitor/lastheard.log
@@ -214,7 +214,7 @@ EOF
 chmod 755 /etc/cron.daily/lastheard
 
 echo Tune network stack...
-cat <<EOF > /etc/sysctl.conf
+cat << EOF > /etc/sysctl.conf &&
 net.core.rmem_default=134217728
 net.core.rmem_max=134217728
 net.core.wmem_max=134217728                       
