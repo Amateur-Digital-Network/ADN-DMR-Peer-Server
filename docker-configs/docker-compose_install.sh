@@ -21,12 +21,8 @@
 echo FreeDMR Docker installer...
 
 echo Installing required packages...
-#apt-get -y install docker.io && 
-#apt-get -y install docker-compose &&
-#apt-get -y  install conntrack &&
-
 echo Install Docker Community Edition...
-#apt-get remove docker docker-engine docker.io &&
+apt-get remove docker docker-engine docker.io &&
 apt-get -y update &&
 apt-get -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common &&
 curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add - &&
@@ -217,6 +213,18 @@ mv /var/log/FreeDMRmonitor/lastheard.log /var/log/FreeDMRmonitor/lastheard.log.s
 EOF
 chmod 755 /etc/cron.daily/lastheard
 
+echo Tune network stack...
+cat <<EOF > /etc/sysctl.conf
+net.core.rmem_default=134217728
+net.core.rmem_max=134217728
+net.core.wmem_max=134217728                       
+net.core.rmem_default=134217728
+net.core.netdev_max_backlog=250000
+net.netfilter.nf_conntrack_udp_timeout=15
+net.netfilter.nf_conntrack_udp_timeout_stream=35
+EOF
+
+/usr/bin/sysctl -p &&
 
 echo Run FreeDMR container...
 docker-compose up -d
