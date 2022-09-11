@@ -100,7 +100,7 @@ TOPO_FILE: topography.json
 
 #Control server shared allstar instance via dial / AMI
 [ALLSTAR]
-ENABLED: True
+ENABLED: false
 USER:admin
 PASS: password
 SERVER: asl.example.com
