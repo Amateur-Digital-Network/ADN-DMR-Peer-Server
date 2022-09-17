@@ -37,7 +37,15 @@ echo Install Docker Compose...
 apt-get -y install docker-compose &&
 
 echo Set userland-proxy to false...
-echo '{ "userland-proxy": false}' > /etc/docker/daemon.json &&
+cat <<EOF > /etc/docker/daemon.json &&
+{ "userland-proxy": false
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "10m",
+        "max-file": "3"
+    }
+}
+EOF
 
 echo Restart docker...
 systemctl restart docker &&
@@ -87,13 +95,13 @@ PATH: ./json/
 PEER_FILE: peer_ids.json
 SUBSCRIBER_FILE: subscriber_ids.json
 TGID_FILE: talkgroup_ids.json
-PEER_URL: https://www.radioid.net/static/rptrs.json
-SUBSCRIBER_URL: https://www.radioid.net/static/users.json
-TGID_URL: http://downloads.freedmr.uk/downloads/talkgroup_ids.json
+PEER_URL: http://freedmr-lh.gb7fr.org.uk/json/peer_ids.json
+SUBSCRIBER_URL: http://freedmr-lh.gb7fr.org.uk/json/subscriber_ids.json
+TGID_URL: http://freedmr-lh.gb7fr.org.uk/talkgroup_ids.json
 LOCAL_SUBSCRIBER_FILE: local_subscriber_ids.json
 STALE_DAYS: 1
 SUB_MAP_FILE: sub_map.pkl
-SERVER_ID_URL: http://downloads.freedmr.uk/downloads/FreeDMR_Hosts.csv
+SERVER_ID_URL: http://freedmr-lh.gb7fr.org.uk/json/server_ids.tsv
 SERVER_ID_FILE: server_ids.tsv
 TOPO_FILE: topography.json
 
@@ -191,26 +199,10 @@ echo "BRIDGES = {'9990': [{'SYSTEM': 'ECHO', 'TS': 2, 'TGID': 9990, 'ACTIVE': Tr
 echo Set perms on config directory...
 chown -R 54000 /etc/freedmr &&
 
-echo Setup logging...
-mkdir -p /var/log/freedmr &&
-touch /var/log/freedmr/freedmr.log &&
-chown -R 54000 /var/log/freedmr &&
-mkdir -p /var/log/FreeDMRmonitor &&
-touch /var/log/FreeDMRmonitor/lastheard.log &&
-touch /var/log/FreeDMRmonitor/hbmon.log &&
-chown -R 54001 /var/log/FreeDMRmonitor &&
-
 echo Get docker-compose.yml...
 cd /etc/freedmr &&
 curl https://gitlab.hacknix.net/hacknix/FreeDMR/-/raw/master/docker-configs/docker-compose.yml -o docker-compose.yml &&
-echo Install crontab...
-cat << EOF > /etc/cron.daily/lastheard &&
-#!/bin/bash
-mv /var/log/FreeDMRmonitor/lastheard.log /var/log/FreeDMRmonitor/lastheard.log.save
-/usr/bin/tail -150 /var/log/FreeDMRmonitor/lastheard.log.save > /var/log/FreeDMRmonitor/lastheard.log
-mv /var/log/FreeDMRmonitor/lastheard.log /var/log/FreeDMRmonitor/lastheard.log.save
-/usr/bin/tail -150 /var/log/FreeDMRmonitor/lastheard.log.save > /var/log/FreeDMRmonitor/lastheard.log
-EOF
+
 chmod 755 /etc/cron.daily/lastheard
 
 echo Tune network stack...
