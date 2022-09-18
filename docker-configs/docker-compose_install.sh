@@ -38,12 +38,14 @@ apt-get -y install docker-compose &&
 
 echo Set userland-proxy to false...
 cat <<EOF > /etc/docker/daemon.json &&
-{ "userland-proxy": false
-    "log-driver": "json-file",
-    "log-opts": {
+{
+     "userland-proxy": false,
+     "experimental": true,
+     "log-driver": "json-file",
+     "log-opts": {
         "max-size": "10m",
         "max-file": "3"
-    }
+      }
 }
 EOF
 
@@ -216,7 +218,7 @@ net.netfilter.nf_conntrack_udp_timeout=15
 net.netfilter.nf_conntrack_udp_timeout_stream=35
 EOF
 
-/usr/bin/sysctl -p &&
+/usr/sbin/sysctl -p &&
 
 echo Run FreeDMR container...
 docker-compose up -d
