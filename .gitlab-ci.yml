@@ -44,7 +44,7 @@ build-extrastats:       # This job runs in the build stage, which runs first.
 
     - echo "Compile complete."
   only:
-    - extrastats
+    - extrastats2
 
 build-testing:       # This job runs in the build stage, which runs first.
   stage: build
