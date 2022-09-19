@@ -24,6 +24,7 @@ services:
         mem_reservation: 600m
         volumes:
             - '/etc/freedmr/freedmr.cfg:/opt/freedmr/freedmr.cfg'
+            - '/var/log/freedmr/:/opt/freedmr/log/'
             - '/etc/freedmr/rules.py:/opt/freedmr/rules.py'
             #Write JSON files outside of container
             - '/etc/freedmr/json/:/opt/freedmr/json/'
@@ -31,8 +32,8 @@ services:
         ports:
             - '62031:62031/udp'
             #Change the below to inlude ports used for your OBP(s)
-            #- '62041:62041/udp'
-        image: 'gitlab.hacknix.net:5050/hacknix/freedmr:development-latest'
+            - '62041:62041/udp'
+        image: 'hacknix/freedmr:latest'
         restart: "unless-stopped"
         networks:
            app_net:
@@ -51,37 +52,45 @@ services:
             #- FDPROXY_LISTENPORT=62031
         read_only: "true"
 
-    freedmrmonitor2:
-        container_name: freedmrmonitor2
+    freedmrmon:
+        container_name: freedmrmon
         cpu_shares: 512
         depends_on:
             - freedmr
+        volumes:
+            #This should be kept to a manageable size from
+            #cron or logrotate outisde of the container.
+            - '/var/log/FreeDMRmonitor/:/opt/FreeDMRmonitor/log/'
+            #Write JSON files outside of container
+            - '/etc/freedmr/json/:/opt/FreeDMRmonitor/json/'
+
+        #Override config file
+        #    - '/etc/freedmr/config.py:/opt/FreeDMRmonitor/config.py'
         ports:
             - '9000:9000/tcp'
-        image: 'gitlab.hacknix.net:5050/freedmr/freedmrmonitor2/freedmrmonitor2:monitor-development-latest'
+        image: 'hacknix/freedmrmonitor:latest'
         restart: "unless-stopped"
         networks:
            app_net:
              ipv4_address: 172.16.238.20
-        read_only: "true"
-        logging:
-              driver: json-file
-
-
+     
     freedmrmonpache:
         container_name: freedmrmonapache
         cpu_shares: 512
         depends_on:
-             - freedmrmonitor2
+             - freedmrmon
+        #Use to override html files
+        #And images
+        #volumes:
+        #    - '/var/www/html/:/var/www/html/'
+        #    - '/var/www/html/images/:/var/www/html/images/'
         ports:
-            - '8080:80/tcp'
-        image: 'gitlab.hacknix.net:5050/freedmr/freedmrmonitor2/freedmrmonitor2:apache-development-latest'
+            - '80:80/tcp'
+        image: hacknix/freedmrmonitor-apache:latest
         restart: "unless-stopped"
         networks:
            app_net:
              ipv4_address: 172.16.238.30
-        logging:
-              driver: json-file
 
 networks:
   app_net:
