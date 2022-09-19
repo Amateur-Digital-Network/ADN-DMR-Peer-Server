@@ -546,7 +546,7 @@ def sendVoicePacket(self,pkt,_source_id,_dest_id,_slot):
         'TGID':      _dest_id,
         'LAST':      _pkt_time,
         'source_server': self._CONFIG['GLOBAL']['SERVER_ID'],
-        'source_rptr': int_id(5000)
+        'source_rptr': bytes_3(5000)
         }
         _slot['TX_TGID'] = _dest_id
     else:
