@@ -1168,7 +1168,7 @@ class routerOBP(OPENBRIDGE):
         systems[_d_system].send_system(_tmp_data)
         logger.debug('(%s) UNIT Data Bridged to HBP on slot 1: %s DST_ID: %s',self._system,_d_system,_int_dst_id)
         if CONFIG['REPORTS']['REPORT']:
-            systems[_d_system]._report.send_bridgeEvent('UNIT DATA,DATA,TX,{{},{},{},{},{},{},{},{}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _d_slot, int_id(_dst_id), int_id(_source_server), int_id(_source_rptr)).encode(encoding='utf-8', errors='ignore'))
+            systems[_d_system]._report.send_bridgeEvent('UNIT DATA,DATA,TX,{{},{},{},{},{},{},{},{}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), int_id(_source_server), int_id(_source_rptr)).encode(encoding='utf-8', errors='ignore'))
         
     def sendDataToOBP(self,_target,_data,dmrpkt,pkt_time,_stream_id,_dst_id,_peer_id,_rf_src,_bits,_slot,_hops = b'',_source_server = b'\x00\x00\x00\x00', _ber = b'\x00', _rssi = b'\x00', _source_rptr = b'\x00\x00\x00\x00'):
 
