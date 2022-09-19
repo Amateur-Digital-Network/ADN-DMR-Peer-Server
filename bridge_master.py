@@ -1160,7 +1160,7 @@ class routerOBP(OPENBRIDGE):
                 #Ignore this system and TS pair if it's called again on this packet
         return(_sysIgnore)
     
-    def sendDataToHBP(self,_d_system,_d_slot,_dst_id,_tmp_bits,_data,dmrpkt,_rf_src,_stream_id,_peer_id,_source_server = b'\x00\x00\x00\x00',_source_rptr = b'\x00\x00\x00\x00'):
+    def sendDataToHBP(self,_d_system,_d_slot,_dst_id,_tmp_bits,_data,dmrpkt,_rf_src,_stream_id,_peer_id):
         _int_dst_id = int_id(_dst_id)
         #Assemble transmit HBP packet header
         _tmp_data = b''.join([_data[:15], _tmp_bits.to_bytes(1, 'big'), _data[16:20]])
