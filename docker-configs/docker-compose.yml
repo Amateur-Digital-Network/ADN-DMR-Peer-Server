@@ -67,15 +67,36 @@ services:
               driver: json-file
 
 
-    freedmrmonapache:
+    freedmrmonpache:
         container_name: freedmrmonapache
         cpu_shares: 512
         depends_on:
              - freedmrmonitor2
+        #where to store TLS certificates
+        #and acme.sh files
+        volumes:
+             - '/etc/freedmr/certs/:/opt/apachecerts/'
+             - '/etc/freedmr/acme.sh:/root/.acme.sh/'
         ports:
-            - '8080:80/tcp'
+            - '80:80/tcp'
+            - '443:443/tcp'
         image: 'gitlab.hacknix.net:5050/freedmr/freedmrmonitor2/freedmrmonitor2:apache-latest'
         restart: "unless-stopped"
+        environment:
+          #Set to 1 to enable TLS support
+          #you'll need to actually generate the certtificates too
+          #using these commands when the container is running:
+
+          #docker exec -it freedmrmonapache gencert.sh <admin email> <server FQDN>
+          #docker-compose restart freedmrmonapache
+
+          #This only needs to be done once - unless the files in the volumes above are deleted.
+
+          #The container will handle renewing the certificates every 60 days.  
+
+          #Note -the gencert.sh script only works when the webserver is available on the default port 80  
+          #If it's on non-standard ports, you'll need to request the certificates manually. 
+          - 'USE_TLS=1'
         networks:
            app_net:
              ipv4_address: 172.16.238.30
