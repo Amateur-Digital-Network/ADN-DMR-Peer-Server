@@ -52,7 +52,7 @@ services:
             #- FDPROXY_LISTENPORT=62031
         read_only: "true"
 
-   freedmrmonitor2:
+    freedmrmonitor2:
         container_name: freedmrmonitor2
         cpu_shares: 512
         depends_on:
