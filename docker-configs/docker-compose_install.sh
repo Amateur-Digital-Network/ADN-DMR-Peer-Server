@@ -27,7 +27,7 @@ apt-get -y update &&
 apt-get -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common &&
 curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add - &&
 add-apt-repository \
-   "deb [arch=amd64] https://download.docker.com/linux/debian \
+   "deb [arch=`/usr/bin/arch`] https://download.docker.com/linux/debian \
    $(lsb_release -cs) \
    stable" &&
 apt-get -y update &&
@@ -54,7 +54,9 @@ systemctl restart docker &&
 
 echo Make config directory...
 mkdir /etc/freedmr &&
-chmod 755 /etc/freedmr &&
+mkdir -p /etc/freedmr/acme.sh && 
+mkdir -p /etc/freedmr/certs &&
+chmod -R 755 /etc/freedmr &&
 
 echo make json directory...
 mkdir -p /etc/freedmr/json &&
