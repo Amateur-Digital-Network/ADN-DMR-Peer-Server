@@ -26,8 +26,14 @@ apt-get -y remove docker docker-engine docker.io &&
 apt-get -y update &&
 apt-get -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common &&
 curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add - &&
+ARCH=`/usr/bin/arch`
+echo "System architecture is $ARCH" 
+if [ "$ARCH" == "x86_64" ]
+then
+    ARCH="amd64"
+fi
 add-apt-repository \
-   "deb [arch=`/usr/bin/arch`] https://download.docker.com/linux/debian \
+   "deb [arch=$ARCH] https://download.docker.com/linux/debian \
    $(lsb_release -cs) \
    stable" &&
 apt-get -y update &&
@@ -225,5 +231,5 @@ EOF
 echo Run FreeDMR container...
 docker-compose up -d
 
-
+echo Read notes in /etc/freedmr/docker-compose.yml to understand how to implement extra functionality.
 echo FreeDMR setup complete!
