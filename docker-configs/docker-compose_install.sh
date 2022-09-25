@@ -107,7 +107,7 @@ SUBSCRIBER_FILE: subscriber_ids.json
 TGID_FILE: talkgroup_ids.json
 PEER_URL: http://freedmr-lh.gb7fr.org.uk/json/peer_ids.json
 SUBSCRIBER_URL: http://freedmr-lh.gb7fr.org.uk/json/subscriber_ids.json
-TGID_URL: http://freedmr-lh.gb7fr.org.uk/talkgroup_ids.json
+TGID_URL: http://freedmr-lh.gb7fr.org.uk/json/talkgroup_ids.json
 LOCAL_SUBSCRIBER_FILE: local_subscriber_ids.json
 STALE_DAYS: 1
 SUB_MAP_FILE: sub_map.pkl
