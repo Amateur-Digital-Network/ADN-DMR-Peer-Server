@@ -25,6 +25,7 @@ import ipaddress
 import os
 from setproctitle import setproctitle
 from datetime import datetime
+#from ipsc_const import *
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Simon Adlem - G7RZU'
@@ -68,7 +69,7 @@ class Proxy(DatagramProtocol):
     def reaper(self,_peer_id):
         if self.debug:
             print("dead",_peer_id)
-        if self.clientinfo and _peer_id != b'\xff\xff\xff\xff':
+        if self.clientinfo:
             print(f"{datetime.now().replace(microsecond=0)} Client: ID:{str(int_id(_peer_id)).rjust(9)} IP:{self.peerTrack[_peer_id]['shost'].rjust(15)} Port:{self.peerTrack[_peer_id]['sport']} Removed.")
         self.connTrack[self.peerTrack[_peer_id]['dport']] = False
         del self.peerTrack[_peer_id]
@@ -89,24 +90,20 @@ class Proxy(DatagramProtocol):
         #If the packet comes from the master
         if host == self.master:
         
-            #fill this in 
-            _peer_id = data[0:0]
+            _command = data[0:1]
+            _peer_id = data[1:5]
             
             if self.debug:
                 print(data)
             if _peer_id in self.peerTrack:
                 self.transport.write(data,(self.peerTrack[_peer_id]['shost'],self.peerTrack[_peer_id]['sport']))
-                # Remove the client after send a MSTN or MSTC packet
-                if _command in (MSTN,MSTC):
-                    # Give time to the client for a reply to prevent port reassignment 
-                    self.peerTrack[_peer_id]['timer'].reset(15)
- 
+                
             return
             
                    
         else:
-            #fill this in 
-            _peer_id = data[0:0]
+            _command = data[0:1]
+            _peer_id = data[1:5]
             
             if _peer_id in self.peerTrack:
                 _dport = self.peerTrack[_peer_id]['dport']
@@ -175,17 +172,17 @@ if __name__ == '__main__':
         
     try:
 
-        Master = config.get('PROXY','Master')
-        ListenPort = config.getint('PROXY','ListenPort')
-        ListenIP = config.get('PROXY','ListenIP')
-        DestportStart = config.getint('PROXY','DestportStart')
-        DestPortEnd = config.getint('PROXY','DestPortEnd')
-        Timeout = config.getint('PROXY','Timeout')
-        Stats = config.getboolean('PROXY','Stats')
-        Debug = config.getboolean('PROXY','Debug')
-        ClientInfo = config.getboolean('PROXY','ClientInfo')
-        BlackList = json.loads(config.get('PROXY','BlackList'))
-        IPBlackList = json.loads(config.get('PROXY','IPBlackList'))
+        Master = config.get('IPSC_PROXY','Master')
+        ListenPort = config.getint('IPSC_PROXY','ListenPort')
+        ListenIP = config.get('IPSC_PROXY','ListenIP')
+        DestportStart = config.getint('IPSC_PROXY','DestportStart')
+        DestPortEnd = config.getint('IPSC_PROXY','DestPortEnd')
+        Timeout = config.getint('IPSC_PROXY','Timeout')
+        Stats = config.getboolean('IPSC_PROXY','Stats')
+        Debug = config.getboolean('IPSC_PROXY','Debug')
+        ClientInfo = config.getboolean('IPSC_PROXY','ClientInfo')
+        BlackList = json.loads(config.get('IPSC_PROXY','BlackList'))
+        IPBlackList = json.loads(config.get('IPSC_PROXY','IPBlackList'))
         
     except configparser.Error as err:
         print('Error processing configuration file -- {}'.format(err))
@@ -194,15 +191,15 @@ if __name__ == '__main__':
 #*** CONFIG HERE ***
     
         Master = "127.0.0.1"
-        ListenPort = 62031
+        ListenPort = 55005
         #'' = all IPv4, '::' = all IPv4 and IPv6 (Dual Stack)
         ListenIP = ''
-        DestportStart = 50000
-        DestPortEnd = 50002
+        DestportStart = 59000
+        DestPortEnd = 59001
         Timeout = 30
-        Stats = False
-        Debug = False
-        ClientInfo = False
+        Stats = True
+        Debug = True
+        ClientInfo = True
         BlackList = [1234567]
         #e.g. {10.0.0.1: 0, 10.0.0.2: 0}
         IPBlackList = {}
@@ -214,7 +211,7 @@ if __name__ == '__main__':
     
     # Set up the signal handler
     def sig_handler(_signal, _frame):
-        print('(GLOBAL) SHUTDOWN: PROXY IS TERMINATING WITH SIGNAL {}'.format(str(_signal)))
+        print('(GLOBAL) SHUTDOWN: IPSC_PROXY IS TERMINATING WITH SIGNAL {}'.format(str(_signal)))
         reactor.stop()
 
     # Set signal handers so that we can gracefully exit if need be
@@ -222,14 +219,14 @@ if __name__ == '__main__':
         signal.signal(sig, sig_handler)
         
     #Override static config from Environment
-    if 'FDPROXY_STATS' in os.environ:
-        Stats = bool(os.environ['FDPROXY_STATS'])
-    #if 'FDPROXY_DEBUG' in os.environ:
-    #    Debug = bool(os.environ['FDPROXY_DEBUG'])
-    if 'FDPROXY_CLIENTINFO' in os.environ:
-        ClientInfo = bool(os.environ['FDPROXY_CLIENTINFO'])
-    if 'FDPROXY_LISTENPORT' in os.environ:
-        ListenPort = int(os.environ['FDPROXY_LISTENPORT'])
+    if 'FDIPSC_PROXY_STATS' in os.environ:
+        Stats = bool(os.environ['FDIPSC_PROXY_STATS'])
+    #if 'FDIPSC_PROXY_DEBUG' in os.environ:
+    #    Debug = bool(os.environ['FDIPSC_PROXY_DEBUG'])
+    if 'FDIPSC_PROXY_CLIENTINFO' in os.environ:
+        ClientInfo = bool(os.environ['FDIPSC_PROXY_CLIENTINFO'])
+    if 'FDIPSC_PROXY_LISTENPORT' in os.environ:
+        ListenPort = int(os.environ['FDIPSC_PROXY_LISTENPORT'])
         
     for port in range(DestportStart,DestPortEnd+1,1):
         CONNTRACK[port] = False
