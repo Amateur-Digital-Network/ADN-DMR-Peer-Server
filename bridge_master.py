@@ -2740,10 +2740,10 @@ if __name__ == '__main__':
     options = options_task.start(26)
     options.addErrback(loopingErrHandle)
         
-    #STAT trimmer - once every hour (roughly - shifted so all timed tasks don't run at once
+    #STAT trimmer - once every 10 mins (roughly - shifted so all timed tasks don't run at once
     if CONFIG['GLOBAL']['GEN_STAT_BRIDGES']:
         stat_trimmer_task = task.LoopingCall(statTrimmer)
-        stat_trimmer = stat_trimmer_task.start(3700)#3600
+        stat_trimmer = stat_trimmer_task.start(523)#3600
         stat_trimmer.addErrback(loopingErrHandle)
         
     #KA Reporting
