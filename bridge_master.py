@@ -331,7 +331,7 @@ def rule_timer_loop():
                         _bridge_used = True
                         logger.info('(ROUTER) Conference Bridge ACTIVE (ON timer running): System: %s Bridge: %s, TS: %s, TGID: %s, Timeout in: %.2fs,', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']),  timeout_in)
                 elif _system['ACTIVE'] == False:
-                    logger.trace('(ROUTER) Conference Bridge INACTIVE (no change): System: %s Bridge: %s, TS: %s, TGID: %s', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']))
+                    logger.debug('(ROUTER) Conference Bridge INACTIVE (no change): System: %s Bridge: %s, TS: %s, TGID: %s', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']))
             elif _system['TO_TYPE'] == 'OFF':
                 if _system['ACTIVE'] == False:
                     if _system['TIMER'] < _now:
@@ -344,13 +344,13 @@ def rule_timer_loop():
                         logger.info('(ROUTER) Conference Bridge INACTIVE (OFF timer running): System: %s Bridge: %s, TS: %s, TGID: %s, Timeout in: %.2fs,', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']),  timeout_in)
                 elif _system['ACTIVE'] == True:
                     _bridge_used = True
-                    logger.trace('(ROUTER) Conference Bridge ACTIVE (no change): System: %s Bridge: %s, TS: %s, TGID: %s', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']))
+                    logger.debug('(ROUTER) Conference Bridge ACTIVE (no change): System: %s Bridge: %s, TS: %s, TGID: %s', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']))
             else:
                 if _system['SYSTEM'][0:3] != 'OBP':
                     _bridge_used = True
                 elif _system['SYSTEM'][0:3] == 'OBP' and _system['TO_TYPE'] == 'STAT':
                     _bridge_used = True
-                logger.trace('(ROUTER) Conference Bridge NO ACTION: System: %s, Bridge: %s, TS: %s, TGID: %s', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']))
+                logger.debug('(ROUTER) Conference Bridge NO ACTION: System: %s, Bridge: %s, TS: %s, TGID: %s', _system['SYSTEM'], _bridge, _system['TS'], int_id(_system['TGID']))
                 
         if _bridge_used == False:
             _remove_bridges.append(_bridge)
@@ -923,8 +923,7 @@ def options_config():
                         if _options['TS1_STATIC']:
                             ts1 = _options['TS1_STATIC'].split(',')
                             for tg in ts1:
-                                if not tg or int(tg) == 0 or int(tg) >= 16777215 or tg == _options['DEFAULT_REFLECTOR']:
-                                    logger.debug('(OPTIONS) %s not setting TS1 Static %s. Bad TG or conflict with DIAL',_system,tg)
+                                if not tg:
                                     continue
                                 tg = int(tg)
                                 make_static_tg(tg,1,_tmout,_system)
@@ -935,8 +934,7 @@ def options_config():
                         if CONFIG['SYSTEMS'][_system]['TS2_STATIC']:
                             ts2 = CONFIG['SYSTEMS'][_system]['TS2_STATIC'].split(',')
                             for tg in ts2:
-                                if not tg or int(tg) == 0 or int(tg) >= 16777215 or tg == _options['DEFAULT_REFLECTOR'] or (tg and ts1 and tg in ts1):
-                                    logger.debug('(OPTIONS) %s not setting TS2 Static %s. Bad TG or conflict with DIAL or TS1',_system,tg)
+                                if not tg or int(tg) == 0 or int(tg) >= 16777215:
                                     continue
                                 tg = int(tg)
                                 reset_static_tg(tg,2,_tmout,_system)
@@ -2742,10 +2740,10 @@ if __name__ == '__main__':
     options = options_task.start(26)
     options.addErrback(loopingErrHandle)
         
-    #STAT trimmer - once every hour (roughly - shifted so all timed tasks don't run at once
+    #STAT trimmer - once every 10 mins (roughly - shifted so all timed tasks don't run at once
     if CONFIG['GLOBAL']['GEN_STAT_BRIDGES']:
         stat_trimmer_task = task.LoopingCall(statTrimmer)
-        stat_trimmer = stat_trimmer_task.start(3700)#3600
+        stat_trimmer = stat_trimmer_task.start(523)#3600
         stat_trimmer.addErrback(loopingErrHandle)
         
     #KA Reporting

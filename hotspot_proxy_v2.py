@@ -312,7 +312,7 @@ if __name__ == '__main__':
     if 'FDPROXY_CLIENTINFO' in os.environ:
         ClientInfo = bool(os.environ['FDPROXY_CLIENTINFO'])
     if 'FDPROXY_LISTENPORT' in os.environ:
-        ListenPort = os.environ['FDPROXY_LISTENPORT']
+        ListenPort = int(os.environ['FDPROXY_LISTENPORT'])
         
     for port in range(DestportStart,DestPortEnd+1,1):
         CONNTRACK[port] = False
