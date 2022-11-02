@@ -307,6 +307,9 @@ def remove_bridge_system(system):
                 if _bridge not in _bridgestemp:
                     _bridgestemp[_bridge] = []
                 _bridgestemp[_bridge].append(_bridgesystem)
+            else:
+                _bridgestemp[_bridge].append({'SYSTEM': system, 'TS': _bridgesystem['TS'], 'TGID': _bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  _bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [_bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + _bridgesystem['TIMEOUT']})
+            
     BRIDGES.update(_bridgestemp)
                 
 
