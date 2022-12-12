@@ -62,6 +62,7 @@ import ssl
 from os.path import isfile, getmtime
 from urllib.request import urlopen
 
+import shutil
 import csv
 
 
@@ -1452,14 +1453,27 @@ def mk_aliases(_config):
         peer_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'])
     except Exception as e:
         logger.error('(ALIAS) ID ALIAS MAPPER: problem with data in peer_ids dictionary, not updating: %s',e)
+        try:
+            peer_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
+        except Exception as f:
+            logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup peer_ids file, but couldn\'t load that either: %s',f)
+
     else:
         if peer_ids:
             logger.info('(ALIAS) ID ALIAS MAPPER: peer_ids dictionary is available')
+            try:
+                shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak')
+            except IOError as g:
+                logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of peer_ids file %s',g)
 
     try:
         subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE'])
     except Exception as e:
         logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in subscriber_ids dictionary, not updating: %s',e)
+        try:
+            subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
+        except Exception as f:
+            logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup subscriber_ids file, but couldn\'t load that either: %s',f)
     else:
         #Add special IDs to DB
         subscriber_ids[900999] = 'D-APRS'
@@ -1467,26 +1481,58 @@ def mk_aliases(_config):
 
         if subscriber_ids:
             logger.info('(ALIAS) ID ALIAS MAPPER: subscriber_ids dictionary is available')
+            try:
+                shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak')
+            except IOError as g:
+                logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of subscriber_ids file %s',g)
+
     try:
         talkgroup_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE'])
     except Exception as e:
         logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in talkgroup_ids dictionary, not updating: %s',e)
+        try:
+            talkgroup_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
+        except Exception as f:
+            logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup talkgroup_ids file, but couldn\'t load that either: %s',f)
     else:
         if talkgroup_ids:
             logger.info('(ALIAS) ID ALIAS MAPPER: talkgroup_ids dictionary is available')
-    try:   
+            try:
+                shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak')
+            except IOError as g:
+                logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of talkgroup_ids file %s',g)
+
+    try:
         local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'])
     except Exception as e:
         logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in local_subscriber_ids dictionary, not updating: %s',e)
+        try:
+            local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
+        except Exception as f:
+            logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup local_subscriber_ids file, but couldn\'t load that either: %s',f)
     else:
-        if subscriber_ids:
+        if local_subscriber_ids:
             logger.info('(ALIAS) ID ALIAS MAPPER: local_subscriber_ids dictionary is available')
-    try:        
+            try:
+                shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'] + '.bak')
+            except IOError as g:
+                logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of local_subscriber_ids file %s',g)
+
+    try:
         server_ids = mk_server_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE'])
     except Exception as e:
         logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in server_ids dictionary, not updating: %s',e)
-    if server_ids:
-        logger.info('(ALIAS) ID ALIAS MAPPER: server_ids dictionary is available')
+        try:
+            server_ids = mk_server_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE'] + '.bak')
+        except Exception as f:
+            logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup server_ids file, but couldn\'t load that either: %s',f)
+    else:
+        if server_ids:
+            logger.info('(ALIAS) ID ALIAS MAPPER: server_ids dictionary is available')
+            try:
+                shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['SERVER_ID_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['SERVER_ID_FILE'] + '.bak')
+            except IOError as g:
+                logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of server_ids file %s',g)
         
         
     return peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids, server_ids
