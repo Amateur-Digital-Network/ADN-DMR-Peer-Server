@@ -19,7 +19,7 @@ FROM python:3.10-alpine
 
 ENTRYPOINT [ "/entrypoint" ]
 
-COPY . /opt/freedmr
+COPY ../ /opt/freedmr
 
 RUN adduser -D -u 54000 radio && \
         apk update && \
