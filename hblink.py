@@ -45,7 +45,8 @@ from twisted.internet import reactor, task
 import log
 import config
 from const import *
-from dmr_utils3.utils import int_id, bytes_4, mk_id_dict
+from utils import mk_id_dict, try_download
+from dmr_utils3.utils import int_id, bytes_4
 
 # Imports for the reporting server
 import pickle
@@ -1380,37 +1381,6 @@ class reportFactory(Factory):
         logger.debug('(REPORT) Send config')
         self.send_clients(b''.join([REPORT_OPCODES['CONFIG_SND'], serialized]))
 
-#Use this try_download instead of that from dmr_utils3
-def try_download(_path, _file, _url, _stale,):
-    no_verify = ssl._create_unverified_context()
-    now = time()
-    file_exists = isfile(''.join([_path,_file])) == True
-    if file_exists:
-        file_old = (getmtime(''.join([_path,_file])) + _stale) < now
-    if not file_exists or (file_exists and file_old):
-        try:
-            with urlopen(_url, context=no_verify) as response:
-                data = response.read()
-                #outfile.write(data)
-                response.close()
-            result = 'ID ALIAS MAPPER: \'{}\' successfully downloaded'.format(_file)
-        except IOError:
-            result = 'ID ALIAS MAPPER: \'{}\' could not be downloaded due to an IOError'.format(_file)
-        else:
-            if data and (data != b'{}'):
-                try:
-                    with open(''.join([_path,_file]), 'wb') as outfile:
-                        outfile.write(data)
-                        outfile.close()
-                except IOError:
-                    result = 'ID ALIAS mapper \'{}\' file could not be written due to an IOError'.format(_file)
-            else:
-                result = 'ID ALIAS mapper \'{}\' file not written because downloaded data is empty for some reason'.format(_file)
-                
-    else:
-        result = 'ID ALIAS MAPPER: \'{}\' is current, not downloaded'.format(_file)
-    
-    return result
 
 #Read list of listed servers from CSV (actually TSV) file 
 def mk_server_dict(path,filename):
@@ -1475,15 +1445,17 @@ def mk_aliases(_config):
         except Exception as f:
             logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup subscriber_ids file, but couldn\'t load that either: %s',f)
     else:
+
+        if subscriber_ids:
+            logger.info('(ALIAS) ID ALIAS MAPPER: subscriber_ids dictionary is available')
+
         #Add special IDs to DB
         subscriber_ids[900999] = 'D-APRS'
         subscriber_ids[4294967295] = 'SC'
 
-        if subscriber_ids:
-            logger.info('(ALIAS) ID ALIAS MAPPER: subscriber_ids dictionary is available')
-            try:
-                shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak')
-            except IOError as g:
+        try:
+            shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak')
+        except IOError as g:
                 logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of subscriber_ids file %s',g)
 
     try:
