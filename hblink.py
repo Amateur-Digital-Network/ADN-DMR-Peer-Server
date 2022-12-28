@@ -60,7 +60,7 @@ from functools import partial, partialmethod
 
 import ssl
 
-from os.path import isfile, getmtime
+from os.path import isfile, getmtime, exists
 from urllib.request import urlopen
 
 import shutil
@@ -1474,21 +1474,24 @@ def mk_aliases(_config):
             except IOError as g:
                 logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of talkgroup_ids file %s',g)
 
-    try:
-        local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'])
-    except Exception as e:
-        logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in local_subscriber_ids dictionary, not updating: %s',e)
+    if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['LOCAL_SUBSCRIBER_FILE']):
         try:
-            local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
-        except Exception as f:
-            logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup local_subscriber_ids file, but couldn\'t load that either: %s',f)
-    else:
-        if local_subscriber_ids:
-            logger.info('(ALIAS) ID ALIAS MAPPER: local_subscriber_ids dictionary is available')
+            local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'])
+        except Exception as e:
+            logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in local_subscriber_ids dictionary, not updating: %s',e)
             try:
-                shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'] + '.bak')
-            except IOError as g:
-                logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of local_subscriber_ids file %s',g)
+                local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
+            except Exception as f:
+                logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup local_subscriber_ids file, but couldn\'t load that either: %s',f)
+        else:
+            if local_subscriber_ids:
+                logger.info('(ALIAS) ID ALIAS MAPPER: local_subscriber_ids dictionary is available')
+                try:
+                    shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'] + '.bak')
+                except IOError as g:
+                    logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of local_subscriber_ids file %s',g)
+    else:
+        logger.info('(ALIAS) ID ALIAS MAPPER: local subscriber file does not exist and is optional, skipping. ')
 
     try:
         server_ids = mk_server_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE'])
