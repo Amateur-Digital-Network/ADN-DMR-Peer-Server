@@ -60,7 +60,7 @@ from functools import partial, partialmethod
 
 import ssl
 
-from os.path import isfile, getmtime, exists
+from os.path import isfile, getmtime, exists, getsize
 from urllib.request import urlopen
 
 import shutil
@@ -1436,12 +1436,15 @@ def mk_aliases(_config):
             except IOError as g:
                 logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of peer_ids file %s',g)
 
+
     try:
+        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') and (getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') > getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'])):
+            raise Exception('backup subscriber_ids file is larger than new file')
         subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE'])
     except Exception as e:
         logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in subscriber_ids dictionary, not updating: %s',e)
         try:
-            subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
+            subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak')
         except Exception as f:
             logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup subscriber_ids file, but couldn\'t load that either: %s',f)
     else:
