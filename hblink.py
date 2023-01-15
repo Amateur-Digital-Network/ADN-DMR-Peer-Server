@@ -1416,6 +1416,8 @@ def mk_aliases(_config):
                 checksums = load_json(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['CHECKSUM_FILE']]))
             except Exception as e:
                 logger.error('(ALIAS) ID ALIAS MAPPER: Cannot load checksums: %s',e)
+        else:
+            logger.warning('(ALIAS) ID ALIAS MAPPER: CHECKSUM_FILE or CHECKSUM_URL is empty. Not downloading checksums!')
 
         # Try updating peer aliases file
         result = try_download(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'], _config['ALIASES']['PEER_URL'], _config['ALIASES']['STALE_TIME'])
@@ -1444,7 +1446,7 @@ def mk_aliases(_config):
         else:
             peer_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'])
     except Exception as e:
-        logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in peer_ids dictionary, not updating: %s',e)
+        logger.error('(ALIAS) ID ALIAS MAPPER: problem with data in peer_ids dictionary, not updating: %s',e)
         try:
             peer_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
         except Exception as f:
@@ -1472,7 +1474,7 @@ def mk_aliases(_config):
         else:
             subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE'])
     except Exception as e:
-        logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in subscriber_ids dictionary, not updating: %s',e)
+        logger.error('(ALIAS) ID ALIAS MAPPER: problem with data in subscriber_ids dictionary, not updating: %s',e)
         try:
             subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak')
         except Exception as f:
@@ -1503,7 +1505,7 @@ def mk_aliases(_config):
         else:
             talkgroup_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE'])
     except Exception as e:
-        logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in talkgroup_ids dictionary, not updating: %s',e)
+        loggererror('(ALIAS) ID ALIAS MAPPER: problem with data in talkgroup_ids dictionary, not updating: %s',e)
         try:
             talkgroup_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE'] + '.bak')
         except Exception as f:
@@ -1523,7 +1525,7 @@ def mk_aliases(_config):
         try:
             local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'])
         except Exception as e:
-            logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in local_subscriber_ids dictionary, not updating: %s',e)
+            logger.error('(ALIAS) ID ALIAS MAPPER: problem with data in local_subscriber_ids dictionary, not updating: %s',e)
             try:
                 local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
             except Exception as f:
@@ -1549,7 +1551,7 @@ def mk_aliases(_config):
         else:
             server_ids = mk_server_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE'])
     except Exception as e:
-        logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in server_ids dictionary, not updating: %s',e)
+        logger.error('(ALIAS) ID ALIAS MAPPER: problem with data in server_ids dictionary, not updating: %s',e)
         try:
             server_ids = mk_server_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE'] + '.bak')
         except Exception as f:
