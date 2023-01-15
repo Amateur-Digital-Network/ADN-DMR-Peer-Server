@@ -38,7 +38,7 @@ from languages import languages
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Cortney T. Buffington, N0MJS'
-__copyright__  = '(c) Simon Adlem, G7RZU 2020-2021, Copyright (c) 2016-2018 Cortney T. Buffington, N0MJS and the K0USY Group'
+__copyright__  = '(c) Simon Adlem, G7RZU 2020-2023, Copyright (c) 2016-2018 Cortney T. Buffington, N0MJS and the K0USY Group'
 __credits__    = 'Colin Durbridge, G4EML, Steve Zingman, N4IRS; Mike Zingman, N4IRR; Jonathan Naylor, G4KLX; Hans Barthen, DL5DI; Torsten Shultze, DG1HT'
 __license__    = 'GNU GPLv3'
 __maintainer__ = 'Simon Adlem, G7RZU'
@@ -134,20 +134,20 @@ def build_config(_config_file):
         for section in config.sections():
             if section == 'GLOBAL':
                 CONFIG['GLOBAL'].update({
-                    'PATH': config.get(section, 'PATH'),
-                    'PING_TIME': config.getint(section, 'PING_TIME'),
-                    'MAX_MISSED': config.getint(section, 'MAX_MISSED'),
-                    'USE_ACL': config.get(section, 'USE_ACL'),
-                    'REG_ACL': config.get(section, 'REG_ACL'),
-                    'SUB_ACL': config.get(section, 'SUB_ACL'),
-                    'TG1_ACL': config.get(section, 'TGID_TS1_ACL'),
-                    'TG2_ACL': config.get(section, 'TGID_TS2_ACL'),
-                    'GEN_STAT_BRIDGES': config.getboolean(section, 'GEN_STAT_BRIDGES'),
-                    'ALLOW_NULL_PASSPHRASE': config.getboolean(section, 'ALLOW_NULL_PASSPHRASE'),
-                    'ANNOUNCEMENT_LANGUAGES': config.get(section, 'ANNOUNCEMENT_LANGUAGES'),
-                    'SERVER_ID': config.getint(section, 'SERVER_ID').to_bytes(4, 'big'),
-                    'DATA_GATEWAY': config.getboolean(section, 'DATA_GATEWAY'),
-                    'VALIDATE_SERVER_IDS': config.getboolean(section, 'VALIDATE_SERVER_IDS')
+                    'PATH': config.get(section, 'PATH',fallback='./'),
+                    'PING_TIME': config.getint(section, 'PING_TIME', fallback=10),
+                    'MAX_MISSED': config.getint(section, 'MAX_MISSED', fallback=3),
+                    'USE_ACL': config.get(section, 'USE_ACL', fallback=True),
+                    'REG_ACL': config.get(section, 'REG_ACL', fallback='PERMIT:ALL'),
+                    'SUB_ACL': config.get(section, 'SUB_ACL', fallback='DENY:1'),
+                    'TG1_ACL': config.get(section, 'TGID_TS1_ACL', fallback='PERMIT:ALL'),
+                    'TG2_ACL': config.get(section, 'TGID_TS2_ACL', fallback='PERMIT:ALL'),
+                    'GEN_STAT_BRIDGES': config.getboolean(section, 'GEN_STAT_BRIDGES', fallback=True),
+                    'ALLOW_NULL_PASSPHRASE': config.getboolean(section, 'ALLOW_NULL_PASSPHRASE', fallback=True),
+                    'ANNOUNCEMENT_LANGUAGES': config.get(section, 'ANNOUNCEMENT_LANGUAGES', fallback=''),
+                    'SERVER_ID': config.getint(section, 'SERVER_ID', fallback=0).to_bytes(4, 'big'),
+                    'DATA_GATEWAY': config.getboolean(section, 'DATA_GATEWAY', fallback=False),
+                    'VALIDATE_SERVER_IDS': config.getboolean(section, 'VALIDATE_SERVER_IDS', fallback=True)
                     
                 })
                 if not CONFIG['GLOBAL']['ANNOUNCEMENT_LANGUAGES']:
@@ -155,39 +155,38 @@ def build_config(_config_file):
 
             elif section == 'REPORTS':
                 CONFIG['REPORTS'].update({
-                    'REPORT': config.getboolean(section, 'REPORT'),
-                    'REPORT_INTERVAL': config.getint(section, 'REPORT_INTERVAL'),
-                    'REPORT_PORT': config.getint(section, 'REPORT_PORT'),
-                    'REPORT_CLIENTS': config.get(section, 'REPORT_CLIENTS').split(',')
+                    'REPORT': config.getboolean(section, 'REPORT', fallback=True),
+                    'REPORT_INTERVAL': config.getint(section, 'REPORT_INTERVAL', fallback=60),
+                    'REPORT_PORT': config.getint(section, 'REPORT_PORT', fallback=4321),
+                    'REPORT_CLIENTS': config.get(section, 'REPORT_CLIENTS',fallback='127.0.0.1').split(',')
                 })
 
             elif section == 'LOGGER':
                 CONFIG['LOGGER'].update({
-                    'LOG_FILE': config.get(section, 'LOG_FILE'),
-                    'LOG_HANDLERS': config.get(section, 'LOG_HANDLERS'),
-                    'LOG_LEVEL': config.get(section, 'LOG_LEVEL'),
-                    'LOG_NAME': config.get(section, 'LOG_NAME')
+                    'LOG_FILE': config.get(section, 'LOG_FILE', fallback='/dev/null'),
+                    'LOG_HANDLERS': config.get(section, 'LOG_HANDLERS', fallback='console-timed'),
+                    'LOG_LEVEL': config.get(section, 'LOG_LEVEL', fallback='INFO'),
+                    'LOG_NAME': config.get(section, 'LOG_NAME', fallback='FreeDMR')
                 })
-                if not CONFIG['LOGGER']['LOG_FILE']:
-                    CONFIG['LOGGER']['LOG_FILE'] = '/dev/null'
+
 
             elif section == 'ALIASES':
                 CONFIG['ALIASES'].update({
-                    'TRY_DOWNLOAD': config.getboolean(section, 'TRY_DOWNLOAD'),
-                    'PATH': config.get(section, 'PATH'),
-                    'PEER_FILE': config.get(section, 'PEER_FILE'),
-                    'SUBSCRIBER_FILE': config.get(section, 'SUBSCRIBER_FILE'),
-                    'TGID_FILE': config.get(section, 'TGID_FILE'),
-                    'PEER_URL': config.get(section, 'PEER_URL'),
-                    'SUBSCRIBER_URL': config.get(section, 'SUBSCRIBER_URL'),
-                    'TGID_URL': config.get(section, 'TGID_URL'),
-                    'STALE_TIME': config.getint(section, 'STALE_DAYS') * 86400,
-                    'SUB_MAP_FILE': config.get(section, 'SUB_MAP_FILE'),
-                    'LOCAL_SUBSCRIBER_FILE': config.get(section, 'LOCAL_SUBSCRIBER_FILE'),
-                    'SERVER_ID_URL': config.get(section, 'SERVER_ID_URL'),
-                    'SERVER_ID_FILE': config.get(section, 'SERVER_ID_FILE'),
-                    'CHECKSUM_URL': config.get(section, 'CHECKSUM_URL'),
-                    'CHECKSUM_FILE': config.get(section, 'CHECKSUM_FILE')
+                    'TRY_DOWNLOAD': config.getboolean(section, 'TRY_DOWNLOAD', fallback=True),
+                    'PATH': config.get(section, 'PATH', fallback='./json/'),
+                    'PEER_FILE': config.get(section, 'PEER_FILE', fallback='peer_ids.json'),
+                    'SUBSCRIBER_FILE': config.get(section, 'SUBSCRIBER_FILE', fallback='subscriber_ids.json'),
+                    'TGID_FILE': config.get(section, 'TGID_FILE', fallback='talkgroup_ids.json'),
+                    'PEER_URL': config.get(section, 'PEER_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/peer_ids.json'),
+                    'SUBSCRIBER_URL': config.get(section, 'SUBSCRIBER_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/subscriber_ids.json'),
+                    'TGID_URL': config.get(section, 'TGID_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/talkgroup_ids.json'),
+                    'STALE_TIME': config.getint(section, 'STALE_DAYS', fallback=1) * 86400,
+                    'SUB_MAP_FILE': config.get(section, 'SUB_MAP_FILE', fallback='sub_map.pkl'),
+                    'LOCAL_SUBSCRIBER_FILE': config.get(section, 'LOCAL_SUBSCRIBER_FILE', fallback=''),
+                    'SERVER_ID_URL': config.get(section, 'SERVER_ID_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/server_ids.tsv'),
+                    'SERVER_ID_FILE': config.get(section, 'SERVER_ID_FILE', fallback='server_ids.tsv'),
+                    'CHECKSUM_URL': config.get(section, 'CHECKSUM_URL', fallback='https://freedmr-lh.gb7fr.org.uk/file_checksums.json'),
+                    'CHECKSUM_FILE': config.get(section, 'CHECKSUM_FILE', fallback='file_checksums.json')
 
                     
                 })
@@ -195,12 +194,12 @@ def build_config(_config_file):
                 
             elif section == 'ALLSTAR':
                 CONFIG['ALLSTAR'].update({
-                    'ENABLED': config.getboolean(section, 'ENABLED'),
-                    'USER': config.get(section, 'USER'),
-                    'PASS': config.get(section, 'PASS'),
-                    'SERVER': config.get(section, 'SERVER'),
-                    'PORT': config.getint(section,'PORT'),
-                    'NODE' : config.getint(section,'NODE')
+                    'ENABLED': config.getboolean(section, 'ENABLED', fallback=False),
+                    'USER': config.get(section, 'USER', fallback='llcgi'),
+                    'PASS': config.get(section, 'PASS', fallback='mypass'),
+                    'SERVER': config.get(section, 'SERVER', fallback='my.asl.server'),
+                    'PORT': config.getint(section,'PORT', fallback=5038),
+                    'NODE' : config.getint(section,'NODE', fallback=0)
             })
                 
             elif section == 'PROXY':
@@ -402,13 +401,13 @@ if __name__ == '__main__':
 
     # CLI argument parser - handles picking up the config file from the command line, and sending a "help" message
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', action='store', dest='CONFIG_FILE', help='/full/path/to/config.file (usually hblink.cfg)')
+    parser.add_argument('-c', '--config', action='store', dest='CONFIG_FILE', help='/full/path/to/config.file (usually freedmr.cfg)')
     cli_args = parser.parse_args()
 
 
     # Ensure we have a path for the config file, if one wasn't specified, then use the execution directory
     if not cli_args.CONFIG_FILE:
-        cli_args.CONFIG_FILE = os.path.dirname(os.path.abspath(__file__))+'/hblink.cfg'
+        cli_args.CONFIG_FILE = os.path.dirname(os.path.abspath(__file__))+'/freedmr.cfg'
     
     CONFIG = build_config(cli_args.CONFIG_FILE)
     pprint(CONFIG)
