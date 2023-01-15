@@ -105,16 +105,16 @@ PATH: ./json/
 PEER_FILE: peer_ids.json
 SUBSCRIBER_FILE: subscriber_ids.json
 TGID_FILE: talkgroup_ids.json
-PEER_URL: http://freedmr-lh.gb7fr.org.uk/json/peer_ids.json
-SUBSCRIBER_URL: http://freedmr-lh.gb7fr.org.uk/json/subscriber_ids.json
-TGID_URL: http://freedmr-lh.gb7fr.org.uk/json/talkgroup_ids.json
-LOCAL_SUBSCRIBER_FILE: local_subscriber_ids.json
+PEER_URL: https://freedmr-lh.gb7fr.org.uk/json/peer_ids.json
+SUBSCRIBER_URL: https://freedmr-lh.gb7fr.org.uk/json/subscriber_ids.json
+TGID_URL: https://freedmr-lh.gb7fr.org.uk/json/talkgroup_ids.json
+LOCAL_SUBSCRIBER_FILE: local_subcriber_ids.json
 STALE_DAYS: 1
 SUB_MAP_FILE: sub_map.pkl
-SERVER_ID_URL: http://freedmr-lh.gb7fr.org.uk/json/server_ids.tsv
+SERVER_ID_URL: https://freedmr-lh.gb7fr.org.uk/json/server_ids.tsv
 SERVER_ID_FILE: server_ids.tsv
-TOPO_FILE: topography.json
-
+CHECKSUM_URL: https://freedmr-lh.gb7fr.org.uk/file_checksums.json
+CHECKSUM_FILE: file_checksums.json
 
 #Control server shared allstar instance via dial / AMI
 [ALLSTAR]

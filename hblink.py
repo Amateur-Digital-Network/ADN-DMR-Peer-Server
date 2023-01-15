@@ -45,7 +45,7 @@ from twisted.internet import reactor, task
 import log
 import config
 from const import *
-from utils import mk_id_dict, try_download
+from utils import mk_id_dict, try_download,load_json,blake2bsum
 from dmr_utils3.utils import int_id, bytes_4
 
 # Imports for the reporting server
@@ -1391,9 +1391,9 @@ def mk_server_dict(path,filename):
             for _row in reader:
                 server_ids[_row['OPB Net ID']] = _row['Country']
         return(server_ids)
-    except IOError as err:
-        logger.warning('ID ALIAS MAPPER: %s could not be read due to IOError: %s',filename,err)
-        return(False)
+    except Exception as err:
+        logger.warning('ID ALIAS MAPPER: %s could not be read: %s',filename,err)
+        raise(err)
 
 
 # ID ALIAS CREATION
@@ -1404,7 +1404,19 @@ def mk_aliases(_config):
     local_subscriber_ids = {}
     talkgroup_ids = {}
     server_ids = {}
+    checksums = {}
     if _config['ALIASES']['TRY_DOWNLOAD'] == True:
+
+        #Try updating checksum file
+        if _config['ALIASES']['CHECKSUM_FILE'] and _config['ALIASES']['CHECKSUM_URL']:
+            result = try_download(_config['ALIASES']['PATH'], _config['ALIASES']['CHECKSUM_FILE'], _config['ALIASES']['CHECKSUM_URL'], _config['ALIASES']['STALE_TIME'])
+            logger.info('(ALIAS) %s', result)
+
+            try:
+                checksums = load_json(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['CHECKSUM_FILE']]))
+            except Exception as e:
+                logger.error('(ALIAS) ID ALIAS MAPPER: Cannot load checksums: %s',e)
+
         # Try updating peer aliases file
         result = try_download(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'], _config['ALIASES']['PEER_URL'], _config['ALIASES']['STALE_TIME'])
         logger.info('(ALIAS) %s', result)
@@ -1417,30 +1429,48 @@ def mk_aliases(_config):
         #Try updating server ids file
         result = try_download(_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE'], _config['ALIASES']['SERVER_ID_URL'], _config['ALIASES']['STALE_TIME'])
         logger.info('(ALIAS) %s', result)
+
         
     # Make Dictionaries
+    #Peer IDs
     try:
-        peer_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'])
+        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak') and (getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak') > getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'])):
+            raise Exception('backup peer_ids file is larger than new file')
+        try:
+            if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE']])) != checksums['peer_ids']:
+                raise(Exception('bad checksum'))
+        except Exception as e:
+            logger.error('(ALIAS) ID ALIAS MAPPER: problem with blake2bsum of peer_ids file. not updating.: %s',e)
+        else:
+            peer_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'])
     except Exception as e:
-        logger.error('(ALIAS) ID ALIAS MAPPER: problem with data in peer_ids dictionary, not updating: %s',e)
+        logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in peer_ids dictionary, not updating: %s',e)
         try:
             peer_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
         except Exception as f:
             logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup peer_ids file, but couldn\'t load that either: %s',f)
-
     else:
+
         if peer_ids:
             logger.info('(ALIAS) ID ALIAS MAPPER: peer_ids dictionary is available')
-            try:
-                shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak')
-            except IOError as g:
+
+        try:
+            shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak')
+        except IOError as g:
                 logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of peer_ids file %s',g)
 
 
+    #Subscriber IDs
     try:
         if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') and (getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') > getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'])):
             raise Exception('backup subscriber_ids file is larger than new file')
-        subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE'])
+        try:
+            if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE']])) != checksums['subscriber_ids']:
+                raise(Exception('bad checksum'))
+        except Exception as e:
+            logger.error('(ALIAS) ID ALIAS MAPPER: problem with blake2bsum of subscriber_ids file. not updating.: %s',e)
+        else:
+            subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE'])
     except Exception as e:
         logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in subscriber_ids dictionary, not updating: %s',e)
         try:
@@ -1461,22 +1491,34 @@ def mk_aliases(_config):
         except IOError as g:
                 logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of subscriber_ids file %s',g)
 
+    #Talkgroup IDs
     try:
-        talkgroup_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE'])
+        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak') and (getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak') > getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'])):
+            raise Exception('backup talkgroup_ids file is larger than new file')
+        try:
+            if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE']])) != checksums['talkgroup_ids']:
+                raise(Exception('bad checksum'))
+        except Exception as e:
+            logger.error('(ALIAS) ID ALIAS MAPPER: problem with blake2bsum of talkgroup_ids file. not updating.: %s',e)
+        else:
+            talkgroup_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE'])
     except Exception as e:
         logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in talkgroup_ids dictionary, not updating: %s',e)
         try:
-            talkgroup_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE'] + '.bak')
+            talkgroup_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE'] + '.bak')
         except Exception as f:
             logger.error('(ALIAS) ID ALIAS MAPPER: Tried backup talkgroup_ids file, but couldn\'t load that either: %s',f)
     else:
+
         if talkgroup_ids:
             logger.info('(ALIAS) ID ALIAS MAPPER: talkgroup_ids dictionary is available')
-            try:
-                shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak')
-            except IOError as g:
+
+        try:
+            shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak')
+        except IOError as g:
                 logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of talkgroup_ids file %s',g)
 
+    #Local subscriber override
     if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['LOCAL_SUBSCRIBER_FILE']):
         try:
             local_subscriber_ids = mk_id_dict(_config['ALIASES']['PATH'], _config['ALIASES']['LOCAL_SUBSCRIBER_FILE'])
@@ -1496,8 +1538,16 @@ def mk_aliases(_config):
     else:
         logger.info('(ALIAS) ID ALIAS MAPPER: local subscriber file does not exist and is optional, skipping. ')
 
+    #Server IDs
     try:
-        server_ids = mk_server_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE'])
+        try:
+            if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE']])) != checksums['server_ids']:
+                raise(Exception('bad checksum'))
+        except Exception as e:
+            logger.error('(ALIAS) ID ALIAS MAPPER: problem with blake2bsum of server_ids file: %s',e)
+            raise(e)
+        else:
+            server_ids = mk_server_dict(_config['ALIASES']['PATH'], _config['ALIASES']['SERVER_ID_FILE'])
     except Exception as e:
         logger.info('(ALIAS) ID ALIAS MAPPER: problem with data in server_ids dictionary, not updating: %s',e)
         try:
@@ -1513,7 +1563,7 @@ def mk_aliases(_config):
                 logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of server_ids file %s',g)
         
         
-    return peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids, server_ids
+    return peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids, server_ids, checksums
 
 
 #************************************************

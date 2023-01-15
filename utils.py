@@ -27,6 +27,7 @@ from time import time
 from os.path import isfile, getmtime
 from urllib.request import urlopen
 from json import load as jload
+import hashlib
 
 
 
@@ -81,4 +82,24 @@ def mk_id_dict(_path, _file):
     except:
         raise
 
+#Read JSON from file
+def load_json(filename):
+    try:
+        with open(filename) as f:
+            data = jload(f)
+    except:
+        raise
+    else:
+        return(data)
 
+
+#Calculate blake2b checksum of file
+def blake2bsum(filename):
+    blake2b_hash = hashlib.blake2b()
+    try:
+        with open(filename,"rb") as f:
+            for byte_block in iter(lambda: f.read(4096),b""):
+                blake2b_hash.update(byte_block)
+            return(blake2b_hash.hexdigest())
+    except:
+        raise

@@ -941,7 +941,7 @@ if __name__ == '__main__':
         signal.signal(sig, sig_handler)
 
     # Create the name-number mapping dictionaries
-    peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids,server_ids = mk_aliases(CONFIG)
+    peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids,_server_ids,_checksums = mk_aliases(CONFIG)
     
     #Add special IDs to DB
     subscriber_ids[900999] = 'D-APRS'
