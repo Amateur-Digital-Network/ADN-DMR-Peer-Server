@@ -350,6 +350,9 @@ def build_config(_config_file):
                         'ENHANCED_OBP': config.getboolean(section, 'ENHANCED_OBP'),
                         'VER' : config.getint(section, 'PROTO_VER')
                     }})
+
+                    if CONFIG['SYSTEMS'][section]['VER'] in (0,2,3) or CONFIG['SYSTEMS'][section]['VER'] > 5:
+                        sys.exit('(%s) PROTO_VER not valid',section)
                     
                     try:
                         
