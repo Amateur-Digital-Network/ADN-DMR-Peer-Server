@@ -476,16 +476,39 @@ class OPENBRIDGE(DatagramProtocol):
                         self.send_bcsq(_dst_id,_stream_id)
                         return
                     
-                    
+
                     #Low-level TG filtering 
                     if _call_type != 'unit':
                         _int_dst_id = int_id(_dst_id)
-                        if _int_dst_id <= 79 or (_int_dst_id >= 9990 and _int_dst_id <= 9999) or _int_dst_id == 900999:
+
+                        if _int_dst_id <= 79:
                             if _stream_id not in self._laststrid:
-                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL TG FILTER', self._system, int_id(_stream_id), _int_dst_id)
+                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL TG FILTER (local to repeater)', self._system, int_id(_stream_id), _int_dst_id)
                                 self.send_bcsq(_dst_id,_stream_id)
                                 self._laststrid.append(_stream_id)
                             return
+
+                        if (_int_dst_id >= 9990 and _int_dst_id <= 9999) or _int_dst_id == 900999:
+                            if _stream_id not in self._laststrid:
+                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL TG FILTER (local to server)', self._system, int_id(_stream_id), _int_dst_id)
+                                self.send_bcsq(_dst_id,_stream_id)
+                                self._laststrid.append(_stream_id)
+                            return
+
+                        if (_int_dst_id >= 92 and _int_dst_id <= 199) and int(str(int.from_bytes(_source_server,'big'))[:4]) != int(str(_CONFIG['SERVER_ID'][:4])):
+                            if _stream_id not in self._laststrid:
+                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL TG FILTER (local to server main ID)', self._system, int_id(_stream_id), _int_dst_id)
+                                self.send_bcsq(_dst_id,_stream_id)
+                                self._laststrid.append(_stream_id)
+                            return
+
+                        if (_int_dst_id >= 80 and _int_dst_id <= 89) or (_int_dst_id >= 800 and _int_dst_id <= 899) and int(str(int.from_bytes(_source_server,'big'))[:3]) != int(str(_CONFIG['SERVER_ID'][:3])):
+                            if _stream_id not in self._laststrid:
+                                logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL TG FILTER (local to MCC)', self._system, int_id(_stream_id), _int_dst_id)
+                                self.send_bcsq(_dst_id,_stream_id)
+                                self._laststrid.append(_stream_id)
+                            return
+
                     
                     # ACL Processing
                     if self._CONFIG['GLOBAL']['USE_ACL']:
@@ -586,7 +609,7 @@ class OPENBRIDGE(DatagramProtocol):
                     if compare_digest(_hash, _ckhs):
                         logger.trace('(%s) *ProtoControl*  BCVE Version received, Ver: %s',self._system,_ver)
                         
-                        if _ver == 2 or _ver ==3:
+                        if _ver == 2 or _ver == 3 or _ver > 5:
                             logger.info('(%s) *ProtoControl*  BCVE Version not supported, Ver: %s',self._system,_ver)
                         elif _ver > self._config['VER']:
                             logger.info('(%s) *ProtoControl*  BCVE Version upgrade, Ver: %s',self._system,_ver)
@@ -812,7 +835,6 @@ class HBSYSTEM(DatagramProtocol):
 
         # Extract the command, which is various length, all but one 4 significant characters -- RPTCL
         _command = _data[:4]
-
         if _command == DMRD:    # DMRData -- encapsulated DMR data frame
             _peer_id = _data[11:15]
             if _peer_id in self._peers \
