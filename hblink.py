@@ -501,7 +501,7 @@ class OPENBRIDGE(DatagramProtocol):
                                 self.send_bcsq(_dst_id,_stream_id)
                                 self._laststrid.append(_stream_id)
                             return
-
+#aaaa
                         if (_int_dst_id >= 80 and _int_dst_id <= 89) or (_int_dst_id >= 800 and _int_dst_id <= 899) and int(str(int.from_bytes(_source_server,'big'))[:3]) != int(str(self._CONFIG['GLOBAL']['SERVER_ID'])[:3]):
                             if _stream_id not in self._laststrid:
                                 logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL TG FILTER (local to MCC)', self._system, int_id(_stream_id), _int_dst_id)
