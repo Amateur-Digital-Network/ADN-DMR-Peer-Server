@@ -52,7 +52,7 @@ build-testing:       # This job runs in the build stage, which runs first.
   script:
     - echo "Compiling the code..."
     - docker login -u $CI_REGISTRY_USER -p $CI_REGISTRY_PASSWORD $CI_REGISTRY
-    - docker buildx build --no-cache -f Dockerfile-ci -t gitlab.hacknix.net:5050/hacknix/freedmr:testing --platform linux/amd64 --push .
+    - docker buildx build --no-cache -f docker-configs/Dockerfile-ci -t gitlab.hacknix.net:5050/hacknix/freedmr:testing --platform linux/amd64 --push .
   only:
     - testing
 
