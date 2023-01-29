@@ -70,66 +70,32 @@ chown 54000:54000 /etc/freedmr/json &&
 
 echo Install /etc/freedmr/freedmr.cfg ... 
 cat << EOF > /etc/freedmr/freedmr.cfg
-[GLOBAL]
-PATH: ./
-PING_TIME: 10
-MAX_MISSED: 3
-USE_ACL: True
-REG_ACL: DENY:0-100000
-SUB_ACL: DENY:0-100000
-TGID_TS1_ACL: PERMIT:ALL
-TGID_TS2_ACL: PERMIT:ALL
-GEN_STAT_BRIDGES: True
-ALLOW_NULL_PASSPHRASE: True
-ANNOUNCEMENT_LANGUAGES:
-SERVER_ID: 0
-DATA_GATEWAY: False
-VALIDATE_SERVER_IDS: True
+#This empty config file will use defaults for everything apart from OBP and HBP config
+#This is usually a sensible choice. 
 
+#I have moved to a config like this to encourage servers to use the accepted defaults 
+#unless you really know what you are doing.
+
+[GLOBAL]
+#If you join the FreeDMR network, you need to add your ServerID Here.
+SERVER_ID: 0
 
 [REPORTS]
-REPORT: True
-REPORT_INTERVAL: 60
-REPORT_PORT: 4321
-REPORT_CLIENTS: *
 
 [LOGGER]
-LOG_FILE: /dev/null
-LOG_HANDLERS: console-timed
-LOG_LEVEL: INFO
-LOG_NAME: FreeDMR
 
 [ALIASES]
-TRY_DOWNLOAD: True
-PATH: ./json/
-PEER_FILE: peer_ids.json
-SUBSCRIBER_FILE: subscriber_ids.json
-TGID_FILE: talkgroup_ids.json
-PEER_URL: https://freedmr-lh.gb7fr.org.uk/json/peer_ids.json
-SUBSCRIBER_URL: https://freedmr-lh.gb7fr.org.uk/json/subscriber_ids.json
-TGID_URL: https://freedmr-lh.gb7fr.org.uk/json/talkgroup_ids.json
-LOCAL_SUBSCRIBER_FILE: local_subcriber_ids.json
-STALE_DAYS: 1
-SUB_MAP_FILE: sub_map.pkl
-SERVER_ID_URL: https://freedmr-lh.gb7fr.org.uk/json/server_ids.tsv
-SERVER_ID_FILE: server_ids.tsv
-CHECKSUM_URL: https://freedmr-lh.gb7fr.org.uk/file_checksums.json
-CHECKSUM_FILE: file_checksums.json
 
-#Control server shared allstar instance via dial / AMI
 [ALLSTAR]
-ENABLED: false
-USER:admin
-PASS: password
-SERVER: asl.example.com
-PORT: 5038
-NODE: 11111
 
+#This is an example OpenBridgeProtocol (OBP) or FreeBridgeProtocol (FBP) configuration
+#If you joing FreeDMR, you will be given a config like this to paste in
 [OBP-TEST]
 MODE: OPENBRIDGE
 ENABLED: False
 IP:
 PORT: 62044
+#The ID which you expect to see sent from the other end of the link. 
 NETWORK_ID: 1
 PASSPHRASE: mypass
 TARGET_IP: 
@@ -137,11 +103,17 @@ TARGET_PORT: 62044
 USE_ACL: True
 SUB_ACL: DENY:1
 TGID_ACL: PERMIT:ALL
+#Should always be true if using docker. 
 RELAX_CHECKS: True
+#True for FBP, False for OBP
 ENHANCED_OBP: True
-PROTO_VER: 2
+#PROTO_VER should be 5 for FreeDMR servers using FBP
+#1 for other servers using OBP
+PROTO_VER: 5
 
-
+#This defines parameters for repeater/hotspot connections 
+#via HomeBrewProtocol (HBP)
+#I don't recommend changing most of this unless you know what you are doing
 [SYSTEM]
 MODE: MASTER
 ENABLED: True
@@ -169,6 +141,7 @@ ALLOW_UNREG_ID: False
 PROXY_CONTROL: True
 OVERRIDE_IDENT_TG:
 
+#Echo (Loro / Parrot) server
 [ECHO]
 MODE: PEER
 ENABLED: True
