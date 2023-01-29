@@ -182,7 +182,7 @@ def build_config(_config_file):
                     'TGID_URL': config.get(section, 'TGID_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/talkgroup_ids.json'),
                     'STALE_TIME': config.getint(section, 'STALE_DAYS', fallback=1) * 86400,
                     'SUB_MAP_FILE': config.get(section, 'SUB_MAP_FILE', fallback='sub_map.pkl'),
-                    'LOCAL_SUBSCRIBER_FILE': config.get(section, 'LOCAL_SUBSCRIBER_FILE', fallback=''),
+                    'LOCAL_SUBSCRIBER_FILE': config.get(section, 'LOCAL_SUBSCRIBER_FILE', fallback='local_subscribers.json'),
                     'SERVER_ID_URL': config.get(section, 'SERVER_ID_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/server_ids.tsv'),
                     'SERVER_ID_FILE': config.get(section, 'SERVER_ID_FILE', fallback='server_ids.tsv'),
                     'CHECKSUM_URL': config.get(section, 'CHECKSUM_URL', fallback='https://freedmr-lh.gb7fr.org.uk/file_checksums.json'),
