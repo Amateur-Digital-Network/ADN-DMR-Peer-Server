@@ -135,8 +135,19 @@ def config_reports(_config, _factory):
 
         reporting = task.LoopingCall(reporting_loop, logger, report_server)
         reporting.start(_config['REPORTS']['REPORT_INTERVAL'])
+        bridgeDebug()
 
     return report_server
+
+def bridgeDebug():
+    for system in CONFIG['SYSTEMS']:
+        bridgeroll = 0
+        for bridge in BRIDGES:
+            for enabled_system in BRIDGE['bridge']:
+                if enabled_system == system:
+                    bridgeroll += 1
+        if not bridgeroll:
+            logger.warn('{BRIDGEDEBUG) system %s has no bridges', system)
 
 
 # Import Bridging rules
