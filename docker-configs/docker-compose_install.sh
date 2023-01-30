@@ -21,19 +21,48 @@
 echo FreeDMR Docker installer...
 
 echo Installing required packages...
-apt-get -y install docker.io && 
+echo Install Docker Community Edition...
+apt-get -y remove docker docker-engine docker.io &&
+apt-get -y update &&
+apt-get -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common &&
+curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add - &&
+ARCH=`/usr/bin/arch`
+echo "System architecture is $ARCH" 
+if [ "$ARCH" == "x86_64" ]
+then
+    ARCH="amd64"
+fi
+add-apt-repository \
+   "deb [arch=$ARCH] https://download.docker.com/linux/debian \
+   $(lsb_release -cs) \
+   stable" &&
+apt-get -y update &&
+apt-get -y install docker-ce &&
+
+echo Install Docker Compose...
 apt-get -y install docker-compose &&
-apt-get -y  install conntrack &&
 
 echo Set userland-proxy to false...
-echo '{ "userland-proxy": false}' > /etc/docker/daemon.json &&
+cat <<EOF > /etc/docker/daemon.json &&
+{
+     "userland-proxy": false,
+     "experimental": true,
+     "log-driver": "json-file",
+     "log-opts": {
+        "max-size": "10m",
+        "max-file": "3"
+      }
+}
+EOF
 
 echo Restart docker...
 systemctl restart docker &&
 
 echo Make config directory...
 mkdir /etc/freedmr &&
-chmod 755 /etc/freedmr &&
+mkdir -p /etc/freedmr/acme.sh && 
+mkdir -p /etc/freedmr/certs &&
+chmod -R 755 /etc/freedmr &&
 
 echo make json directory...
 mkdir -p /etc/freedmr/json &&
@@ -41,60 +70,32 @@ chown 54000:54000 /etc/freedmr/json &&
 
 echo Install /etc/freedmr/freedmr.cfg ... 
 cat << EOF > /etc/freedmr/freedmr.cfg
+#This empty config file will use defaults for everything apart from OBP and HBP config
+#This is usually a sensible choice. 
+
+#I have moved to a config like this to encourage servers to use the accepted defaults 
+#unless you really know what you are doing.
+
 [GLOBAL]
-PATH: ./
-PING_TIME: 10
-MAX_MISSED: 3
-USE_ACL: True
-REG_ACL: DENY:0-100000
-SUB_ACL: DENY:0-100000
-TGID_TS1_ACL: PERMIT:ALL
-TGID_TS2_ACL: PERMIT:ALL
-GEN_STAT_BRIDGES: True
-ALLOW_NULL_PASSPHRASE: True
-ANNOUNCEMENT_LANGUAGES:
+#If you join the FreeDMR network, you need to add your ServerID Here.
 SERVER_ID: 0
 
-
 [REPORTS]
-REPORT: True
-REPORT_INTERVAL: 60
-REPORT_PORT: 4321
-REPORT_CLIENTS: *
 
 [LOGGER]
-LOG_FILE: log/freedmr.log
-LOG_HANDLERS: file-timed
-LOG_LEVEL: INFO
-LOG_NAME: FreeDMR
 
 [ALIASES]
-TRY_DOWNLOAD: True
-PATH: ./json/
-PEER_FILE: peer_ids.json
-SUBSCRIBER_FILE: subscriber_ids.json
-TGID_FILE: talkgroup_ids.json
-PEER_URL: https://www.radioid.net/static/rptrs.json
-SUBSCRIBER_URL: http://downloads.freedmr.uk/downloads/local_subscriber_ids.json
-TGID_URL: TGID_URL: https://freedmr.cymru/talkgroups/talkgroup_ids_json.php
-STALE_DAYS: 1
-LOCAL_SUBSCRIBER_FILE: local_subcriber_ids.json
-SUB_MAP_FILE: sub_map.pkl
 
-[MYSQL]
-USE_MYSQL: False
-USER: hblink
-PASS: mypassword
-DB: hblink
-SERVER: 127.0.0.1
-PORT: 3306
-TABLE: repeaters
+[ALLSTAR]
 
+#This is an example OpenBridgeProtocol (OBP) or FreeBridgeProtocol (FBP) configuration
+#If you joing FreeDMR, you will be given a config like this to paste in
 [OBP-TEST]
 MODE: OPENBRIDGE
 ENABLED: False
 IP:
 PORT: 62044
+#The ID which you expect to see sent from the other end of the link. 
 NETWORK_ID: 1
 PASSPHRASE: mypass
 TARGET_IP: 
@@ -102,11 +103,17 @@ TARGET_PORT: 62044
 USE_ACL: True
 SUB_ACL: DENY:1
 TGID_ACL: PERMIT:ALL
+#Should always be true if using docker. 
 RELAX_CHECKS: True
+#True for FBP, False for OBP
 ENHANCED_OBP: True
-PROTO_VER: 2
+#PROTO_VER should be 5 for FreeDMR servers using FBP
+#1 for other servers using OBP
+PROTO_VER: 5
 
-
+#This defines parameters for repeater/hotspot connections 
+#via HomeBrewProtocol (HBP)
+#I don't recommend changing most of this unless you know what you are doing
 [SYSTEM]
 MODE: MASTER
 ENABLED: True
@@ -132,7 +139,9 @@ ANNOUNCEMENT_LANGUAGE: en_GB
 GENERATOR: 100
 ALLOW_UNREG_ID: False
 PROXY_CONTROL: True
+OVERRIDE_IDENT_TG:
 
+#Echo (Loro / Parrot) server
 [ECHO]
 MODE: PEER
 ENABLED: True
@@ -173,31 +182,27 @@ echo "BRIDGES = {'9990': [{'SYSTEM': 'ECHO', 'TS': 2, 'TGID': 9990, 'ACTIVE': Tr
 echo Set perms on config directory...
 chown -R 54000 /etc/freedmr &&
 
-echo Setup logging...
-mkdir -p /var/log/freedmr &&
-touch /var/log/freedmr/freedmr.log &&
-chown -R 54000 /var/log/freedmr &&
-mkdir -p /var/log/FreeDMRmonitor &&
-touch /var/log/FreeDMRmonitor/lastheard.log &&
-touch /var/log/FreeDMRmonitor/hbmon.log &&
-chown -R 54001 /var/log/FreeDMRmonitor &&
-
 echo Get docker-compose.yml...
 cd /etc/freedmr &&
 curl https://gitlab.hacknix.net/hacknix/FreeDMR/-/raw/master/docker-configs/docker-compose.yml -o docker-compose.yml &&
-echo Install crontab...
-cat << EOF > /etc/cron.daily/lastheard
-#!/bin/bash
-mv /var/log/FreeDMRmonitor/lastheard.log /var/log/FreeDMRmonitor/lastheard.log.save
-/usr/bin/tail -150 /var/log/FreeDMRmonitor/lastheard.log.save > /var/log/FreeDMRmonitor/lastheard.log
-mv /var/log/FreeDMRmonitor/lastheard.log /var/log/FreeDMRmonitor/lastheard.log.save
-/usr/bin/tail -150 /var/log/FreeDMRmonitor/lastheard.log.save > /var/log/FreeDMRmonitor/lastheard.log
-EOF
+
 chmod 755 /etc/cron.daily/lastheard
 
+echo Tune network stack...
+cat << EOF > /etc/sysctl.conf &&
+net.core.rmem_default=134217728
+net.core.rmem_max=134217728
+net.core.wmem_max=134217728                       
+net.core.rmem_default=134217728
+net.core.netdev_max_backlog=250000
+net.netfilter.nf_conntrack_udp_timeout=15
+net.netfilter.nf_conntrack_udp_timeout_stream=35
+EOF
+
+/usr/sbin/sysctl -p &&
 
 echo Run FreeDMR container...
 docker-compose up -d
 
-
+echo Read notes in /etc/freedmr/docker-compose.yml to understand how to implement extra functionality.
 echo FreeDMR setup complete!
