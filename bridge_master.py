@@ -390,6 +390,7 @@ def statTrimmer():
 
 #Identify systems with no bridges
 def bridgeDebug():
+    logger.info('(BRIDGEDEBUG) Running bridge debug')
     for system in CONFIG['SYSTEMS']:
         bridgeroll = 0
         for bridge in BRIDGES:
