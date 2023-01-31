@@ -388,6 +388,17 @@ def statTrimmer():
     if CONFIG['REPORTS']['REPORT']:
         report_server.send_clients(b'bridge updated')
 
+#Identify systems with no bridges
+def bridgeDebug():
+    for system in CONFIG['SYSTEMS']:
+        bridgeroll = 0
+        for bridge in BRIDGES:
+            for enabled_system in BRIDGE['bridge']:
+                if enabled_system == system:
+                    bridgeroll += 1
+        if not bridgeroll:
+            logger.warn('{BRIDGEDEBUG) system %s has no bridges', system)
+
 def kaReporting():
     logger.debug('(ROUTER) KeepAlive reporting loop started')
     for system in systems:
@@ -2757,6 +2768,13 @@ if __name__ == '__main__':
     ka_task = task.LoopingCall(kaReporting)
     ka = ka_task.start(60)
     ka.addErrback(loopingErrHandle)
+
+    #Debug bridges
+    if CONFIG['GLOBAL']['DEBUG_BRIDGES']:
+        debug_bridges_task = task.LoopingCall(bridgeDebug)
+        debug_bridges = debug_bridges_task.start(66)
+        debug_bridges.addErrback(loopingErrHandle)
+
     
     #Subscriber map trimmer
     sub_trimmer_task = task.LoopingCall(SubMapTrimmer)
