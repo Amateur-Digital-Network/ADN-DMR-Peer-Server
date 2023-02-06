@@ -159,7 +159,7 @@ def build_config(_config_file):
                     'REPORT': config.getboolean(section, 'REPORT', fallback=True),
                     'REPORT_INTERVAL': config.getint(section, 'REPORT_INTERVAL', fallback=60),
                     'REPORT_PORT': config.getint(section, 'REPORT_PORT', fallback=4321),
-                    'REPORT_CLIENTS': config.get(section, 'REPORT_CLIENTS',fallback='127.0.0.1').split(',')
+                    'REPORT_CLIENTS': config.get(section, 'REPORT_CLIENTS',fallback='*').split(',')
                 })
 
             elif section == 'LOGGER':
