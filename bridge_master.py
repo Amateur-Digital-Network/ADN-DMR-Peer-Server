@@ -394,7 +394,7 @@ def bridgeDebug():
     for system in CONFIG['SYSTEMS']:
         bridgeroll = 0
         for bridge in BRIDGES:
-            for enabled_system in bridge['bridge']:
+            for enabled_system in BRIDGES[bridge]:
                 if enabled_system == system:
                     bridgeroll += 1
         if not bridgeroll:
