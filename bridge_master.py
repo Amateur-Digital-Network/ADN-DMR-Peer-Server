@@ -398,7 +398,7 @@ def bridgeDebug():
                 if enabled_system == system:
                     bridgeroll += 1
         if not bridgeroll:
-            logger.warn('{BRIDGEDEBUG) system %s has no bridges', system)
+            logger.warning('{BRIDGEDEBUG) system %s has no bridges', system)
 
 def kaReporting():
     logger.debug('(ROUTER) KeepAlive reporting loop started')
@@ -894,6 +894,12 @@ def options_config():
                     if isinstance(_options['DEFAULT_UA_TIMER'], str) and not _options['DEFAULT_UA_TIMER'].isdigit():
                         logger.debug('(OPTIONS) %s - DEFAULT_REFLECTOR is not an integer, ignoring',_system)
                         continue
+
+                    #if the UA timer is set to 0 - actually set it to (close to) maximum size of a 32
+                    #bit signed int - which works out at around 68 years!
+                    #For all practical purposes, this implements an unlimited timer - aka sticky static.
+                    if int(_options['DEFAULT_UA_TIMER']) == 0:
+                        _options['DEFAULT_UA_TIMER'] = 35791394
                         
                     _tmout = int(_options['DEFAULT_UA_TIMER'])
                     
