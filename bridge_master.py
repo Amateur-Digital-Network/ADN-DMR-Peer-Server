@@ -1499,6 +1499,7 @@ class routerOBP(OPENBRIDGE):
                 #Rate drop
                 if self.STATUS[_stream_id]['packets'] > 18 and (self.STATUS[_stream_id]['packets'] / self.STATUS[_stream_id]['START'] > 25):
                     logger.warning("(%s) *PacketControl* RATE DROP! Stream ID:, %s TGID: %s",self._system,int_id(_stream_id),int_id(_dst_id))
+                    self.proxy_BadPeer()
                     return
                 
                 #Duplicate handling#

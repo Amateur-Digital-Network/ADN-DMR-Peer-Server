@@ -802,6 +802,10 @@ class HBSYSTEM(DatagramProtocol):
         _bltime = str(_bltime)
         _prpacket = b''.join([PRBL,peer_id,_bltime.encode('UTF-8')])
         self.transport.write(_prpacket,sockaddr)
+
+    def proxy_BadPeer(self):
+        for _pi in self._peers:
+            self.proxy_IPBlackList(_pi,self._peers[_pi]['SOCKADDR'])
         
     def validate_id(self,_peer_id):
         
