@@ -391,11 +391,11 @@ def statTrimmer():
 #Debug and fix bridge table issues.
 def bridgeDebug():
     logger.info('(BRIDGEDEBUG) Running bridge debug')
+    statroll = 0
     for system in CONFIG['SYSTEMS']:
         bridgeroll = 0
         dialroll = 0
         activeroll = 0
-        statroll = 0
         for _bridge in BRIDGES:
             for enabled_system in BRIDGES[_bridge]:
                 if enabled_system['SYSTEM'] == system:
@@ -409,7 +409,7 @@ def bridgeDebug():
                     if enabled_system['TO_TYPE'] == 'STAT':
                         statroll += 1
         if bridgeroll:
-            logger.info('(BRIDGEDEBUG) system %s has %s bridges of which %s are in an ACTIVE state', system, bridgeroll, activeroll)
+            logger.warning('(BRIDGEDEBUG) system %s has %s bridges of which %s are in an ACTIVE state', system, bridgeroll, activeroll)
 
         if dialroll > 1 :
             logger.warning('(BRIDGEDEBUG) system %s has more than one active dial bridge (%s) - fixing',system, dialroll)
@@ -430,7 +430,7 @@ def bridgeDebug():
                             if _entry['SYSTEM'] == system:
                                 _entry['ACTIVE'] = False
 
-        logger.info('(BRIDGEDEBUG) The server currently has %s STATic bridges',statroll)
+    logger.info('(BRIDGEDEBUG) The server currently has %s STATic bridges',statroll)
 
 
 def kaReporting():
