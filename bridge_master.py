@@ -411,7 +411,7 @@ def bridgeDebug():
         if bridgeroll:
             logger.debug('(BRIDGEDEBUG) system %s has %s bridges of which %s are in an ACTIVE state', system, bridgeroll, activeroll)
 
-        if dialroll > 1 :
+        if dialroll > 1 and CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
             logger.warning('(BRIDGEDEBUG) system %s has more than one active dial bridge (%s) - fixing',system, dialroll)
             times = {}
             for _bridge in BRIDGES:
@@ -420,7 +420,8 @@ def bridgeDebug():
                         times[enabled_system['TIMER']] = _bridge
             ordered = sorted(times.keys())
             _setbridge = times[ordered.pop()]
-            logger.warning('(BRIDGEDEBUG) setting %s dial bridge to %s as this bridge has the longest timer set to run',system, _setbridge)
+            if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
+                logger.warning('(BRIDGEDEBUG) setting %s dial bridge to %s as this bridge has the longest timer set to run',system, _setbridge)
 
             for _tstamp in ordered:
                 for _bridge in times.values():
