@@ -121,7 +121,7 @@ def config_reports(_config, _factory):
             logger.info('(REPORT) %s systems have at least one peer',i)
             logger.info('(REPORT) Subscriber Map has %s entries',len(SUB_MAP))
             
-        logger.info('(REPORT) HBlink TCP reporting server configured')
+        logger.info('(REPORT) FreeDMR TCP reporting server configured')
 
         report_server = _factory(_config)
         report_server.clients = []
@@ -406,10 +406,26 @@ def bridgeDebug():
                         else:
                             activeroll += 1
         if bridgeroll:
-            logger.info('(BRIDGEDEBUG) system %s has %s bridges of which %s are in an ACTIVE state', system, bridgeroll, activeroll)
+            logger.debug('(BRIDGEDEBUG) system %s has %s bridges of which %s are in an ACTIVE state', system, bridgeroll, activeroll)
 
         if dialroll > 1 :
-            logger.warning('(BRIDGEDEBUG) system %s has more than one active dial bridge (%s) - needs fixing',system, dialroll)
+            logger.warning('(BRIDGEDEBUG) system %s has more than one active dial bridge (%s) - fixing',system, dialroll)
+            times == {}
+            for _bridge in BRIDGES:
+                for enabled_system in BRIDGES[_bridge]:
+                    if enabled_system['ACTIVE'] and _bridge and _bridge[0:1] == '#':
+                        times[enabled_system['TIMER']] == _bridge
+            ordered == sorted(keys(times))
+            ordered.pop()
+            for _bridge in ordered:
+                for _entry in BRIDGES[_bridge]:
+                    if _entry['SYSTEM'] == system:
+                        _entry['ACTIVE'] = False
+
+
+
+
+
 
 
 
