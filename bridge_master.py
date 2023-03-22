@@ -388,13 +388,14 @@ def statTrimmer():
     if CONFIG['REPORTS']['REPORT']:
         report_server.send_clients(b'bridge updated')
 
-#Identify systems with no bridges
+#Debug and fix bridge table issues.
 def bridgeDebug():
     logger.info('(BRIDGEDEBUG) Running bridge debug')
     for system in CONFIG['SYSTEMS']:
         bridgeroll = 0
         dialroll = 0
         activeroll = 0
+        statroll = 0
         for _bridge in BRIDGES:
             for enabled_system in BRIDGES[_bridge]:
                 if enabled_system['SYSTEM'] == system:
@@ -405,6 +406,8 @@ def bridgeDebug():
                             activeroll += 1
                         else:
                             activeroll += 1
+                    if enabled_system['TO_TYPE'] == 'STAT':
+                        statroll += 1
         if bridgeroll:
             logger.debug('(BRIDGEDEBUG) system %s has %s bridges of which %s are in an ACTIVE state', system, bridgeroll, activeroll)
 
@@ -414,15 +417,20 @@ def bridgeDebug():
             for _bridge in BRIDGES:
                 for enabled_system in BRIDGES[_bridge]:
                     if enabled_system['ACTIVE'] and _bridge and _bridge[0:1] == '#':
-                        times[enabled_system['TIMER']] == _bridge
-            ordered == sorted(keys(times))
-            ordered.pop()
-            for _bridge in ordered:
-                for _entry in BRIDGES[_bridge]:
-                    if _entry['SYSTEM'][0:3] == 'OBP':
-                        continue
-                    if _entry['SYSTEM'] == system:
-                        _entry['ACTIVE'] = False
+                        times[enabled_system['TIMER']] = _bridge
+            ordered = sorted(times.keys())
+            _setbridge = times[ordered.pop()]
+            logger.warning('(BRIDGEDEBUG) setting %s dial bridge to %s as this bridge has the longest timer set to run',system, _setbridge)
+
+            for _tstamp in ordered:
+                for _bridge in times.values():
+                    for _entry in BRIDGES[_bridge]:
+
+                        if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
+                            if _entry['SYSTEM'] == system:
+                                _entry['ACTIVE'] = False
+
+        logger.info('(BRIDGEDEBUG) The server currently has %s STATic bridges',statroll)
 
 
 
