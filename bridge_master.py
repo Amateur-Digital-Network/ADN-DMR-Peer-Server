@@ -400,7 +400,7 @@ def bridgeDebug():
                 if enabled_system['SYSTEM'] == system:
                     bridgeroll += 1
                     if enabled_system['ACTIVE']:
-                        if _bridge[1] == '#':
+                        if _bridge and _bridge[0:1] == '#':
                             dialroll += 1
                             activeroll += 1
                         else:
