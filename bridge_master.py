@@ -263,7 +263,7 @@ def reset_static_tg(tg,ts,_tmout,system):
             
         BRIDGES[str(tg)] = bridgetemp
     except KeyError:
-        logger.exception('(%s) KeyError in reset_static_tg() - bridge gone away? TG:',system)
+        logger.exception('(%s) KeyError in reset_static_tg() - bridge gone away? TG: %s',system,tg)
         return
         
 def reset_default_reflector(reflector,_tmout,system):
@@ -393,12 +393,25 @@ def bridgeDebug():
     logger.info('(BRIDGEDEBUG) Running bridge debug')
     for system in CONFIG['SYSTEMS']:
         bridgeroll = 0
-        for bridge in BRIDGES:
-            for enabled_system in BRIDGES[bridge]:
-                if enabled_system == system:
+        dialroll = 0
+        activeroll = 0
+        for _bridge in BRIDGES:
+            for enabled_system in BRIDGES[_bridge]:
+                if enabled_system['SYSTEM'] == system:
                     bridgeroll += 1
-        if not bridgeroll:
-            logger.warning('{BRIDGEDEBUG) system %s has no bridges', system)
+                    if enabled_system['ACTIVE']:
+                        if _bridge[1] == '#':
+                            dialroll += 1
+                            activeroll += 1
+                        else:
+                            activeroll += 1
+        if bridgeroll:
+            logger.info('(BRIDGEDEBUG) system %s has %s bridges of which %s are in an ACTIVE state', system, bridgeroll, activeroll)
+
+        if dialroll > 1 :
+            logger.warning('(BRIDGEDEBUG) system %s has more than one active dial bridge (%s) - needs fixing',system, dialroll)
+
+
 
 def kaReporting():
     logger.debug('(ROUTER) KeepAlive reporting loop started')
