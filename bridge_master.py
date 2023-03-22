@@ -419,6 +419,8 @@ def bridgeDebug():
             ordered.pop()
             for _bridge in ordered:
                 for _entry in BRIDGES[_bridge]:
+                    if _entry['SYSTEM'][0:3] == 'OBP':
+                        continue
                     if _entry['SYSTEM'] == system:
                         _entry['ACTIVE'] = False
 
