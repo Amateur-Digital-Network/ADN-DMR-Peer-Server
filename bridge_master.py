@@ -410,7 +410,7 @@ def bridgeDebug():
 
         if dialroll > 1 :
             logger.warning('(BRIDGEDEBUG) system %s has more than one active dial bridge (%s) - fixing',system, dialroll)
-            times == {}
+            times = {}
             for _bridge in BRIDGES:
                 for enabled_system in BRIDGES[_bridge]:
                     if enabled_system['ACTIVE'] and _bridge and _bridge[0:1] == '#':
