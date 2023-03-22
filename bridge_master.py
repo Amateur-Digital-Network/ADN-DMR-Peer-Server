@@ -409,7 +409,7 @@ def bridgeDebug():
                     if enabled_system['TO_TYPE'] == 'STAT':
                         statroll += 1
         if bridgeroll:
-            logger.warning('(BRIDGEDEBUG) system %s has %s bridges of which %s are in an ACTIVE state', system, bridgeroll, activeroll)
+            logger.debug('(BRIDGEDEBUG) system %s has %s bridges of which %s are in an ACTIVE state', system, bridgeroll, activeroll)
 
         if dialroll > 1 :
             logger.warning('(BRIDGEDEBUG) system %s has more than one active dial bridge (%s) - fixing',system, dialroll)
