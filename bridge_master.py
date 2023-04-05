@@ -406,6 +406,7 @@ def bridgeDebug():
                             activeroll += 1
                         else:
                             activeroll += 1
+
                     if enabled_system['TO_TYPE'] == 'STAT':
                         statroll += 1
         if bridgeroll:

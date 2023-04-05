@@ -66,6 +66,8 @@ from urllib.request import urlopen
 import shutil
 import csv
 
+import math
+
 
 logging.TRACE = 5
 logging.addLevelName(logging.TRACE, 'TRACE')
@@ -1347,7 +1349,7 @@ def mk_aliases(_config):
     # Make Dictionaries
     #Peer IDs
     try:
-        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak') and (getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak') > getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'])):
+        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak') and not math.isclose(getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak'),getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE']), rel_tol=1000):
             raise Exception('backup peer_ids file is larger than new file')
         try:
             if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE']])) != checksums['peer_ids']:
@@ -1375,7 +1377,7 @@ def mk_aliases(_config):
 
     #Subscriber IDs
     try:
-        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') and (getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') > getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'])):
+        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') and not math.isclose(getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak'), getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE']),rel_tol=1000):
             raise Exception('backup subscriber_ids file is larger than new file')
         try:
             if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE']])) != checksums['subscriber_ids']:
@@ -1406,7 +1408,7 @@ def mk_aliases(_config):
 
     #Talkgroup IDs
     try:
-        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak') and (getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak') > getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'])):
+        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak') and not math.isclose(getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak'), getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE']),rel_tol=1000):
             raise Exception('backup talkgroup_ids file is larger than new file')
         try:
             if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE']])) != checksums['talkgroup_ids']:
