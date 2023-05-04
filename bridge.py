@@ -791,7 +791,11 @@ class routerHBP(HBSYSTEM):
                                                 systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,END,TX,{},{},{},{},{},{},{:.2f}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID']), call_duration).encode(encoding='utf-8', errors='ignore'))
                                         # Create a Burst B-E packet (Embedded LC)
                                         elif _dtype_vseq in [1,2,3,4]:
-                                            dmrbits = dmrbits[0:116] + _target_status[_target['TS']]['TX_EMB_LC'][_dtype_vseq] + dmrbits[148:264]
+                                            #catch weird bug, so we can work out what's going on (N2CID)
+                                            try:
+                                                dmrbits = dmrbits[0:116] + _target_status[_target['TS']]['TX_EMB_LC'][_dtype_vseq] + dmrbits[148:264]
+                                            except Exception as e:
+                                                logger.warning('(N2CID) Caught error [non-fatal] %s',e)
                                         dmrpkt = dmrbits.tobytes()
                                         _tmp_data = b''.join([_tmp_data, dmrpkt, _data[53:55]])
 
