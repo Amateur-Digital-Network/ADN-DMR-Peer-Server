@@ -147,7 +147,8 @@ def build_config(_config_file):
                     'ANNOUNCEMENT_LANGUAGES': config.get(section, 'ANNOUNCEMENT_LANGUAGES', fallback=''),
                     'SERVER_ID': config.getint(section, 'SERVER_ID', fallback=0).to_bytes(4, 'big'),
                     'DATA_GATEWAY': config.getboolean(section, 'DATA_GATEWAY', fallback=False),
-                    'VALIDATE_SERVER_IDS': config.getboolean(section, 'VALIDATE_SERVER_IDS', fallback=True)
+                    'VALIDATE_SERVER_IDS': config.getboolean(section, 'VALIDATE_SERVER_IDS', fallback=True),
+                    'DEBUG_BRIDGES' : config.getboolean(section, 'DEBUG_BRIDGES', fallback=True)
                     
                 })
                 if not CONFIG['GLOBAL']['ANNOUNCEMENT_LANGUAGES']:
@@ -158,7 +159,7 @@ def build_config(_config_file):
                     'REPORT': config.getboolean(section, 'REPORT', fallback=True),
                     'REPORT_INTERVAL': config.getint(section, 'REPORT_INTERVAL', fallback=60),
                     'REPORT_PORT': config.getint(section, 'REPORT_PORT', fallback=4321),
-                    'REPORT_CLIENTS': config.get(section, 'REPORT_CLIENTS',fallback='127.0.0.1').split(',')
+                    'REPORT_CLIENTS': config.get(section, 'REPORT_CLIENTS',fallback='*').split(',')
                 })
 
             elif section == 'LOGGER':

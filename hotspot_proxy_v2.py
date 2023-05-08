@@ -283,6 +283,7 @@ if __name__ == '__main__':
         BlackList = [1234567]
         #e.g. {10.0.0.1: 0, 10.0.0.2: 0}
         IPBlackList = {}
+        UsePrivilegedHelper = False
         
 #*******************        
     
@@ -313,6 +314,11 @@ if __name__ == '__main__':
         ClientInfo = bool(os.environ['FDPROXY_CLIENTINFO'])
     if 'FDPROXY_LISTENPORT' in os.environ:
         ListenPort = int(os.environ['FDPROXY_LISTENPORT'])
+    if 'USE_PRIV_HELPER' in os.environ:
+        UsePrivilegedHelper = os.environ['USE_PRIV_HELPER']
+
+    if UsePrivilegedHelper:
+
         
     for port in range(DestportStart,DestPortEnd+1,1):
         CONNTRACK[port] = False

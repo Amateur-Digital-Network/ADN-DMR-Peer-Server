@@ -66,6 +66,8 @@ from urllib.request import urlopen
 import shutil
 import csv
 
+import math
+
 
 logging.TRACE = 5
 logging.addLevelName(logging.TRACE, 'TRACE')
@@ -502,7 +504,7 @@ class OPENBRIDGE(DatagramProtocol):
                                 self._laststrid.append(_stream_id)
                             return
 
-                        if (_int_dst_id >= 80 and _int_dst_id <= 89) or (_int_dst_id >= 800 and _int_dst_id <= 899) and int(str(int.from_bytes(_source_server,'big'))[:3]) != int(str(int.from_bytes(self._CONFIG['GLOBAL']['SERVER_ID'],'big'))[:3]):
+                        if ((_int_dst_id >= 80 and _int_dst_id <= 89) or (_int_dst_id >= 800 and _int_dst_id <= 899)) and int(str(int.from_bytes(_source_server,'big'))[:3]) != int(str(int.from_bytes(self._CONFIG['GLOBAL']['SERVER_ID'],'big'))[:3]):
                             if _stream_id not in self._laststrid:
                                 logger.info('(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL TG FILTER (local to MCC)', self._system, int_id(_stream_id), _int_dst_id)
                                 self.send_bcsq(_dst_id,_stream_id)
@@ -802,6 +804,10 @@ class HBSYSTEM(DatagramProtocol):
         _bltime = str(_bltime)
         _prpacket = b''.join([PRBL,peer_id,_bltime.encode('UTF-8')])
         self.transport.write(_prpacket,sockaddr)
+
+    def proxy_BadPeer(self):
+        for _pi in self._peers:
+            self.proxy_IPBlackList(_pi,self._peers[_pi]['SOCKADDR'])
         
     def validate_id(self,_peer_id):
         
@@ -1343,7 +1349,7 @@ def mk_aliases(_config):
     # Make Dictionaries
     #Peer IDs
     try:
-        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak') and (getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak') > getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'])):
+        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak') and not math.isclose(getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE'] + '.bak'),getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['PEER_FILE']), rel_tol=1000):
             raise Exception('backup peer_ids file is larger than new file')
         try:
             if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['PEER_FILE']])) != checksums['peer_ids']:
@@ -1371,7 +1377,7 @@ def mk_aliases(_config):
 
     #Subscriber IDs
     try:
-        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') and (getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') > getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'])):
+        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') and not math.isclose(getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak'), getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE']),rel_tol=1000):
             raise Exception('backup subscriber_ids file is larger than new file')
         try:
             if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE']])) != checksums['subscriber_ids']:
@@ -1402,7 +1408,7 @@ def mk_aliases(_config):
 
     #Talkgroup IDs
     try:
-        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak') and (getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak') > getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'])):
+        if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak') and not math.isclose(getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak'), getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE']),rel_tol=1000):
             raise Exception('backup talkgroup_ids file is larger than new file')
         try:
             if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE']])) != checksums['talkgroup_ids']:
