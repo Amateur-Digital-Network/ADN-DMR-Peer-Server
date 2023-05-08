@@ -25,10 +25,11 @@ import ipaddress
 import os
 from setproctitle import setproctitle
 from datetime import datetime
+import Pyro5.api
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Simon Adlem - G7RZU'
-__copyright__  = 'Copyright (c) Simon Adlem, G7RZU 2020,2021,2022'
+__copyright__  = 'Copyright (c) Simon Adlem, G7RZU 2020,2021,2022,2023'
 __credits__    = 'Jon Lee, G4TSN; Norman Williams, M6NBP; Christian, OA4DOA'
 __license__    = 'GNU GPLv3'
 __maintainer__ = 'Simon Adlem G7RZU'
@@ -49,9 +50,38 @@ def IsIPv6Address(ip):
     except ValueError as errorCode:
         pass
 
+class privHelper():
+    def __init__(self):
+        self._netfilterURI = 'PYRO:netfilterControl@./u:/run/priv_control/priv_control.unixsocket'
+        self._conntrackURI = 'PYRO:conntrackControl@./u:/run/priv_control/priv_control.unixsocket'
+
+    def addBL(self,ip):
+        try:
+            with Pyro5.api.Proxy(self._netfilterURI) as nf:
+                nf.blocklistAdd(False,ip)
+        except Exception as e:
+            print('(PrivError) {}'.format(e))
+
+    def delBL(self,ip):
+        try:
+            with Pyro5.api.Proxy(self._netfilterURI) as nf:
+                nf.blocklistDel(False,ip)
+        except Exception as e:
+            print('(PrivError) {}'.format(e))
+
+    def flushCT(self):
+        try:
+            with Pyro5.api.Proxy(self._conntrackURI) as ct:
+                ct.flushUDPTarget(62031)
+        except Exception as e:
+            print('(PrivError) {}'.format(e))
+
+
+
+
 class Proxy(DatagramProtocol):
 
-    def __init__(self,Master,ListenPort,connTrack,peerTrack,blackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd):
+    def __init__(self,Master,ListenPort,connTrack,peerTrack,blackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd,privHelper):
         self.master = Master
         self.connTrack = connTrack
         self.peerTrack = peerTrack
@@ -63,6 +93,8 @@ class Proxy(DatagramProtocol):
         self.destPortStart = DestportStart
         self.destPortEnd = DestPortEnd
         self.numPorts = DestPortEnd - DestportStart
+        self.privHelper = privHelper
+
         
         
     def reaper(self,_peer_id):
@@ -131,6 +163,9 @@ class Proxy(DatagramProtocol):
                     return
                 if self.clientinfo:
                     print('Add to blacklist: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
+                if self.privHelper:
+                    print('Ask priv_helper to add to iptables: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
+                    self.reactor.callinthread(self.privHelper.addBL(self.peerTrack[_peer_id]['shost']))
                 return
             
             if _command == DMRD:
@@ -226,6 +261,10 @@ if __name__ == '__main__':
     import argparse
     import sys
     import json
+    import stat
+    import functools
+
+    print = functools.partial(print, flush=True)
 
     #Set process title early
     setproctitle(__file__)
@@ -283,12 +322,12 @@ if __name__ == '__main__':
         BlackList = [1234567]
         #e.g. {10.0.0.1: 0, 10.0.0.2: 0}
         IPBlackList = {}
-        UsePrivilegedHelper = False
         
 #*******************        
     
     CONNTRACK = {}
     PEERTRACK = {}
+    PRIV_HELPER = None
     
     # Set up the signal handler
     def sig_handler(_signal, _frame):
@@ -314,12 +353,15 @@ if __name__ == '__main__':
         ClientInfo = bool(os.environ['FDPROXY_CLIENTINFO'])
     if 'FDPROXY_LISTENPORT' in os.environ:
         ListenPort = int(os.environ['FDPROXY_LISTENPORT'])
-    if 'USE_PRIV_HELPER' in os.environ:
-        UsePrivilegedHelper = os.environ['USE_PRIV_HELPER']
 
-    if UsePrivilegedHelper:
+    unixSocket = '/run/priv_control/priv_control.unixsocket'
 
-        
+    if os.path.exists(unixSocket) and stat.S_ISSOCK(os.stat(unixSocket).st_mode):
+        print('(PRIV) Found UNIX socket. Enabling priv helper')
+        PRIV_HELPER = privHelper()
+        print('(PRIV) flush conntrack')
+        PRIV_HELPER.flushCT()
+
     for port in range(DestportStart,DestPortEnd+1,1):
         CONNTRACK[port] = False
     
@@ -328,7 +370,7 @@ if __name__ == '__main__':
     if ListenIP == '::' and IsIPv4Address(Master):
         Master = '::ffff:' + Master
 
-    reactor.listenUDP(ListenPort,Proxy(Master,ListenPort,CONNTRACK,PEERTRACK,BlackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd),interface=ListenIP)
+    reactor.listenUDP(ListenPort,Proxy(Master,ListenPort,CONNTRACK,PEERTRACK,BlackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd,PRIV_HELPER),interface=ListenIP)
 
     def loopingErrHandle(failure):
         print('(GLOBAL) STOPPING REACTOR TO AVOID MEMORY LEAK: Unhandled error innowtimed loop.\n {}'.format(failure))
@@ -358,6 +400,9 @@ if __name__ == '__main__':
             IPBlackList.pop(delete)
             if ClientInfo:
                 print('Remove dynamic blacklist entry for {}'.format(delete))
+            if PRIV_HELPER:
+                print('Ask priv heler to remove blacklist entry for {} from iptables'.format(delete))
+                reactor.callInThread(PRIV_HELPER.delBL(delete))
 
         
     if Stats == True:
