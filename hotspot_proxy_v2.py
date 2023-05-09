@@ -55,17 +55,17 @@ class privHelper():
         self._netfilterURI = 'PYRO:netfilterControl@./u:/run/priv_control/priv_control.unixsocket'
         self._conntrackURI = 'PYRO:conntrackControl@./u:/run/priv_control/priv_control.unixsocket'
 
-    def addBL(self,ip):
+    def addBL(self,ip,dport):
         try:
             with Pyro5.api.Proxy(self._netfilterURI) as nf:
-                nf.blocklistAdd(False,ip)
+                nf.blocklistAdd(dport,ip)
         except Exception as e:
             print('(PrivError) {}'.format(e))
 
-    def delBL(self,ip):
+    def delBL(self,ip,dport):
         try:
             with Pyro5.api.Proxy(self._netfilterURI) as nf:
-                nf.blocklistDel(False,ip)
+                nf.blocklistDel(dport,ip)
         except Exception as e:
             print('(PrivError) {}'.format(e))
 
@@ -83,6 +83,7 @@ class Proxy(DatagramProtocol):
 
     def __init__(self,Master,ListenPort,connTrack,peerTrack,blackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd,privHelper):
         self.master = Master
+        self.ListenPort = ListenPort
         self.connTrack = connTrack
         self.peerTrack = peerTrack
         self.timeout = Timeout
@@ -165,7 +166,7 @@ class Proxy(DatagramProtocol):
                     print('Add to blacklist: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
                 if self.privHelper:
                     print('Ask priv_helper to add to iptables: host {}.'.format(self.peerTrack[_peer_id]['shost']))
-                    reactor.callInThread(self.privHelper.addBL(self.peerTrack[_peer_id]['shost']))
+                    reactor.callInThread(self.privHelper.addBL,self.privHelper,self.ListenPort,self.peerTrack[_peer_id]['shost'])
                 return
             
             if _command == DMRD:
