@@ -403,7 +403,7 @@ if __name__ == '__main__':
                 print('Remove dynamic blacklist entry for {}'.format(delete))
             if PRIV_HELPER:
                 print('Ask priv helper to remove blacklist entry for {} from iptables'.format(delete))
-                reactor.callInThread(PRIV_HELPER.delBL,PRIV_HELPER,ListenPort,delete)
+                reactor.callInThread(PRIV_HELPER.delBL,ListenPort,delete)
 
         
     if Stats == True:
