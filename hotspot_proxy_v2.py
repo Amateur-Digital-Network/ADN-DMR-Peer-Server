@@ -55,7 +55,7 @@ class privHelper():
         self._netfilterURI = 'PYRO:netfilterControl@./u:/run/priv_control/priv_control.unixsocket'
         self._conntrackURI = 'PYRO:conntrackControl@./u:/run/priv_control/priv_control.unixsocket'
 
-    def addBL(selfdport,ip):
+    def addBL(self,dport,ip):
         try:
             with Pyro5.api.Proxy(self._netfilterURI) as nf:
                 nf.blocklistAdd(dport,ip)
