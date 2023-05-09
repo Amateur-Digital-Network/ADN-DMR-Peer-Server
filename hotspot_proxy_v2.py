@@ -164,8 +164,8 @@ class Proxy(DatagramProtocol):
                 if self.clientinfo:
                     print('Add to blacklist: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
                 if self.privHelper:
-                    print('Ask priv_helper to add to iptables: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
-                    reactor.callInThread(self.privHelper.addBL(self.peerTrack[_peer_id]['shost']))
+                    print('Ask priv_helper to add to iptables: host {}.'.format(self.peerTrack[_peer_id]['shost']))
+                    reactor.callInThread(privHelper.addBL(self.peerTrack[_peer_id]['shost']))
                 return
             
             if _command == DMRD:
