@@ -55,14 +55,14 @@ class privHelper():
         self._netfilterURI = 'PYRO:netfilterControl@./u:/run/priv_control/priv_control.unixsocket'
         self._conntrackURI = 'PYRO:conntrackControl@./u:/run/priv_control/priv_control.unixsocket'
 
-    def addBL(self,ip,dport):
+    def addBL(selfdport,ip):
         try:
             with Pyro5.api.Proxy(self._netfilterURI) as nf:
                 nf.blocklistAdd(dport,ip)
         except Exception as e:
             print('(PrivError) {}'.format(e))
 
-    def delBL(self,ip,dport):
+    def delBL(self,dport,ip):
         try:
             with Pyro5.api.Proxy(self._netfilterURI) as nf:
                 nf.blocklistDel(dport,ip)
@@ -402,8 +402,8 @@ if __name__ == '__main__':
             if ClientInfo:
                 print('Remove dynamic blacklist entry for {}'.format(delete))
             if PRIV_HELPER:
-                print('Ask priv heler to remove blacklist entry for {} from iptables'.format(delete))
-                reactor.callInThread(PRIV_HELPER.delBL(delete))
+                print('Ask priv helper to remove blacklist entry for {} from iptables'.format(delete))
+                reactor.callInThread(PRIV_HELPER.delBL,PRIV_HELPER,ListenPort,delete)
 
         
     if Stats == True:
