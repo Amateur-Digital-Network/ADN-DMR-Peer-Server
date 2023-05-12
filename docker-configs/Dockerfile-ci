@@ -36,4 +36,5 @@ RUN     addgroup -g 54000 freedmr && \
 
 COPY docker-configs/entrypoint-proxy /entrypoint
 USER freedmr
+#
 
