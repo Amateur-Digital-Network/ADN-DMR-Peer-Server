@@ -22,7 +22,7 @@ ENTRYPOINT [ "/entrypoint" ]
 COPY . /opt/freedmr
 
 RUN     addgroup -g 54000 freedmr && \
-        adduser -D -u 54000 -G 54000 freedmr && \
+        adduser -D -u 54000 -G freedmr freedmr && \
         apk update && \
         apk add git gcc musl-dev && \
         cd /opt && \
@@ -30,9 +30,9 @@ RUN     addgroup -g 54000 freedmr && \
 	ls -lah && \
         pip install --no-cache-dir -r requirements.txt && \
         apk del git gcc musl-dev && \
-        chown -R freedmr: /opt/freedmr && \
+        chown -R freedmr:freedmr /opt/freedmr && \
         mkdir /run/priv_control/ && \
-        chown -R freedmr: /run/priv_control
+        chown -R freedmr:freedmr /run/priv_control
 
 COPY docker-configs/entrypoint-proxy /entrypoint
 USER freedmr
