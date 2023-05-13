@@ -22,9 +22,9 @@ echo FreeDMR Docker installer...
 
 echo Installing required packages...
 echo Install Docker Community Edition...
-apt-get -y remove docker docker-engine docker.io ufw &&
+apt-get -y remove docker docker-engine docker.io &&
 apt-get -y update &&
-apt-get -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common conntrack iptables &&
+apt-get -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common &&
 curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add - &&
 ARCH=`/usr/bin/arch`
 echo "System architecture is $ARCH" 
@@ -62,7 +62,6 @@ echo Make config directory...
 mkdir /etc/freedmr &&
 mkdir -p /etc/freedmr/acme.sh && 
 mkdir -p /etc/freedmr/certs &&
-mkdir -p /etc/freedmr/sockets &&
 chmod -R 755 /etc/freedmr &&
 
 echo make json directory...
@@ -186,6 +185,8 @@ chown -R 54000 /etc/freedmr &&
 echo Get docker-compose.yml...
 cd /etc/freedmr &&
 curl https://gitlab.hacknix.net/hacknix/FreeDMR/-/raw/master/docker-configs/docker-compose.yml -o docker-compose.yml &&
+
+chmod 755 /etc/cron.daily/lastheard
 
 echo Tune network stack...
 cat << EOF > /etc/sysctl.conf &&

@@ -22,16 +22,12 @@ services:
         container_name: freedmr
         cpu_shares: 1024
         mem_reservation: 600m
-        depends_on:
-          -freedmr-priv-control
         volumes:
             - '/etc/freedmr/freedmr.cfg:/opt/freedmr/freedmr.cfg'
             - '/var/log/freedmr/:/opt/freedmr/log/'
             - '/etc/freedmr/rules.py:/opt/freedmr/rules.py'
             #Write JSON files outside of container
             - '/etc/freedmr/json/:/opt/freedmr/json/'
-            - '/etc/freedmr/sockets/priv_control:/run/priv_control/'
-
 
         ports:
             - '62031:62031/udp'
@@ -106,19 +102,6 @@ services:
              ipv4_address: 172.16.238.30
         logging:
               driver: json-file
-
-    freedmr-priv-control:
-        container_name: freedmr-priv-control
-        image: 'gitlab.hacknix.net:5050/freedmr/freedmr-privileged-control/priv_control:bullseye-latest'
-        restart: "unless-stopped"
-        volumes:
-            - '/etc/freedmr/sockets/priv_control:/run/priv_control/'
-        logging:
-              driver: json-file
-        cap_add:
-           - NET_ADMIN
-        network_mode: "host"
-
 
 networks:
   app_net:
