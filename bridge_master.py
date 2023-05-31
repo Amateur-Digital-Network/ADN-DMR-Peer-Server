@@ -779,6 +779,9 @@ def ident():
 
 def options_config():
     logger.debug('(OPTIONS) Running options parser')
+
+    prohibitedTGs = [0,1,2,3,4,5,9,9990,9991,9992,9993,9994,9995,9996,9997,9998,9999]
+
     for _system in CONFIG['SYSTEMS']:
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
             logger.debug('(OPTIONS) Bridge reset for %s - no peers',_system)
@@ -927,7 +930,7 @@ def options_config():
                     
                     
                     if isinstance(_options['DEFAULT_UA_TIMER'], str) and not _options['DEFAULT_UA_TIMER'].isdigit():
-                        logger.debug('(OPTIONS) %s - DEFAULT_REFLECTOR is not an integer, ignoring',_system)
+                        logger.debug('(OPTIONS) %s - DEFAULT_UA_TIMER is not an integer, ignoring',_system)
                         continue
 
                     #if the UA timer is set to 0 - actually set it to (close to) maximum size of a 32
@@ -963,6 +966,9 @@ def options_config():
                             logger.debug('(OPTIONS) %s default reflector changed, updating',_system) 
                             reset_default_reflector(CONFIG['SYSTEMS'][_system]['DEFAULT_REFLECTOR'],_tmout,_system)
                             make_default_reflector(int(_options['DEFAULT_REFLECTOR']),_tmout,_system)
+                        elif int(_options['DEFAULT_REFLECTOR']) in prohibitedTGs:
+                            logger.debug('(OPTIONS) %s default reflector is prohibited, ignoring change',_system)
+
                         else:
                             logger.debug('(OPTIONS) %s default reflector disabled, updating',_system) 
                             reset_default_reflector(int(_options['DEFAULT_REFLECTOR']),_tmout,_system)
@@ -995,6 +1001,8 @@ def options_config():
                             for tg in ts2:
                                 if not tg or int(tg) == 0 or int(tg) >= 16777215:
                                     continue
+                                if int(tg) in prohibitedTGs:
+                                    continue
                                 tg = int(tg)
                                 reset_static_tg(tg,2,_tmout,_system)
                         ts2 = []
@@ -1002,6 +1010,8 @@ def options_config():
                             ts2 = _options['TS2_STATIC'].split(',')
                             for tg in ts2:
                                 if not tg or int(tg) == 0 or int(tg) >= 16777215:
+                                    continue
+                                if int(tg) in prohibitedTGs:
                                     continue
                                 tg = int(tg)
                                 make_static_tg(tg,2,_tmout,_system)
