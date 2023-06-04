@@ -218,8 +218,10 @@ class Proxy(DatagramProtocol):
                     self.rptlTrack[host] += 1
 
                 if self.rptlTrack[host] > 20:
+                    print('(RPTL) exceeded max: {}'.format(self.rptlTrack[host]))
                     _bltime = nowtime + 600
                     self.IPBlackList[host] = _bltime
+                    self.rptlTrack.pop(host)
 
                     if self.clientinfo:
                         print('(RPTL) Add to blacklist: host {}. Expire time {}'.format(host,_bltime))
@@ -436,6 +438,7 @@ if __name__ == '__main__':
     def rptlTrimmer():
         RPTLTRACK = {}
         print('Purge RPTL table')
+
 
         
     if Stats == True:
