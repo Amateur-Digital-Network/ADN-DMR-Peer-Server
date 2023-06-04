@@ -81,7 +81,7 @@ class privHelper():
 
 class Proxy(DatagramProtocol):
 
-    def __init__(self,Master,ListenPort,connTrack,peerTrack,blackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd,privHelper):
+    def __init__(self,Master,ListenPort,connTrack,peerTrack,blackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd,privHelper,rptlTrack):
         self.master = Master
         self.ListenPort = ListenPort
         self.connTrack = connTrack
@@ -95,8 +95,8 @@ class Proxy(DatagramProtocol):
         self.destPortEnd = DestPortEnd
         self.numPorts = DestPortEnd - DestportStart
         self.privHelper = privHelper
+        self.rptlTrack = rptlTrack
 
-        
         
     def reaper(self,_peer_id):
         if self.debug:
@@ -204,6 +204,24 @@ class Proxy(DatagramProtocol):
                 _peer_id = data[4:8]
             elif _command == RPTL:              # RPTLogin -- a repeater wants to login
                 _peer_id = data[4:8]
+
+                #if we have seen more than 20 RPTL packets from this IP since the RPTL tracking table was reset (every 60 secs)
+                #blacklist IP for 10 minutes
+                if host not in self.rptlTrack:
+                    self.rptlTrack[host] = 1
+                else:
+                    self.rptlTrack[host] += 1
+
+                if self.rptlTrack[host] > 20:
+                    self.IPBlackList[host] = (nowtime + 600)
+
+                    if self.clientinfo:
+                        print('Add to blacklist: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
+                    if self.privHelper:
+                        print('Ask priv_helper to add to iptables: host {}, port {}.'.format(self.peerTrack[_peer_id]['shost'],self.ListenPort))
+                        reactor.callInThread(self.privHelper.addBL,self.ListenPort,self.peerTrack[_peer_id]['shost'])
+                    return
+
             elif _command == RPTK:              # Repeater has answered our login challenge
                 _peer_id = data[4:8]
             elif _command == RPTC:              # Repeater is sending it's configuraiton OR disconnecting
@@ -328,6 +346,7 @@ if __name__ == '__main__':
     
     CONNTRACK = {}
     PEERTRACK = {}
+    RPTLTRACK = {}
     PRIV_HELPER = None
     
     # Set up the signal handler
@@ -371,7 +390,7 @@ if __name__ == '__main__':
     if ListenIP == '::' and IsIPv4Address(Master):
         Master = '::ffff:' + Master
 
-    reactor.listenUDP(ListenPort,Proxy(Master,ListenPort,CONNTRACK,PEERTRACK,BlackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd,PRIV_HELPER),interface=ListenIP)
+    reactor.listenUDP(ListenPort,Proxy(Master,ListenPort,CONNTRACK,PEERTRACK,BlackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd,PRIV_HELPER, RPTLTRACK),interface=ListenIP)
 
     def loopingErrHandle(failure):
         print('(GLOBAL) STOPPING REACTOR TO AVOID MEMORY LEAK: Unhandled error innowtimed loop.\n {}'.format(failure))
@@ -405,6 +424,9 @@ if __name__ == '__main__':
                 print('Ask priv helper to remove blacklist entry for {} from iptables'.format(delete))
                 reactor.callInThread(PRIV_HELPER.delBL,ListenPort,delete)
 
+    def rptlTrimmer():
+        RPTLTRACK = {}
+
         
     if Stats == True:
         stats_task = task.LoopingCall(stats)
@@ -414,6 +436,12 @@ if __name__ == '__main__':
     blacklist_task = task.LoopingCall(blackListTrimmer)
     blacklista = blacklist_task.start(15)
     blacklista.addErrback(loopingErrHandle)
+
+
+    rptlTrimmer_task = task.LoopingCall(rptlTrimmer)
+    rptlTrimmera = rptlTrimmer_task.start(60)
+    rptlTrimmera.addErrback(loopingErrHandle)
+
     
     reactor.run()
     
