@@ -356,7 +356,7 @@ if __name__ == '__main__':
     PEERTRACK = {}
     RPTLTRACK = {}
     PRIV_HELPER = None
-    
+
     # Set up the signal handler
     def sig_handler(_signal, _frame):
         print('(GLOBAL) SHUTDOWN: PROXY IS TERMINATING WITH SIGNAL {}'.format(str(_signal)))
@@ -436,7 +436,7 @@ if __name__ == '__main__':
                 reactor.callInThread(PRIV_HELPER.delBL,ListenPort,delete)
 
     def rptlTrimmer():
-        RPTLTRACK = {}
+        RPTLTRACK.clear()
         print('Purge RPTL table')
 
 
