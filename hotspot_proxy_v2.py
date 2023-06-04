@@ -216,9 +216,9 @@ class Proxy(DatagramProtocol):
                     self.IPBlackList[host] = (nowtime + 600)
 
                     if self.clientinfo:
-                        print('Add to blacklist: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
+                        print('(RPTL) Add to blacklist: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
                     if self.privHelper:
-                        print('Ask priv_helper to add to iptables: host {}, port {}.'.format(self.peerTrack[_peer_id]['shost'],self.ListenPort))
+                        print('(RPTL) Ask priv_helper to add to iptables: host {}, port {}.'.format(self.peerTrack[_peer_id]['shost'],self.ListenPort))
                         reactor.callInThread(self.privHelper.addBL,self.ListenPort,self.peerTrack[_peer_id]['shost'])
                     return
 
