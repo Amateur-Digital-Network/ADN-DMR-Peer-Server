@@ -69,14 +69,19 @@ class privHelper():
         except Exception as e:
             print('(PrivError) {}'.format(e))
 
+    def blocklistFlush(self):
+        try:
+            with Pyro5.api.Proxy(self._netfilterURI) as nf:
+                nf.blocklistFlush()
+        except Exception as e:
+            print('(PrivError) {}'.format(e))
+
     def flushCT(self):
         try:
             with Pyro5.api.Proxy(self._conntrackURI) as ct:
                 ct.flushUDPTarget(62031)
         except Exception as e:
             print('(PrivError) {}'.format(e))
-
-
 
 
 class Proxy(DatagramProtocol):
