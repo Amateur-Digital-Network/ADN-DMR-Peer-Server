@@ -213,7 +213,7 @@ class Proxy(DatagramProtocol):
                     self.rptlTrack[host] += 1
 
                 if self.rptlTrack[host] > 20:
-                    _bltime = nowtime + 6000
+                    _bltime = nowtime + 600
                     self.IPBlackList[host] = _bltime
 
                     if self.clientinfo:
