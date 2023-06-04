@@ -213,7 +213,8 @@ class Proxy(DatagramProtocol):
                     self.rptlTrack[host] += 1
 
                 if self.rptlTrack[host] > 20:
-                    self.IPBlackList[host] = (nowtime + 600)
+                    _bltime = nowtime + 6000
+                    self.IPBlackList[host] = _bltime
 
                     if self.clientinfo:
                         print('(RPTL) Add to blacklist: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
