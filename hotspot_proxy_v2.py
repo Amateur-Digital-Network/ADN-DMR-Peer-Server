@@ -217,10 +217,10 @@ class Proxy(DatagramProtocol):
                     self.IPBlackList[host] = _bltime
 
                     if self.clientinfo:
-                        print('(RPTL) Add to blacklist: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
+                        print('(RPTL) Add to blacklist: host {}. Expire time {}'.format(host,_bltime))
                     if self.privHelper:
-                        print('(RPTL) Ask priv_helper to add to iptables: host {}, port {}.'.format(self.peerTrack[_peer_id]['shost'],self.ListenPort))
-                        reactor.callInThread(self.privHelper.addBL,self.ListenPort,self.peerTrack[_peer_id]['shost'])
+                        print('(RPTL) Ask priv_helper to add to iptables: host {}, port {}.'.format(host,self.ListenPort))
+                        reactor.callInThread(self.privHelper.addBL,self.ListenPort,host)
                     return
 
             elif _command == RPTK:              # Repeater has answered our login challenge
