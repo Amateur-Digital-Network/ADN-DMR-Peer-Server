@@ -382,6 +382,9 @@ if __name__ == '__main__':
         PRIV_HELPER = privHelper()
         print('(PRIV) flush conntrack')
         PRIV_HELPER.flushCT()
+        print('(PRIV) flush blocklist')
+        PRIV_HELPER.blocklistFlush()
+
 
     for port in range(DestportStart,DestPortEnd+1,1):
         CONNTRACK[port] = False
@@ -427,6 +430,7 @@ if __name__ == '__main__':
 
     def rptlTrimmer():
         RPTLTRACK = {}
+        print('Purge RPTL table')
 
         
     if Stats == True:
