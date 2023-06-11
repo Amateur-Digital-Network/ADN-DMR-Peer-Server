@@ -2172,8 +2172,8 @@ class routerHBP(HBSYSTEM):
                 
                 _say = [words[_lang]['silence']]
 
-                if _int_dst_id <= 5 or _int_dst_id == 9:
-                    logger.info('(%s) Reflector: voice called - TG < 5 or 9 - "busy""', self._system)
+                if _int_dst_id < 8 or _int_dst_id == 9 :
+                    logger.info('(%s) Reflector: voice called - TG <  8 or 9 - "busy""', self._system)
                     _say.append(words[_lang]['busy'])
                     _say.append(words[_lang]['silence'])
                     self.STATUS[_slot]['_stopTgAnnounce'] = True
