@@ -1379,6 +1379,8 @@ def mk_aliases(_config):
     try:
         if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak') and not math.isclose(getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE'] + '.bak'), getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE']),rel_tol=1000):
             raise Exception('backup subscriber_ids file is larger than new file')
+        if getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['SUBSCRIBER_FILE']) > 52428800:
+            raise Exception('subscriber_ids file is larger than 50Mb')
         try:
             if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['SUBSCRIBER_FILE']])) != checksums['subscriber_ids']:
                 raise(Exception('bad checksum'))
@@ -1410,6 +1412,8 @@ def mk_aliases(_config):
     try:
         if exists(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak') and not math.isclose(getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE'] + '.bak'), getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE']),rel_tol=1000):
             raise Exception('backup talkgroup_ids file is larger than new file')
+        if getsize(_config['ALIASES']['PATH'] + _config['ALIASES']['TGID_FILE']) > 52428800:
+            raise Exception('talkgroup_ids file is larger than 50Mb')
         try:
             if blake2bsum(''.join([_config['ALIASES']['PATH'], _config['ALIASES']['TGID_FILE']])) != checksums['talkgroup_ids']:
                 raise(Exception('bad checksum'))
