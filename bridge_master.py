@@ -777,17 +777,22 @@ def ident():
                     _pkt_time = time()
                     reactor.callFromThread(sendVoicePacket,systems[system],pkt,_source_id,_dst_id,_slot)
 
-def options_config():
-    logger.debug('(OPTIONS) Running options parser')
-
-    prohibitedTGs = [0,1,2,3,4,5,9,9990,9991,9992,9993,9994,9995,9996,9997,9998,9999]
-
+def bridge_reset():
+    logger.debug('(BRIDERESET) Running bridge resetter')
     for _system in CONFIG['SYSTEMS']:
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
             logger.debug('(OPTIONS) Bridge reset for %s - no peers',_system)
             remove_bridge_system(_system)
             CONFIG['SYSTEMS'][_system]['_reset'] = False
             continue
+
+
+def options_config():
+    logger.debug('(OPTIONS) Running options parser')
+
+    prohibitedTGs = [0,1,2,3,4,5,9,9990,9991,9992,9993,9994,9995,9996,9997,9998,9999]
+
+    for _system in CONFIG['SYSTEMS']:
         try:
             if CONFIG['SYSTEMS'][_system]['MODE'] != 'MASTER':
                 continue
@@ -2810,6 +2815,11 @@ if __name__ == '__main__':
     options_task = task.LoopingCall(options_config)
     options = options_task.start(26)
     options.addErrback(loopingErrHandle)
+
+    #bridge reset
+    bridge_task = task.LoopingCall(bridge_reset)
+    bridge = bridge_task.start(11)
+    bridge.addErrback(loopingErrHandle)
         
     #STAT trimmer - once every 10 mins (roughly - shifted so all timed tasks don't run at once
     if CONFIG['GLOBAL']['GEN_STAT_BRIDGES']:
