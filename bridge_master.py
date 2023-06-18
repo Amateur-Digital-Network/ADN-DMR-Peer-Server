@@ -778,10 +778,10 @@ def ident():
                     reactor.callFromThread(sendVoicePacket,systems[system],pkt,_source_id,_dst_id,_slot)
 
 def bridge_reset():
-    logger.debug('(BRIDERESET) Running bridge resetter')
+    logger.debug('(BRIDGERESET) Running bridge resetter')
     for _system in CONFIG['SYSTEMS']:
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
-            logger.debug('(OPTIONS) Bridge reset for %s - no peers',_system)
+            logger.debug('(BRIDGERESET) Bridge reset for %s - no peers',_system)
             remove_bridge_system(_system)
             CONFIG['SYSTEMS'][_system]['_reset'] = False
             continue
@@ -2818,7 +2818,7 @@ if __name__ == '__main__':
 
     #bridge reset
     bridge_task = task.LoopingCall(bridge_reset)
-    bridge = bridge_task.start(11)
+    bridge = bridge_task.start(6)
     bridge.addErrback(loopingErrHandle)
         
     #STAT trimmer - once every 10 mins (roughly - shifted so all timed tasks don't run at once
