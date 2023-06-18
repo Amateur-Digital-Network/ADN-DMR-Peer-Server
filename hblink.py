@@ -694,16 +694,16 @@ class HBSYSTEM(DatagramProtocol):
             # Remove any timed out peers from the configuration
             del self._CONFIG['SYSTEMS'][self._system]['PEERS'][peer]
 
-        if not self._CONFIG['SYSTEMS'][self._system]['PEERS']:
-            if'OPTIONS' in self._CONFIG['SYSTEMS'][self._system]:
-                if '_default_options' in self._CONFIG['SYSTEMS'][self._system]:
-                    logger.info('(%s) Setting default Options: %s',self._system, self._CONFIG['SYSTEMS'][self._system]['_default_options'])
-                    self._CONFIG['SYSTEMS'][self._system]['OPTIONS'] = self._CONFIG['SYSTEMS'][self._system]['_default_options']
-                else:
-                    del self._CONFIG['SYSTEMS'][self._system]['OPTIONS']
-                    logger.info('(%s) Deleting HBP Options',self._system)
+            if not self._CONFIG['SYSTEMS'][self._system]['PEERS']:
+                if'OPTIONS' in self._CONFIG['SYSTEMS'][self._system]:
+                    if '_default_options' in self._CONFIG['SYSTEMS'][self._system]:
+                        logger.info('(%s) Setting default Options: %s',self._system, self._CONFIG['SYSTEMS'][self._system]['_default_options'])
+                        self._CONFIG['SYSTEMS'][self._system]['OPTIONS'] = self._CONFIG['SYSTEMS'][self._system]['_default_options']
+                    else:
+                        del self._CONFIG['SYSTEMS'][self._system]['OPTIONS']
+                        logger.info('(%s) Deleting HBP Options',self._system)
 
-            self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
+                self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
 
     # Aliased in __init__ to maintenance_loop if system is a peer
     def peer_maintenance_loop(self):
