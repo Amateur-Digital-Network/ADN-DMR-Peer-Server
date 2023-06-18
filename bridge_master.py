@@ -781,7 +781,7 @@ def bridge_reset():
     logger.debug('(BRIDGERESET) Running bridge resetter')
     for _system in CONFIG['SYSTEMS']:
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
-            logger.debug('(BRIDGERESET) Bridge reset for %s - no peers',_system)
+            logger.info('(BRIDGERESET) Bridge reset for %s - no peers',_system)
             remove_bridge_system(_system)
             CONFIG['SYSTEMS'][_system]['_reset'] = False
             continue
