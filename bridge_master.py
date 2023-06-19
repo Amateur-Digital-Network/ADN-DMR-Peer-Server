@@ -421,7 +421,7 @@ def bridgeDebug():
                     if enabled_system['ACTIVE'] and _bridge and _bridge[0:1] == '#':
                         times[enabled_system['TIMER']] = _bridge
             ordered = sorted(times.keys())
-            _setbridge = times[ordered.pop()]
+            str(_setbridge) = times[ordered.pop()]
             if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
                 logger.warning('(BRIDGEDEBUG) setting %s dial bridge to %s as this bridge has the longest timer set to run',system, _setbridge)
 
