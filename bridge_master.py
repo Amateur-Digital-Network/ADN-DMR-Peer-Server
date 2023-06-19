@@ -427,12 +427,21 @@ def bridgeDebug():
 
             for _tstamp in ordered:
                 for _bridge in times.values():
-                    for _entry in BRIDGES[_bridge]:
+                   # for _entry in BRIDGES[_bridge]:
 
-                        if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
-                            if _entry['SYSTEM'] == system:
-                                _entry['ACTIVE'] = False
-                                _entry['TIMER'] = _rst_time
+                   #     if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
+                   #         if _entry['SYSTEM'] == system:
+                   #             _entry['ACTIVE'] = False
+                   #             _entry['TIMER'] = _rst_time
+
+                    bridgetemp = deque()
+                    for bridgesystem in BRIDGES[_bridge]:
+                        if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:
+                            bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(_setbridge),],'RESET': [], 'TIMER': _rst_time + (_tmout * 60)})
+                        else:
+                            bridgetemp.append(bridgesystem)
+                        BRIDGES[_bridge] = bridgetemp
+
 
     logger.info('(BRIDGEDEBUG) The server currently has %s STATic bridges',statroll)
 
