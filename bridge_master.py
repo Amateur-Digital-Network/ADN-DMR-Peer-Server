@@ -391,6 +391,7 @@ def statTrimmer():
 #Debug and fix bridge table issues.
 def bridgeDebug():
     logger.info('(BRIDGEDEBUG) Running bridge debug')
+    _rst_time = time()
     statroll = 0
     for system in CONFIG['SYSTEMS']:
         bridgeroll = 0
@@ -431,6 +432,7 @@ def bridgeDebug():
                         if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
                             if _entry['SYSTEM'] == system:
                                 _entry['ACTIVE'] = False
+                                _entry['TIMER'] = _rst_time
 
     logger.info('(BRIDGEDEBUG) The server currently has %s STATic bridges',statroll)
 
