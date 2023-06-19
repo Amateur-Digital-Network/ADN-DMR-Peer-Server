@@ -148,7 +148,7 @@ def build_config(_config_file):
                     'SERVER_ID': config.getint(section, 'SERVER_ID', fallback=0).to_bytes(4, 'big'),
                     'DATA_GATEWAY': config.getboolean(section, 'DATA_GATEWAY', fallback=False),
                     'VALIDATE_SERVER_IDS': config.getboolean(section, 'VALIDATE_SERVER_IDS', fallback=True),
-                    'DEBUG_BRIDGES' : config.getboolean(section, 'DEBUG_BRIDGES', fallback=True)
+                    'DEBUG_BRIDGES' : config.getboolean(section, 'DEBUG_BRIDGES', fallback=False)
                     
                 })
                 if not CONFIG['GLOBAL']['ANNOUNCEMENT_LANGUAGES']:
