@@ -390,7 +390,7 @@ def statTrimmer():
 
 #Debug and fix bridge table issues.
 def bridgeDebug():
-    logger.info('(BRIDGEDEBUG) Running bridge debug')
+    logger.debug('(BRIDGEDEBUG) Running bridge debug')
     _rst_time = time()
     statroll = 0
     for system in CONFIG['SYSTEMS']:
@@ -433,7 +433,7 @@ def bridgeDebug():
                    #         if _entry['SYSTEM'] == system:
                    #             _entry['ACTIVE'] = False
                    #             _entry['TIMER'] = _rst_time
-
+                    logger.warning('(BRIDGEDEBUG) deactivating system: %s for bridge: %s',system,_bridge)
                     bridgetemp = deque()
                     for bridgesystem in BRIDGES[_bridge]:
                         if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:

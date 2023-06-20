@@ -957,6 +957,7 @@ class HBSYSTEM(DatagramProtocol):
                     self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
                     if self._config['PROXY_CONTROL']:
                         self.proxy_IPBlackList(_peer_id,_sockaddr)
+                    self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
                     logger.warning('(%s) Invalid Login from %s Radio ID: %s Denied by Registation ACL or not registered ID', self._system, _sockaddr[0], int_id(_peer_id))
             else:
                 self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
@@ -1037,6 +1038,7 @@ class HBSYSTEM(DatagramProtocol):
                         if self._config['PROXY_CONTROL']:
                             self.proxy_IPBlackList(_peer_id,_sockaddr)
                         self.transport.write(b''.join([MSTNAK, _peer_id]), _sockaddr)
+                        self._CONFIG['SYSTEMS'][self._system]['_reset'] = True
                         logger.info('(%s) Callsign does not match subscriber database: ID: %s, Sent Call: %s, DB call %s', self._system, int_id(_peer_id),_this_peer['CALLSIGN'].decode('utf8').rstrip(),self.validate_id(_peer_id))
                     else:
                         self.send_peer(_peer_id, b''.join([RPTACK, _peer_id]))
