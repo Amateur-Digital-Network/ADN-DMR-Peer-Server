@@ -393,6 +393,12 @@ def bridgeDebug():
     logger.debug('(BRIDGEDEBUG) Running bridge debug')
     _rst_time = time()
     statroll = 0
+
+    #Kill off any bridges that should nnot exist, ever.
+    for b in ['0','1','2','3','4','5','0','9']:
+        BRIDGES.pop(b,None)
+        BRIDGES.pop('#'+b, None)
+
     for system in CONFIG['SYSTEMS']:
         bridgeroll = 0
         dialroll = 0
@@ -421,11 +427,9 @@ def bridgeDebug():
                     if enabled_system['ACTIVE'] and _bridge and _bridge[0:1] == '#':
                         times[enabled_system['TIMER']] = _bridge
             ordered = sorted(times.keys())
-            bridgetmout = ordered.pop()
-            _setbridge = str(times[bridgetmout])
+            #bridgetmout = ordered.pop()
+            #_setbridge = str(times[bridgetmout])
             if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
-                logger.warning('(BRIDGEDEBUG) not setting %s dial bridge to %s as this bridge has the longest timer set to run',system, _setbridge)
-
                 for _bridge in set(times.values()):
                     # for _entry in BRIDGES[_bridge]:
 
@@ -1011,6 +1015,8 @@ def options_config():
                             for tg in ts1:
                                 if not tg:
                                     continue
+                                elif int(tg) in prohibitedTGs:
+                                    logger.debug('(OPTIONS) %s TS1 TG %s is prohibited, ignoring change',_system,tg)
                                 tg = int(tg)
                                 make_static_tg(tg,1,_tmout,_system)
                     ts2 = []
@@ -1022,8 +1028,6 @@ def options_config():
                             for tg in ts2:
                                 if not tg or int(tg) == 0 or int(tg) >= 16777215:
                                     continue
-                                if int(tg) in prohibitedTGs:
-                                    continue
                                 tg = int(tg)
                                 reset_static_tg(tg,2,_tmout,_system)
                         ts2 = []
@@ -1032,8 +1036,10 @@ def options_config():
                             for tg in ts2:
                                 if not tg or int(tg) == 0 or int(tg) >= 16777215:
                                     continue
-                                if int(tg) in prohibitedTGs:
+                                elif int(tg) in prohibitedTGs:
+                                    logger.debug('(OPTIONS) %s TS2 TG %s is prohibited, ignoring change',_system,tg)
                                     continue
+
                                 tg = int(tg)
                                 make_static_tg(tg,2,_tmout,_system)
                     
