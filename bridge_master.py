@@ -424,27 +424,28 @@ def bridgeDebug():
             bridgetmout = ordered.pop()
             _setbridge = str(times[bridgetmout])
             if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
-                logger.warning('(BRIDGEDEBUG) setting %s dial bridge to %s as this bridge has the longest timer set to run',system, _setbridge)
+                logger.warning('(BRIDGEDEBUG) not setting %s dial bridge to %s as this bridge has the longest timer set to run',system, _setbridge)
 
-            for _bridge in set(times.values()):
-                # for _entry in BRIDGES[_bridge]:
+                for _bridge in set(times.values()):
+                    # for _entry in BRIDGES[_bridge]:
 
-                #     if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
-                #         if _entry['SYSTEM'] == system:
-                #             _entry['ACTIVE'] = False
-                #             _entry['TIMER'] = _rst_time
-                logger.warning('(BRIDGEDEBUG) deactivating system: %s for bridge: %s',system,_bridge)
-                bridgetemp = deque()
-                for bridgesystem in BRIDGES[_bridge]:
-                    if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:
-                        bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(_setbridge[1:])),],'RESET': [], 'TIMER': _rst_time + (_tmout * 60)})
-                    else:
-                        bridgetemp.append(bridgesystem)
-                    BRIDGES[_bridge] = bridgetemp
+                    #     if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
+                    #         if _entry['SYSTEM'] == system:
+                    #             _entry['ACTIVE'] = False
+                    #             _entry['TIMER'] = _rst_time
+                    logger.warning('(BRIDGEDEBUG) deactivating system: %s for bridge: %s',system,_bridge)
+                    bridgetemp = deque()
+                    for bridgesystem in BRIDGES[_bridge]:
+                        if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:
+                            bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(_setbridge[1:])),],'RESET': [], 'TIMER': _rst_time + (_tmout * 60)})
+                        else:
+                            bridgetemp.append(bridgesystem)
+                        BRIDGES[_bridge] = bridgetemp
 
-            logger.warning('(BRIDGEDEBUG) reactivating system: %s for TG: %s with timer: ',system,_setbridge,CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER'])
-
-            make_single_reflector(_setbridge,CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER'],system)
+                # logger.warning('(BRIDGEDEBUG) reactivating system: %s for TG: %s with timer: ',system,_setbridge,CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER'])
+                # if system['ACTIVE'] == False:
+                #     system['ACTIVE'] = True
+                #     system['TIMER'] = _rst_time + system['TIMEOUT']
 
 
     logger.info('(BRIDGEDEBUG) The server currently has %s STATic bridges',statroll)
