@@ -440,8 +440,13 @@ def bridgeDebug():
                     logger.warning('(BRIDGEDEBUG) deactivating system: %s for bridge: %s',system,_bridge)
                     bridgetemp = deque()
                     for bridgesystem in BRIDGES[_bridge]:
+                        if _bridge[0:1] == '#':
+                            _setbridge = int(_bridge[1:])
+                        else:
+                            _setbridge = int(_bridge)
+
                         if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:
-                            bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(_setbridge[1:])),],'RESET': [], 'TIMER': _rst_time + (_tmout * 60)})
+                            bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(_setbridge),],'RESET': [], 'TIMER': _rst_time + (_tmout * 60)})
                         else:
                             bridgetemp.append(bridgesystem)
                         BRIDGES[_bridge] = bridgetemp
