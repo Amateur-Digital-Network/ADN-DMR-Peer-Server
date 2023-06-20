@@ -2731,13 +2731,15 @@ if __name__ == '__main__':
     
     del generator
     del systemdelete
+
+    prohibitedTGs = [0,1,2,3,4,5,9,9990,9991,9992,9993,9994,9995,9996,9997,9998,9999]
     
     # Default reflector
     logger.debug('(ROUTER) Setting default reflectors')
     for system in CONFIG['SYSTEMS']:
         if CONFIG['SYSTEMS'][system]['MODE'] != 'MASTER':
             continue
-        if CONFIG['SYSTEMS'][system]['DEFAULT_REFLECTOR'] > 0:
+        if CONFIG['SYSTEMS'][system]['DEFAULT_REFLECTOR'] not in prohibitedTGs:
             make_default_reflector(CONFIG['SYSTEMS'][system]['DEFAULT_REFLECTOR'],CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER'],system)
             
     #static TGs 
@@ -2756,10 +2758,14 @@ if __name__ == '__main__':
         for tg in ts1:
                 if not tg:
                     continue
+                if tg in prohibitedTGs:
+                    continue
                 tg = int(tg)
                 make_static_tg(tg,1,_tmout,system)
         for tg in ts2:
                 if not tg:
+                    continue
+                if tg in prohibitedTGs:
                     continue
                 tg = int(tg)
                 make_static_tg(tg,2,_tmout,system)
