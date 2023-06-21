@@ -1946,9 +1946,12 @@ class routerHBP(HBSYSTEM):
 
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
 
-        if CONFIG['SYSTEMS'][self._system]['_reset'] == True:
+        try:
+            if  CONFIG['SYSTEMS'][self._system]['_reset'] == True:
             logger.info('(%s) disallow transmission until reset cycle is complete')
             return
+        except KeyError:
+            pass
 
         pkt_time = time()
         dmrpkt = _data[20:53]
