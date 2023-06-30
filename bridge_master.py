@@ -395,7 +395,7 @@ def bridgeDebug():
     statroll = 0
 
     #Kill off any bridges that should nnot exist, ever.
-    for b in ['0','1','2','3','4','5','0','9']:
+    for b in ['0','1','2','3','4','5','6','7','8','9']:
         BRIDGES.pop(b,None)
         BRIDGES.pop('#'+b, None)
 
@@ -431,12 +431,6 @@ def bridgeDebug():
             #_setbridge = str(times[bridgetmout])
             if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
                 for _bridge in set(times.values()):
-                    # for _entry in BRIDGES[_bridge]:
-
-                    #     if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
-                    #         if _entry['SYSTEM'] == system:
-                    #             _entry['ACTIVE'] = False
-                    #             _entry['TIMER'] = _rst_time
                     logger.warning('(BRIDGEDEBUG) deactivating system: %s for bridge: %s',system,_bridge)
                     bridgetemp = deque()
                     for bridgesystem in BRIDGES[_bridge]:
@@ -450,11 +444,6 @@ def bridgeDebug():
                         else:
                             bridgetemp.append(bridgesystem)
                         BRIDGES[_bridge] = bridgetemp
-
-                # logger.warning('(BRIDGEDEBUG) reactivating system: %s for TG: %s with timer: ',system,_setbridge,CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER'])
-                # if system['ACTIVE'] == False:
-                #     system['ACTIVE'] = True
-                #     system['TIMER'] = _rst_time + system['TIMEOUT']
 
 
     logger.info('(BRIDGEDEBUG) The server currently has %s STATic bridges',statroll)
@@ -2861,10 +2850,10 @@ if __name__ == '__main__':
     bridge = bridge_task.start(6)
     bridge.addErrback(loopingErrHandle)
         
-    #STAT trimmer - once every 10 mins (roughly - shifted so all timed tasks don't run at once
+    #STAT trimmer - once every 5 mins (roughly - shifted so all timed tasks don't run at once
     if CONFIG['GLOBAL']['GEN_STAT_BRIDGES']:
         stat_trimmer_task = task.LoopingCall(statTrimmer)
-        stat_trimmer = stat_trimmer_task.start(523)#3600
+        stat_trimmer = stat_trimmer_task.start(303)#3600
         stat_trimmer.addErrback(loopingErrHandle)
         
     #KA Reporting
