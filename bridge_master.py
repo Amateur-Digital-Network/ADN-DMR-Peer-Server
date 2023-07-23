@@ -798,7 +798,7 @@ def bridge_reset():
             logger.info('(BRIDGERESET) Bridge reset for %s - no peers',_system)
             remove_bridge_system(_system)
             CONFIG['SYSTEMS'][_system]['_reset'] = False
-
+            CONFIG['SYSTEMS'][_system]['_resetlog'] = False
 
 def options_config():
     logger.debug('(OPTIONS) Running options parser')
@@ -1936,8 +1936,11 @@ class routerHBP(HBSYSTEM):
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
 
         try:
-            if CONFIG['SYSTEMS'][self._system]['_reset'] == True:
-                logger.info('(%s) disallow transmission until reset cycle is complete')
+            if CONFIG['SYSTEMS'][self._system]['_reset'] and not CONFIG['SYSTEMS'][self._system]['_resetlog']:
+                logger.info('(%s) disallow transmission until reset cycle is complete',_system)
+                CONFIG['SYSTEMS'][self._system]['_resetlog'] = True
+
+
                 return
         except KeyError:
             pass
@@ -2691,7 +2694,8 @@ if __name__ == '__main__':
         #os.unlink("bridge.pkl")
     #else:
     
-    BRIDGES = make_bridges(rules_module.BRIDGES) 
+    BRIDGES = make_bridges(rules_module.BRIDGES)
+
     
     #Subscriber map for unit calls - complete with test entry
     #SUB_MAP = {bytes_3(73578):('REP-1',1,time())}
