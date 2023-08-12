@@ -797,6 +797,7 @@ def bridge_reset():
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
             logger.info('(BRIDGERESET) Bridge reset for %s - no peers',_system)
             remove_bridge_system(_system)
+            del(CONFIG['SYSTEMS'][_system]['_opt_key'])
             CONFIG['SYSTEMS'][_system]['_reset'] = False
             CONFIG['SYSTEMS'][_system]['_resetlog'] = False
 
@@ -824,6 +825,23 @@ def options_config():
                             continue
                         _options[k] = v
                     logger.debug('(OPTIONS) Options found for %s',_system)
+
+                    if '_opt_key' in CONFIG['SYSTEMS'][_system]:
+                        if 'KEY' not in _options:
+                            logger.info('(OPTIONS) %s, options key set but no key in options string, skipping',_system)
+                            continue
+                        elif CONFIG['SYSTEMS'][_system]['_opt_key'] != _options['KEY']:
+                            logger.info('(OPTIONS) %s, options key set but key sent does not match, skipping',_system)
+                            continue
+                    elif _options['KEY']:
+                        logger.info('(OPTIONS) %s, _opt_key not set but key sent. Setting to sent key',_system)
+                        CONFIG['SYSTEMS'][_system]['_opt_key'] = _options['KEY']
+                    else:
+                        logger.info('(OPTIONS) %s, _opt_key not set and no key sent. Generate random key',_system)
+                        CONFIG['SYSTEMS'][_system]['_opt_key'] = randint(0,65535)
+
+
+
                     
                     if 'DIAL' in _options:
                         _options['DEFAULT_REFLECTOR'] = _options.pop('DIAL')
