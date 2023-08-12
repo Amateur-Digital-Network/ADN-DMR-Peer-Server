@@ -40,6 +40,8 @@ import re
 import copy
 from setproctitle import setproctitle
 from collections import deque
+from random import randint
+
 
 #from crccheck.crc import Crc32
 from hashlib import blake2b
