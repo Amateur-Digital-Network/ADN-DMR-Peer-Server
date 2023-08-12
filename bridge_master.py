@@ -833,7 +833,7 @@ def options_config():
                         elif CONFIG['SYSTEMS'][_system]['_opt_key'] != _options['KEY']:
                             logger.info('(OPTIONS) %s, options key set but key sent does not match, skipping',_system)
                             continue
-                    elif _options['KEY']:
+                    elif 'KEY' in _options and _options['KEY']:
                         logger.info('(OPTIONS) %s, _opt_key not set but key sent. Setting to sent key',_system)
                         CONFIG['SYSTEMS'][_system]['_opt_key'] = _options['KEY']
                     else:
