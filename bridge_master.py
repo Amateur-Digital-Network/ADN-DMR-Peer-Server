@@ -50,6 +50,7 @@ from hashlib import blake2b
 from twisted.internet.protocol import Factory, Protocol
 from twisted.protocols.basic import NetstringReceiver
 from twisted.internet import reactor, task
+from twisted.web import server
 
 # Things we import from the main hblink module
 from hblink import HBSYSTEM, OPENBRIDGE, systems, hblink_handler, reportFactory, REPORT_OPCODES, mk_aliases, acl_check
@@ -80,6 +81,7 @@ import re
 from binascii import b2a_hex as ahex
 
 from AMI import AMI
+from API import FD_API
 
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
@@ -133,6 +135,14 @@ def config_reports(_config, _factory):
         reporting.start(_config['REPORTS']['REPORT_INTERVAL'])
 
     return report_server
+
+# Start API server
+def config_API(_config, _apiqueue):
+
+    r = FD_API(_config,_apiqueue)
+    reactor.listenTCP(7080, server.Site(r))
+
+    return r
 
 
 # Import Bridging rules
@@ -844,9 +854,6 @@ def options_config():
                     else:
                         logger.debug('(OPTIONS) %s, _opt_key not set and no key sent. Generate random key',_system)
                         CONFIG['SYSTEMS'][_system]['_opt_key'] = randint(0,65535)
-
-
-
                     
                     if 'DIAL' in _options:
                         _options['DEFAULT_REFLECTOR'] = _options.pop('DIAL')
@@ -2611,6 +2618,7 @@ if __name__ == '__main__':
     
     ID_MAX = 16776415
 
+
     #Set process title early
     setproctitle(__file__)
     
@@ -2844,6 +2852,15 @@ if __name__ == '__main__':
     def loopingErrHandle(failure):
         logger.error('(GLOBAL) STOPPING REACTOR TO AVOID MEMORY LEAK: Unhandled error in timed loop.\n %s', failure)
         reactor.stop()
+
+
+    #Initialize API
+    APIQUEUE = {}
+    api = config_API(CONFIG,APIQUEUE)
+    if api:
+        logger.info('(API) API running')
+    else:
+        logger.info('(API) API not started')
 
     # Initialize the rule timer -- this if for user activated stuff
     rule_timer_task = task.LoopingCall(rule_timer_loop)
