@@ -831,7 +831,7 @@ def options_config():
                         _options[k] = v
                     logger.debug('(OPTIONS) Options found for %s',_system)
 
-                    if '_opt_key' in CONFIG['SYSTEMS'][_system]:
+                    if '_opt_key' in CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_opt_key']:
                         if 'KEY' not in _options:
                             logger.debug('(OPTIONS) %s, options key set but no key in options string, skipping',_system)
                             continue
@@ -842,8 +842,8 @@ def options_config():
                         logger.debug('(OPTIONS) %s, _opt_key not set but key sent. Setting to sent key',_system)
                         CONFIG['SYSTEMS'][_system]['_opt_key'] = _options['KEY']
                     else:
-                        logger.debug('(OPTIONS) %s, _opt_key not set and no key sent. Generate random key',_system)
-                        CONFIG['SYSTEMS'][_system]['_opt_key'] = randint(0,65535)
+                        logger.debug('(OPTIONS) %s, _opt_key not set and no key sent. Set to false',_system)
+                        CONFIG['SYSTEMS'][_system]['_opt_key'] = False
 
 
 
