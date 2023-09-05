@@ -380,7 +380,7 @@ def statTrimmer():
                 _bridge_stat = True
             if _system['TO_TYPE'] == 'ON' and _system['ACTIVE']:
                 _in_use = True
-            elif _system['TO_TYPE'] == 'OFF' and not _system['ACTIVE']:
+            elif _system['TO_TYPE'] == 'OFF':
                 _in_use = True
         if _bridge_stat and not _in_use:
             _remove_bridges.append(_bridge)
