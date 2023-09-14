@@ -2747,7 +2747,7 @@ if __name__ == '__main__':
                     _systemname = ''.join([system,'-',str(count)])
                     generator[_systemname] = copy.deepcopy(CONFIG['SYSTEMS'][system])
                     generator[_systemname]['PORT'] = generator[_systemname]['PORT'] + count
-                    generator[_systemname]['_default_options'] = "TS1_STATIC={};TS2_STATIC={};SINGLE={};DEFAULT_UA_TIMER={};DEFAULT_REFLECTOR={};VOICE={};LANG={}".format(generator[_systemname]['TS1_STATIC'],generator[_systemname]['TS2_STATIC'],int(generator[_systemname]['SINGLE_MODE']),generator[_systemname]['DEFAULT_UA_TIMER'],generator[_systemname]['DEFAULT_REFLECTOR'],int(generator[_systemname]['VOICE_IDENT']), generator[_systemname]['ANNOUNCEMENT_LANGUAGE'])
+                    generator[_systemname]['_default_options'] = "SINGLE={};DEFAULT_UA_TIMER={};VOICE={};LANG={}".format(int(generator[_systemname]['SINGLE_MODE']),generator[_systemname]['DEFAULT_UA_TIMER'],int(generator[_systemname]['VOICE_IDENT']), generator[_systemname]['ANNOUNCEMENT_LANGUAGE'])
                     logger.debug('(GLOBAL) Generator - generated system %s',_systemname)
                     generator[_systemname]['_default_options']
                 systemdelete.append(system)
