@@ -390,7 +390,7 @@ def statTrimmer():
                 _bridge_stat = True
             if _system['TO_TYPE'] == 'ON' and _system['ACTIVE']:
                 _in_use = True
-            elif _system['TO_TYPE'] == 'OFF' and not _system['ACTIVE']:
+            elif _system['TO_TYPE'] == 'OFF':
                 _in_use = True
         if _bridge_stat and not _in_use:
             _remove_bridges.append(_bridge)
@@ -841,7 +841,7 @@ def options_config():
                         _options[k] = v
                     logger.debug('(OPTIONS) Options found for %s',_system)
 
-                    if '_opt_key' in CONFIG['SYSTEMS'][_system]:
+                    if '_opt_key' in CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_opt_key']:
                         if 'KEY' not in _options:
                             logger.debug('(OPTIONS) %s, options key set but no key in options string, skipping',_system)
                             continue
@@ -852,8 +852,9 @@ def options_config():
                         logger.debug('(OPTIONS) %s, _opt_key not set but key sent. Setting to sent key',_system)
                         CONFIG['SYSTEMS'][_system]['_opt_key'] = _options['KEY']
                     else:
-                        logger.debug('(OPTIONS) %s, _opt_key not set and no key sent. Generate random key',_system)
-                        CONFIG['SYSTEMS'][_system]['_opt_key'] = randint(0,65535)
+                        logger.debug('(OPTIONS) %s, _opt_key not set and no key sent. Set to false',_system)
+                        CONFIG['SYSTEMS'][_system]['_opt_key'] = False
+
                     
                     if 'DIAL' in _options:
                         _options['DEFAULT_REFLECTOR'] = _options.pop('DIAL')
@@ -2755,7 +2756,7 @@ if __name__ == '__main__':
                     _systemname = ''.join([system,'-',str(count)])
                     generator[_systemname] = copy.deepcopy(CONFIG['SYSTEMS'][system])
                     generator[_systemname]['PORT'] = generator[_systemname]['PORT'] + count
-                    generator[_systemname]['_default_options'] = "TS1_STATIC={};TS2_STATIC={};SINGLE={};DEFAULT_UA_TIMER={};DEFAULT_REFLECTOR={};VOICE={};LANG={}".format(generator[_systemname]['TS1_STATIC'],generator[_systemname]['TS2_STATIC'],int(generator[_systemname]['SINGLE_MODE']),generator[_systemname]['DEFAULT_UA_TIMER'],generator[_systemname]['DEFAULT_REFLECTOR'],int(generator[_systemname]['VOICE_IDENT']), generator[_systemname]['ANNOUNCEMENT_LANGUAGE'])
+                    generator[_systemname]['_default_options'] = "SINGLE={};DEFAULT_UA_TIMER={};VOICE={};LANG={}".format(int(generator[_systemname]['SINGLE_MODE']),generator[_systemname]['DEFAULT_UA_TIMER'],int(generator[_systemname]['VOICE_IDENT']), generator[_systemname]['ANNOUNCEMENT_LANGUAGE'])
                     logger.debug('(GLOBAL) Generator - generated system %s',_systemname)
                     generator[_systemname]['_default_options']
                 systemdelete.append(system)
