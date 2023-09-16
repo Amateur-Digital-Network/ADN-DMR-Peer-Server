@@ -50,7 +50,15 @@ from hashlib import blake2b
 from twisted.internet.protocol import Factory, Protocol
 from twisted.protocols.basic import NetstringReceiver
 from twisted.internet import reactor, task
-from twisted.web import server
+from twisted.web.server import Site
+
+from spyne import Application
+from spyne.server.twisted import TwistedWebResource
+from spyne.protocol.http import HttpRpc
+from spyne.protocol.json import JsonDocument
+
+
+
 
 # Things we import from the main hblink module
 from hblink import HBSYSTEM, OPENBRIDGE, systems, hblink_handler, reportFactory, REPORT_OPCODES, mk_aliases, acl_check
@@ -81,8 +89,7 @@ import re
 from binascii import b2a_hex as ahex
 
 from AMI import AMI
-from API import FD_API
-
+from API import FD_API, FD_APIUserDefinedContext
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Cortney T. Buffington, N0MJS, Forked by Simon Adlem - G7RZU'
@@ -137,12 +144,25 @@ def config_reports(_config, _factory):
     return report_server
 
 # Start API server
-def config_API(_config, _apiqueue):
+def config_API(_config, _apiqueu, _bridges):
 
-    r = FD_API(_config,_apiqueue)
-    reactor.listenTCP(7080, server.Site(r))
 
-    return r
+    application = Application([FD_API],
+        tns='freedmr.api',
+        in_protocol=HttpRpc(validator='soft'),
+        out_protocol=JsonDocument()
+        )
+
+    def _on_method_call(ctx):
+        ctx.udc = FD_APIUserDefinedContext(CONFIG,APIQUEUE,_bridges)
+
+    application.event_manager.add_listener('method_call', _on_method_call)
+
+    resource = TwistedWebResource(application)
+    site = Site(resource)
+
+    r = reactor.listenTCP(8000, site, interface='0.0.0.0')
+    return(r)
 
 
 # Import Bridging rules
@@ -820,6 +840,13 @@ def options_config():
     logger.debug('(OPTIONS) Running options parser')
 
     prohibitedTGs = [0,1,2,3,4,5,9,9990,9991,9992,9993,9994,9995,9996,9997,9998,9999]
+
+    try:
+        for (system,options) in APIQUEUE.pop(1):
+            if not CONFIG['SYSTEMS'][_system]['_reset']:
+                CONFIG['SYSTEMS'][system][OPTIONS] = options
+    except IndexError:
+        pass
 
     for _system in CONFIG['SYSTEMS']:
         try:
@@ -2613,6 +2640,9 @@ if __name__ == '__main__':
     import sys
     import os
     import signal
+
+    global CONFIG
+    global APIQUEUE
     
     # Higheset peer ID permitted by HBP
     PEER_MAX = 4294967295
@@ -2856,8 +2886,8 @@ if __name__ == '__main__':
 
 
     #Initialize API
-    APIQUEUE = {}
-    api = config_API(CONFIG,APIQUEUE)
+    APIQUEUE = []
+    api = config_API(CONFIG,APIQUEUE,BRIDGES)
     if api:
         logger.info('(API) API running')
     else:

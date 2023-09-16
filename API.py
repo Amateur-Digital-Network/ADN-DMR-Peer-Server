@@ -1,62 +1,85 @@
-from xmlrpc.client import Fault
-
-from twisted.web import xmlrpc
 
 from hashlib import blake2b
-
-class FD_API_HELPERS():
-    def __init__(self,CONFIG,APIQUEUE):
-        self._CONFIG = CONFIG
-        self._APIQUEUE = APIQUEUE
-
-    def connected(self,_id):
-        for system in self._CONFIG['SYSTEMS']:
-             for peerid in self._CONFIG['SYSTEMS'][self._system]['PEERS']:
-                 if peerid == _id:
-                     return(system)
-        return(False)
+from spyne import ServiceBase, rpc, Integer, Decimal, UnsignedInteger32, Unicode, Iterable, error
+from dmr_utils3.utils import bytes_3
 
 
-    def validateHMAC(_hmac,_system):
-        self._config = self._CONFIG['SYSTEMS'][_system]
-        _h = blake2b(key=self._config['_opt_key'], digest_size=16)
-        _h.update('validate')
-        _hash = _h.digest()
-        if _hash == _hmac:
-            return(True)
+class FD_APIUserDefinedContext(object):
+    def __init__(self,CONFIG,APIQUEUE,BRIDGES):
+        self.CONFIG = CONFIG
+        self.APIQUEUE = APIQUEUE
+        self.BRIDGES = BRIDGES
+
+    def getconfig(self):
+        return self.CONFIG
+
+    def getapiqueue(self):
+        return self.APIQUEUE
+
+    def getbridges(self):
+        return self.BRIDGES
+
+    def validateKey(self,dmrid,key):
+        systems = self.CONFIG['SYSTEMS']
+        dmrid = bytes_3(dmrid)
+        for system in systems:
+            for peerid in systems[system]['PEERS']:
+                if peerid == dmrid:
+                    if key == _hash:
+                        return(systems[system]['_opt_key'])
+                    else:
+                        return(False)
+
+    def reset(self,system):
+        self.CONFIG['SYSTEMS'][system]['_reset'] = True
+
+    def queue(self,system,options):
+        self.APIQUEUE.append((system,options))
+
+
+class FD_API(ServiceBase):
+    _version = 0.1
+
+    #def validateHMAC(_hmac,_system):
+    #    self._config = self._CONFIG['SYSTEMS'][_system]
+    #    _h = blake2b(key=self._config['_opt_key'], digest_size=16)
+    #    _h.update('validate')
+    #    _hash = _h.digest()
+    #    if _hash == _hmac:
+    #        return(True)
+    #    else:
+    #        return(False)
+
+
+    #return API version
+    @rpc(Unicode, _returns=Decimal())
+    def version(ctx, sessionid):
+        return(FD_API._version)
+
+    @rpc(Unicode,Unicode, _returns=Unicode())
+    def reset(ctx,dmrid,key):
+        system = ctx.udc.validateKey(dmrid,key)
+        if system:
+            ctx.udc.reset(system)
         else:
-            return(False)
+            raise error.InvalidCredentialsError()
 
-
-class FD_API(xmlrpc.XMLRPC(allow_none=True)):
-
-    def __init__(self,CONFIG,APIQUEUE):
-        self._CONFIG = CONFIG
-        self._APIQUEUE = APIQUEUE
-        self.helpers = FD_API_HELPERS(self._CONFIG,self._APIQUEUE)
-
-    def reset(self,_id,_hmac):
-        return('<xml></xml>')
-        system = self.helpers.connected(_id)
-        if result:
-            if self.helpers.validateHMAC(_hmac,_system):
-                self._CONFIG['SYSTEMS'][system]['_reset'] = True
-            else:
-                return Fault(2, "Authentication failed")
+    @rpc(UnsignedInteger32,UnsignedInteger32,Unicode,_returns=Unicode())
+    def setoptions(ctx,dmrid,key,options):
+        system = ctx.udc.validateKey(dmrid,key)
+        if system:
+            ctx.udc.queue(system,options)
         else:
-            return Fault(1, "ID not connected to this server")
+            raise error.InvalidCredentialsError()
 
-        return('Z')
+    @rpc(UnsignedInteger32,_returns=(Unicode()))
+    def killserver(ctx,killkey):
+        pass
 
+    @rpc(_returns=Unicode())
+    def getconfig(ctx):
+        return ctx.udc.getconfig()
 
-def main():
-    from twisted.internet import reactor
-    from twisted.web import server
-
-    r = FD_API({},{})
-    reactor.listenTCP(7080, server.Site(r))
-    reactor.run()
-
-
-if __name__ == "__main__":
-    main()
+    @rpc(_returns=Unicode())
+    def getbridges(ctx):
+        return ctx.udc.getbridges()

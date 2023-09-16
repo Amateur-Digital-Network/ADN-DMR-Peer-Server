@@ -6,3 +6,4 @@ configparser>=3.0.0
 resettabletimer>=0.7.0
 setproctitle
 Pyro5
+spyne
