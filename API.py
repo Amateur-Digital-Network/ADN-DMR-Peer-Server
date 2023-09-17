@@ -19,13 +19,14 @@ class FD_APIUserDefinedContext(object):
         dmrid = bytes_4(dmrid)
         print(dmrid)
         for system in systems:
-            for peerid in systems[system]['PEERS']:
-                print(peerid)
-                if peerid == dmrid:
-                    if key == systems[system]['_opt_key']:
-                        return(system)
-                    else:
-                        return(False)
+            if systems[_system]['MODE'] == 'MASTER':
+                for peerid in systems[system]['PEERS']:
+                    print(peerid)
+                    if peerid == dmrid:
+                        if key == systems[system]['_opt_key']:
+                            return(system)
+                        else:
+                            return(False)
         return(False)
 
     def validateSystemKey(self,systemkey):
