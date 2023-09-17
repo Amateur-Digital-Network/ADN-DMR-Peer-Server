@@ -150,7 +150,7 @@ def build_config(_config_file):
                     'DATA_GATEWAY': config.getboolean(section, 'DATA_GATEWAY', fallback=False),
                     'VALIDATE_SERVER_IDS': config.getboolean(section, 'VALIDATE_SERVER_IDS', fallback=True),
                     'DEBUG_BRIDGES' : config.getboolean(section, 'DEBUG_BRIDGES', fallback=True),
-                    'ENABLE_API' : config.getboolean(section, 'ENABLE_API', fallback=True)
+                    'ENABLE_API' : config.getboolean(section, 'ENABLE_API', fallback=False)
 
                     
                 })
