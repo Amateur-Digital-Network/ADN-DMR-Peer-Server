@@ -1,5 +1,4 @@
 
-from hashlib import blake2b
 from spyne import ServiceBase, rpc, Integer, Decimal, UnsignedInteger32, Unicode, Iterable, error
 from dmr_utils3.utils import bytes_3
 
@@ -29,6 +28,12 @@ class FD_APIUserDefinedContext(object):
                         return(systems[system]['_opt_key'])
                     else:
                         return(False)
+
+    def validateSystemKey(self,systemkey):
+        if systemkey == self.CONFIG['GLOBAL']['SYSTEM_API_KEY']:
+            return True
+        else:
+            return False
 
     def reset(self,system):
         self.CONFIG['SYSTEMS'][system]['_reset'] = True
@@ -76,10 +81,17 @@ class FD_API(ServiceBase):
     def killserver(ctx,killkey):
         pass
 
-    @rpc(_returns=Unicode())
-    def getconfig(ctx):
-        return ctx.udc.getconfig()
+    @rpc(Unicode,_returns=Unicode())
+    def getconfig(ctx,systemkey):
+        if ctx.udc.validateSystemKey(systemkey):
+            return ctx.udc.getconfig()
+        else:
+            raise error.InvalidCredentialsError()
 
-    @rpc(_returns=Unicode())
-    def getbridges(ctx):
-        return ctx.udc.getbridges()
+    @rpc(Unicode,_returns=Unicode())
+    def getbridges(ctx,systemkey):
+        if ctx.udc.validateSystemKey(systemkey):
+            return ctx.udc.getbridges()
+        else:
+            raise error.InvalidCredentialsError()
+

@@ -2887,9 +2887,13 @@ if __name__ == '__main__':
 
     #Initialize API
     APIQUEUE = []
-    api = config_API(CONFIG,APIQUEUE,BRIDGES)
+    if CONFIG['GLOBAL']['ENABLE_API']:
+        api = config_API(CONFIG,APIQUEUE,BRIDGES)
+    else:
+        api = False
     if api:
         logger.info('(API) API running')
+        logger.info('(API) Random system API Key is %s',CONFIG['GLOBAL']['SYSTEM_API_KEY'])
     else:
         logger.info('(API) API not started')
 

@@ -32,6 +32,7 @@ import const
 
 import socket
 import ipaddress 
+import secrets
 from socket import gethostbyname
 from languages import languages
 
@@ -148,11 +149,16 @@ def build_config(_config_file):
                     'SERVER_ID': config.getint(section, 'SERVER_ID', fallback=0).to_bytes(4, 'big'),
                     'DATA_GATEWAY': config.getboolean(section, 'DATA_GATEWAY', fallback=False),
                     'VALIDATE_SERVER_IDS': config.getboolean(section, 'VALIDATE_SERVER_IDS', fallback=True),
-                    'DEBUG_BRIDGES' : config.getboolean(section, 'DEBUG_BRIDGES', fallback=True)
+                    'DEBUG_BRIDGES' : config.getboolean(section, 'DEBUG_BRIDGES', fallback=True),
+                    'ENABLE_API' : config.getboolean(section, 'ENABLE_API', fallback=True)
+
                     
                 })
                 if not CONFIG['GLOBAL']['ANNOUNCEMENT_LANGUAGES']:
                     CONFIG['GLOBAL']['ANNOUNCEMENT_LANGUAGES'] = languages
+
+                if CONFIG['GLOBAL']['ENABLE_API']:
+                    CONFIG['GLOBAL']['SYSTEM_API_KEY'] = secrets.token_hex(16)
 
             elif section == 'REPORTS':
                 CONFIG['REPORTS'].update({
