@@ -64,7 +64,11 @@ class FD_API(ServiceBase):
     def version(ctx, sessionid):
         return(FD_API._version)
 
-    @rpc(Unicode,Unicode, _returns=Unicode())
+    @rpc()
+    def dummy(ctx):
+        pass
+
+    @rpc(Unicode,Unicode)
     def reset(ctx,dmrid,key):
         system = ctx.udc.validateKey(int(dmrid),key)
         if system:
@@ -72,7 +76,7 @@ class FD_API(ServiceBase):
         else:
             raise error.InvalidCredentialsError()
 
-    @rpc(UnsignedInteger32,Unicode,Unicode,_returns=Unicode())
+    @rpc(UnsignedInteger32,Unicode,Unicode)
     def setoptions(ctx,dmrid,key,options):
         system = ctx.udc.validateKey(int(dmrid),key)
         if system:
@@ -80,7 +84,7 @@ class FD_API(ServiceBase):
         else:
             raise error.InvalidCredentialsError()
 
-    @rpc(UnsignedInteger32,_returns=(Unicode()))
+    @rpc(UnsignedInteger32)
     def killserver(ctx,killkey):
         pass
 

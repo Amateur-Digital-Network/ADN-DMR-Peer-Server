@@ -1036,7 +1036,7 @@ def options_config():
                             logger.debug('(OPTIONS) %s default reflector changed, updating',_system) 
                             reset_default_reflector(CONFIG['SYSTEMS'][_system]['DEFAULT_REFLECTOR'],_tmout,_system)
                             make_default_reflector(int(_options['DEFAULT_REFLECTOR']),_tmout,_system)
-                        elif int(_options['DEFAULT_REFLECTOR']) in prohibitedTGs:
+                        elif int(_options['DEFAULT_REFLECTOR']) in prohibitedTGs and not bool(_options['DEFAULT_REFLECTOR']):
                             logger.debug('(OPTIONS) %s default reflector is prohibited, ignoring change',_system)
 
                         else:
