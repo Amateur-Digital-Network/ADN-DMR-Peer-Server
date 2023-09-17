@@ -144,7 +144,7 @@ def config_reports(_config, _factory):
     return report_server
 
 # Start API server
-def config_API(_config, _apiqueu, _bridges):
+def config_API(_config, _bridges):
 
 
     application = Application([FD_API],
@@ -154,7 +154,7 @@ def config_API(_config, _apiqueu, _bridges):
         )
 
     def _on_method_call(ctx):
-        ctx.udc = FD_APIUserDefinedContext(CONFIG,APIQUEUE,_bridges)
+        ctx.udc = FD_APIUserDefinedContext(CONFIG,_bridges)
 
     application.event_manager.add_listener('method_call', _on_method_call)
 
@@ -841,12 +841,6 @@ def options_config():
 
     prohibitedTGs = [0,1,2,3,4,5,9,9990,9991,9992,9993,9994,9995,9996,9997,9998,9999]
 
-    try:
-        for (system,options) in APIQUEUE.pop(1):
-            if not CONFIG['SYSTEMS'][_system]['_reset']:
-                CONFIG['SYSTEMS'][system][OPTIONS] = options
-    except IndexError:
-        pass
 
     for _system in CONFIG['SYSTEMS']:
         try:
@@ -2642,7 +2636,6 @@ if __name__ == '__main__':
     import signal
 
     global CONFIG
-    global APIQUEUE
     
     # Higheset peer ID permitted by HBP
     PEER_MAX = 4294967295
@@ -2886,9 +2879,8 @@ if __name__ == '__main__':
 
 
     #Initialize API
-    APIQUEUE = []
     if CONFIG['GLOBAL']['ENABLE_API']:
-        api = config_API(CONFIG,APIQUEUE,BRIDGES)
+        api = config_API(CONFIG,BRIDGES)
     else:
         api = False
     if api:
