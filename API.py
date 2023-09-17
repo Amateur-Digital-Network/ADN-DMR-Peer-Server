@@ -19,7 +19,7 @@ class FD_APIUserDefinedContext(object):
         dmrid = bytes_4(dmrid)
         print(dmrid)
         for system in systems:
-            if systems[_system]['MODE'] == 'MASTER':
+            if systems[system]['MODE'] == 'MASTER':
                 for peerid in systems[system]['PEERS']:
                     print(peerid)
                     if peerid == dmrid:
