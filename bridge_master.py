@@ -298,19 +298,38 @@ def reset_static_tg(tg,ts,_tmout,system):
         logger.exception('(%s) KeyError in reset_static_tg() - bridge gone away? TG: %s',system,tg)
         return
         
-def reset_default_reflector(reflector,_tmout,system):
-    bridge = ''.join(['#',str(reflector)])
-    #_tmout = CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER']
-    if bridge not in BRIDGES:
-        BRIDGES[bridge] = []
-        make_single_reflector(bytes_3(reflector),_tmout, system)
-    bridgetemp = deque()
-    for bridgesystem in BRIDGES[bridge]:
-        if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:
-            bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(reflector),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
-        else:
-            bridgetemp.append(bridgesystem)
-        BRIDGES[bridge] = bridgetemp
+# def reset_default_reflector(reflector,_tmout,system):
+#     print(reflector)
+#     bridge = ''.join(['#',str(reflector)])
+#     print(bridge)
+#     #_tmout = CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER']
+#     if bridge not in BRIDGES:
+#         BRIDGES[bridge] = []
+#         make_single_reflector(bytes_3(reflector),_tmout, system)
+#     bridgetemp = deque()
+#     for bridgesystem in BRIDGES[bridge]:
+#         print(bridgesystem)
+#         if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:
+#             print(bridgesystem)
+#             bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(reflector),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
+#         else:
+#             bridgetemp.append(bridgesystem)
+#         print(bridgetemp)
+#         BRIDGES[bridge] = bridgetemp
+#         print(BRIDGES[bridge])
+
+def reset_all_reflector_system(_tmout,system):
+    for system in CONFIG['SYSTEMS']:
+        for bridge in BRIDGES:
+            if bridge[0:1] == '#':
+                for bridgesystem in BRIDGES[bridge]:
+                    bridgetemp = deque()
+                    if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:
+                        bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(bridge[1:])),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
+                    else:
+                        bridgetemp.append(bridgesystem)
+                    BRIDGES[bridge] = bridgetemp
+
             
 def make_single_reflector(_tgid,_tmout,_sourcesystem):
     _tgid_s = str(int_id(_tgid))
@@ -1034,14 +1053,14 @@ def options_config():
                     if int(_options['DEFAULT_REFLECTOR']) != CONFIG['SYSTEMS'][_system]['DEFAULT_REFLECTOR']:
                         if int(_options['DEFAULT_REFLECTOR']) > 0:
                             logger.debug('(OPTIONS) %s default reflector changed, updating',_system) 
-                            reset_default_reflector(CONFIG['SYSTEMS'][_system]['DEFAULT_REFLECTOR'],_tmout,_system)
+                            reset_all_reflector_system(_tmout,_system)
                             make_default_reflector(int(_options['DEFAULT_REFLECTOR']),_tmout,_system)
                         elif int(_options['DEFAULT_REFLECTOR']) in prohibitedTGs and not bool(_options['DEFAULT_REFLECTOR']):
                             logger.debug('(OPTIONS) %s default reflector is prohibited, ignoring change',_system)
 
                         else:
                             logger.debug('(OPTIONS) %s default reflector disabled, updating',_system) 
-                            reset_default_reflector(int(_options['DEFAULT_REFLECTOR']),_tmout,_system)
+                            reset_all_reflector_system(_tmout,_system)
                     
                     ts1 = []
                     if _options['TS1_STATIC'] != CONFIG['SYSTEMS'][_system]['TS1_STATIC']:
