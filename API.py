@@ -38,26 +38,12 @@ class FD_APIUserDefinedContext(object):
     def reset(self,system):
         self.CONFIG['SYSTEMS'][system]['_reset'] = True
 
-    def queue(self,system,options):
-        self.APIQUEUE.append((system,options))
-
     def options(self,system,options):
         self.CONFIG['SYSTEMS'][system]['OPTIONS'] = options
 
 
 class FD_API(ServiceBase):
     _version = 0.1
-
-    #def validateHMAC(_hmac,_system):
-    #    self._config = self._CONFIG['SYSTEMS'][_system]
-    #    _h = blake2b(key=self._config['_opt_key'], digest_size=16)
-    #    _h.update('validate')
-    #    _hash = _h.digest()
-    #    if _hash == _hmac:
-    #        return(True)
-    #    else:
-    #        return(False)
-
 
     #return API version
     @rpc(Unicode, _returns=Decimal())

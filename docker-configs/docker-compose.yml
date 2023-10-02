@@ -24,8 +24,6 @@ services:
         mem_reservation: 600m
         volumes:
             - '/etc/freedmr/freedmr.cfg:/opt/freedmr/freedmr.cfg'
-            - '/var/log/freedmr/:/opt/freedmr/log/'
-            - '/etc/freedmr/rules.py:/opt/freedmr/rules.py'
             #Write JSON files outside of container
             - '/etc/freedmr/json/:/opt/freedmr/json/'
 

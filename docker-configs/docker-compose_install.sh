@@ -176,8 +176,6 @@ TGID_TS2_ACL: PERMIT:ALL
 ANNOUNCEMENT_LANGUAGE: en_GB
 EOF
 
-echo Install rules.py ...
-echo "BRIDGES = {'9990': [{'SYSTEM': 'ECHO', 'TS': 2, 'TGID': 9990, 'ACTIVE': True, 'TIMEOUT': 2, 'TO_TYPE': 'NONE', 'ON': [], 'OFF': [], 'RESET': []},]}" > /etc/freedmr/rules.py &&
 
 echo Set perms on config directory...
 chown -R 54000 /etc/freedmr &&
