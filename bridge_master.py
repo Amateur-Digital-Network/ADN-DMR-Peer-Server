@@ -2725,6 +2725,16 @@ if __name__ == '__main__':
         if CONFIG['ALIASES']['SUB_MAP_FILE']:
             subMapWrite()
 
+    #Server kill routine
+    def kill_server():
+        try:
+            if CONFIG['GLOBAL']['_KILL_SERVER']:
+                logger.info('(GLOBAL) SHUTDOWN: CONFBRIDGE IS TERMINATING - killserver called from API')
+                reactor.stop()
+        except KeyError:
+            pass
+
+
     # Set signal handers so that we can gracefully exit if need be
     for sig in [signal.SIGINT, signal.SIGTERM]:
         signal.signal(sig, sig_handler)
@@ -2965,6 +2975,11 @@ if __name__ == '__main__':
     sub_trimmer_task = task.LoopingCall(SubMapTrimmer)
     sub_trimmer = sub_trimmer_task.start(3600)#3600
     sub_trimmer.addErrback(loopingErrHandle)
+
+    #Server kill switch checker
+    killserver_task = task.LoopingCall(kill_server)
+    killserver = killserver_task.start(10)
+    killserver.addErrback(loopingErrHandle)
     
     #more threads
     reactor.suggestThreadPoolSize(100)
