@@ -1483,7 +1483,7 @@ def mk_aliases(_config):
                 shutil.copy(_config['ALIASES']['PATH'] + _config['ALIASES']['SERVER_ID_FILE'],_config['ALIASES']['PATH'] + _config['ALIASES']['SERVER_ID_FILE'] + '.bak')
             except IOError as g:
                 logger.info('(ALIAS) ID ALIAS MAPPER: couldn\'t make backup copy of server_ids file %s',g)
-        
+
         
     return peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids, server_ids, checksums
 

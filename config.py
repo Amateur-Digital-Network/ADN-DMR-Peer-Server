@@ -32,7 +32,6 @@ import const
 
 import socket
 import ipaddress 
-import secrets
 from socket import gethostbyname
 from languages import languages
 
@@ -157,9 +156,6 @@ def build_config(_config_file):
                 if not CONFIG['GLOBAL']['ANNOUNCEMENT_LANGUAGES']:
                     CONFIG['GLOBAL']['ANNOUNCEMENT_LANGUAGES'] = languages
 
-                if CONFIG['GLOBAL']['ENABLE_API']:
-                    CONFIG['GLOBAL']['SYSTEM_API_KEY'] = secrets.token_hex(16)
-
             elif section == 'REPORTS':
                 CONFIG['REPORTS'].update({
                     'REPORT': config.getboolean(section, 'REPORT', fallback=True),
@@ -193,9 +189,8 @@ def build_config(_config_file):
                     'SERVER_ID_URL': config.get(section, 'SERVER_ID_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/server_ids.tsv'),
                     'SERVER_ID_FILE': config.get(section, 'SERVER_ID_FILE', fallback='server_ids.tsv'),
                     'CHECKSUM_URL': config.get(section, 'CHECKSUM_URL', fallback='https://freedmr-lh.gb7fr.org.uk/file_checksums.json'),
-                    'CHECKSUM_FILE': config.get(section, 'CHECKSUM_FILE', fallback='file_checksums.json')
-
-                    
+                    'CHECKSUM_FILE': config.get(section, 'CHECKSUM_FILE', fallback='file_checksums.json'),
+                    'KEYS_FILE': config.get(section, 'KEYS_FILE', fallback='keys.json')
                 })
                 
                 

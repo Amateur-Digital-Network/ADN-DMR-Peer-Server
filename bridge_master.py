@@ -41,7 +41,7 @@ import copy
 from setproctitle import setproctitle
 from collections import deque
 from random import randint
-
+import secrets
 
 #from crccheck.crc import Crc32
 from hashlib import blake2b
@@ -69,6 +69,7 @@ from config import acl_build
 import log
 from const import *
 from mk_voice import pkt_gen
+from utils import load_json, save_json
 #from voice_lib import words
 
 #Read voices
@@ -2655,6 +2656,8 @@ if __name__ == '__main__':
     import signal
 
     global CONFIG
+    global KEYS
+    keys = {}
     
     # Higheset peer ID permitted by HBP
     PEER_MAX = 4294967295
@@ -2721,16 +2724,26 @@ if __name__ == '__main__':
         logger.info('(GLOBAL) SHUTDOWN: CONFBRIDGE IS TERMINATING WITH SIGNAL %s', str(_signal))
         hblink_handler(_signal, _frame)
         logger.info('(GLOBAL) SHUTDOWN: ALL SYSTEM HANDLERS EXECUTED - STOPPING REACTOR')
-        reactor.stop()
-        if CONFIG['ALIASES']['SUB_MAP_FILE']:
-            subMapWrite()
+        if reactor.running:
+            CONFIG['GLOBAL']['_KILL_SERVER'] = True
+        else:
+            exit()
+
 
     #Server kill routine
     def kill_server():
         try:
             if CONFIG['GLOBAL']['_KILL_SERVER']:
-                logger.info('(GLOBAL) SHUTDOWN: CONFBRIDGE IS TERMINATING - killserver called from API')
-                reactor.stop()
+                logger.info('(GLOBAL) SHUTDOWN: CONFBRIDGE IS TERMINATING - killserver called')
+                if reactor.running:
+                    reactor.stop()
+                if CONFIG['ALIASES']['SUB_MAP_FILE']:
+                    subMapWrite()
+                try:
+                    save_json(''.join([CONFIG['ALIASES']['PATH'], CONFIG['ALIASES']['KEYS_FILE']]),keys)
+                    logger.info('(KEYS) saved system keys to keystore')
+                except Exception as e:
+                    logger.error('(GLOBAL) Canot save key file: %s',e)
         except KeyError:
             pass
 
@@ -2909,6 +2922,11 @@ if __name__ == '__main__':
         logger.error('(GLOBAL) STOPPING REACTOR TO AVOID MEMORY LEAK: Unhandled error in timed loop.\n %s', failure)
         reactor.stop()
 
+    #load keys if exists
+    try:
+        keys = load_json(''.join([CONFIG['ALIASES']['PATH'], CONFIG['ALIASES']['KEYS_FILE']]))
+    except Exception as e:
+        logger.error('(KEYS) Cannot load keys: %s',e)
 
     #Initialize API
     if CONFIG['GLOBAL']['ENABLE_API']:
@@ -2917,7 +2935,13 @@ if __name__ == '__main__':
         api = False
     if api:
         logger.info('(API) API running')
-        logger.info('(API) Random system API Key is %s',CONFIG['GLOBAL']['SYSTEM_API_KEY'])
+        if 'SYSTEM_API_KEY' not in keys or not keys['SYSTEM_API_KEY']:
+            CONFIG['GLOBAL']['SYSTEM_API_KEY'] = secrets.token_hex(16)
+            keys['SYSTEM_API_KEY'] = CONFIG['GLOBAL']['SYSTEM_API_KEY']
+            logger.info('(API) Random system API Key generated: %s',CONFIG['GLOBAL']['SYSTEM_API_KEY'])
+        else:
+            CONFIG['GLOBAL']['SYSTEM_API_KEY'] = keys['SYSTEM_API_KEY']
+            logger.info('(API) System API Key loaded from system key store')
     else:
         logger.info('(API) API not started')
 
@@ -2978,7 +3002,7 @@ if __name__ == '__main__':
 
     #Server kill switch checker
     killserver_task = task.LoopingCall(kill_server)
-    killserver = killserver_task.start(10)
+    killserver = killserver_task.start(5)
     killserver.addErrback(loopingErrHandle)
     
     #more threads

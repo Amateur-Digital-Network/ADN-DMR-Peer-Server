@@ -26,7 +26,7 @@ import ssl
 from time import time
 from os.path import isfile, getmtime
 from urllib.request import urlopen
-from json import load as jload
+from json import load as jload, dump as jdump
 import hashlib
 
 
@@ -91,6 +91,16 @@ def load_json(filename):
         raise
     else:
         return(data)
+
+def save_json(filename,data):
+    try:
+        with open(filename, 'w', encoding='utf-8') as f:
+            jdump(data, f, ensure_ascii=False, indent=4)
+    except:
+        raise
+    else:
+        return(True)
+
 
 
 #Calculate blake2b checksum of file
