@@ -2790,13 +2790,17 @@ if __name__ == '__main__':
             #BRIDGES = make_bridges(rules_module.BRIDGES)
         #os.unlink("bridge.pkl")
     #else:
-    
-    BRIDGES = make_bridges({'9990': [{'SYSTEM': 'ECHO', 'TS': 2, 'TGID': 9990, 'ACTIVE': True, 'TIMEOUT': 2, 'TO_TYPE': 'NONE', 'ON': [], 'OFF': [], 'RESET': []},]}
-)
+
+
+    if 'ECHO' in CONFIG['SYSTEMS'] and CONFIG['SYSTEMS']['ECHO']['MODE'] == 'PEER':
+        BRIDGES = make_bridges({'9990': [{'SYSTEM': 'ECHO', 'TS': 2, 'TGID': 9990, 'ACTIVE': True, 'TIMEOUT': 2, 'TO_TYPE': 'NONE', 'ON': [], 'OFF': [], 'RESET': []},]})
+    else:
+        BRIDGES = {}
 
 
 
-    
+
+
     #Subscriber map for unit calls - complete with test entry
     #SUB_MAP = {bytes_3(73578):('REP-1',1,time())}
     SUB_MAP = {}
