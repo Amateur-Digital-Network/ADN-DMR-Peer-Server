@@ -362,9 +362,9 @@ if __name__ == '__main__':
         print('(GLOBAL) SHUTDOWN: PROXY IS TERMINATING WITH SIGNAL {}'.format(str(_signal)))
         reactor.stop()
 
-    # Set signal handers so that we can gracefully exit if need be
-    for sig in [signal.SIGINT, signal.SIGTERM]:
-        signal.signal(sig, sig_handler)
+    #Install signal handlers
+    signal.signal(signal.SIGTERM, sig_handler)
+    signal.signal(signal.SIGINT, sig_handler)
         
     #readState()
     
