@@ -18,7 +18,7 @@
 FROM python:3.11-alpine
 
 #ENTRYPOINT [ "/entrypoint" ]
-ENTRYPOINT ["/sbin/tini", "-g", "--", "/entrypoint"]
+ENTRYPOINT ["/sbin/tini", "-g", "--", "/usr/bin/supervisord"]
 
 COPY . /opt/freedmr
 
