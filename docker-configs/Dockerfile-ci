@@ -25,7 +25,7 @@ COPY . /opt/freedmr
 RUN     addgroup -g 54000 freedmr && \
         adduser -D -u 54000 -G freedmr freedmr && \
         apk update && \
-        apk add git gcc musl-dev && \
+        apk add git gcc musl-dev supervisor && \
          apk add --no-cache tini && \
         cd /opt && \
         cd /opt/freedmr && \
@@ -37,6 +37,7 @@ RUN     addgroup -g 54000 freedmr && \
         chown -R freedmr:freedmr /run/priv_control
 
 COPY docker-configs/entrypoint-proxy /entrypoint
+COPY docker-configs/supervisord.conf /etc/supervisor/conf.d/supervisord.conf
 USER freedmr
 
 

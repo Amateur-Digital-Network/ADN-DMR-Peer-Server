@@ -22,7 +22,7 @@ cd /opt/freedmr
 if [ "$BRIDGE_SERVER" == 1 ]
 then
         echo 'Starting in Bridge mode...'
-        python /opt/freedmr/bridge.py -c freedmr.cfg -r rules.py
+        exec python /opt/freedmr/bridge.py -c freedmr.cfg -r rules.py
 else
 	echo 'Starting in FreeDMR mode...'
 	python /opt/freedmr/hotspot_proxy_v2.py &

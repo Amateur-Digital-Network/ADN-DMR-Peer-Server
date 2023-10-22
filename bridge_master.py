@@ -2919,6 +2919,9 @@ if __name__ == '__main__':
                     logger.warning('(GLOBAL) Invalid language in ANNOUNCEMENT_LANGUAGE, skipping system %s',system)
                     continue
                 systems[system] = routerHBP(system, CONFIG, report_server)
+                if (CONFIG['SYSTEMS'][system]['MODE'] == 'PEER' and system != 'ECHO') or CONFIG['SYSTEMS'][system]['MODE'] == 'XLXPEER':
+                    logger.warning('(GLOBAL) PEER and XLXPEER connections only allowed in bridge mode, skipping system %s',system)
+                    continue
             listeningPorts[system] = reactor.listenUDP(CONFIG['SYSTEMS'][system]['PORT'], systems[system], interface=CONFIG['SYSTEMS'][system]['IP'])
             logger.debug('(GLOBAL) %s instance created: %s, %s', CONFIG['SYSTEMS'][system]['MODE'], system, systems[system])
 
