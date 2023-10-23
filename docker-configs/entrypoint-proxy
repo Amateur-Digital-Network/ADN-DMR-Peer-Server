@@ -25,7 +25,8 @@ then
         exec python /opt/freedmr/bridge.py -c freedmr.cfg -r rules.py
 else
 	echo 'Starting in FreeDMR mode...'
-	python /opt/freedmr/hotspot_proxy_v2.py &
-	python /opt/freedmr/playback.py -c loro.cfg &
-	exec python /opt/freedmr/bridge_master.py -c freedmr.cfg
+	/usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf
+	#python /opt/freedmr/hotspot_proxy_v2.py &
+	#python /opt/freedmr/playback.py -c loro.cfg &
+	#exec python /opt/freedmr/bridge_master.py -c freedmr.cfg
 fi

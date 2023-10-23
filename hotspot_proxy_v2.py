@@ -345,7 +345,7 @@ if __name__ == '__main__':
         Timeout = 30
         Stats = False
         Debug = False
-        ClientInfo = False
+        ClientInfo = True
         BlackList = [1234567]
         #e.g. {10.0.0.1: 0, 10.0.0.2: 0}
         IPBlackList = {}
