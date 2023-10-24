@@ -26,6 +26,7 @@ import os
 from setproctitle import setproctitle
 from datetime import datetime
 import Pyro5.api
+import signal
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Simon Adlem - G7RZU'
@@ -363,8 +364,8 @@ if __name__ == '__main__':
         reactor.stop()
 
     #Install signal handlers
-    signal.signal(signal.SIGTERM, sig_handler)
     signal.signal(signal.SIGINT, sig_handler)
+    signal.signal(signal.SIGTERM, sig_handler)
         
     #readState()
     
