@@ -26,7 +26,6 @@ import os
 from setproctitle import setproctitle
 from datetime import datetime
 import Pyro5.api
-import signal
 
 # Does anybody read this stuff? There's a PEP somewhere that says I should do this.
 __author__     = 'Simon Adlem - G7RZU'
@@ -61,28 +60,28 @@ class privHelper():
             with Pyro5.api.Proxy(self._netfilterURI) as nf:
                 nf.blocklistAdd(dport,ip)
         except Exception as e:
-            print('(PrivError) {}'.format(e))
+            print('(PROXY)(PrivError) {}'.format(e))
 
     def delBL(self,dport,ip):
         try:
             with Pyro5.api.Proxy(self._netfilterURI) as nf:
                 nf.blocklistDel(dport,ip)
         except Exception as e:
-            print('(PrivError) {}'.format(e))
+            print('(PROXY)(PrivError) {}'.format(e))
 
     def blocklistFlush(self):
         try:
             with Pyro5.api.Proxy(self._netfilterURI) as nf:
                 nf.blocklistFlush()
         except Exception as e:
-            print('(PrivError) {}'.format(e))
+            print('(PROXY)(PrivError) {}'.format(e))
 
     def flushCT(self):
         try:
             with Pyro5.api.Proxy(self._conntrackURI) as ct:
                 ct.flushUDPTarget(62031)
         except Exception as e:
-            print('(PrivError) {}'.format(e))
+            print('(PROXY)(PrivError) {}'.format(e))
 
 
 class Proxy(DatagramProtocol):
@@ -169,9 +168,9 @@ class Proxy(DatagramProtocol):
                 except KeyError:
                     return
                 if self.clientinfo:
-                    print('Add to blacklist: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
+                    print('(PROXY)Add to blacklist: host {}. Expire time {}'.format(self.peerTrack[_peer_id]['shost'],_bltime))
                 if self.privHelper:
-                    print('Ask priv_helper to add to iptables: host {}, port {}.'.format(self.peerTrack[_peer_id]['shost'],self.ListenPort))
+                    print('(PROXY)Ask priv_helper to add to iptables: host {}, port {}.'.format(self.peerTrack[_peer_id]['shost'],self.ListenPort))
                     reactor.callInThread(self.privHelper.addBL,self.ListenPort,self.peerTrack[_peer_id]['shost'])
                 return
             
@@ -219,15 +218,15 @@ class Proxy(DatagramProtocol):
                     self.rptlTrack[host] += 1
 
                 if self.rptlTrack[host] > 20:
-                    print('(RPTL) exceeded max: {}'.format(self.rptlTrack[host]))
+                    print('(PROXY)(RPTL) exceeded max: {}'.format(self.rptlTrack[host]))
                     _bltime = nowtime + 600
                     self.IPBlackList[host] = _bltime
                     self.rptlTrack.pop(host)
 
                     if self.clientinfo:
-                        print('(RPTL) Add to blacklist: host {}. Expire time {}'.format(host,_bltime))
+                        print('(PROXY)(RPTL) Add to blacklist: host {}. Expire time {}'.format(host,_bltime))
                     if self.privHelper:
-                        print('(RPTL) Ask priv_helper to add to iptables: host {}, port {}.'.format(host,self.ListenPort))
+                        print('(PROXY)(RPTL) Ask priv_helper to add to iptables: host {}, port {}.'.format(host,self.ListenPort))
                         reactor.callInThread(self.privHelper.addBL,self.ListenPort,host)
                     return
 
@@ -315,7 +314,7 @@ if __name__ == '__main__':
     config = configparser.ConfigParser()
     
     if not config.read(_config_file):
-        print('Configuration file \''+_config_file+'\' is not a valid configuration file!')
+        print('(PROXY)Configuration file \''+_config_file+'\' is not a valid configuration file!')
         
     try:
 
@@ -332,9 +331,9 @@ if __name__ == '__main__':
         IPBlackList = json.loads(config.get('PROXY','IPBlackList'))
         
     except configparser.Error as err:
-        print('Error processing configuration file -- {}'.format(err))
+        print('(PROXY)Error processing configuration file -- {}'.format(err))
         
-        print('Using default config')
+        print('(PROXY)Using default config')
 #*** CONFIG HERE ***
     
         Master = "127.0.0.1"
@@ -360,7 +359,7 @@ if __name__ == '__main__':
 
     # Set up the signal handler
     def sig_handler(_signal, _frame):
-        print('(GLOBAL) SHUTDOWN: PROXY IS TERMINATING WITH SIGNAL {}'.format(str(_signal)))
+        print('(PROXY)(GLOBAL) SHUTDOWN: PROXY IS TERMINATING WITH SIGNAL {}'.format(str(_signal)))
         reactor.stop()
 
     #Install signal handlers
@@ -386,11 +385,11 @@ if __name__ == '__main__':
     unixSocket = '/run/priv_control/priv_control.unixsocket'
 
     if os.path.exists(unixSocket) and stat.S_ISSOCK(os.stat(unixSocket).st_mode):
-        print('(PRIV) Found UNIX socket. Enabling priv helper')
+        print('(PROXY)(PRIV) Found UNIX socket. Enabling priv helper')
         PRIV_HELPER = privHelper()
-        print('(PRIV) flush conntrack')
+        print('(PROXY)(PRIV) flush conntrack')
         PRIV_HELPER.flushCT()
-        print('(PRIV) flush blocklist')
+        print('(PROXY)(PRIV) flush blocklist')
         PRIV_HELPER.blocklistFlush()
 
 
@@ -405,7 +404,7 @@ if __name__ == '__main__':
     reactor.listenUDP(ListenPort,Proxy(Master,ListenPort,CONNTRACK,PEERTRACK,BlackList,IPBlackList,Timeout,Debug,ClientInfo,DestportStart,DestPortEnd,PRIV_HELPER, RPTLTRACK),interface=ListenIP)
 
     def loopingErrHandle(failure):
-        print('(GLOBAL) STOPPING REACTOR TO AVOID MEMORY LEAK: Unhandled error innowtimed loop.\n {}'.format(failure))
+        print('(PROXY)(GLOBAL) STOPPING REACTOR TO AVOID MEMORY LEAK: Unhandled error innowtimed loop.\n {}'.format(failure))
         reactor.stop()
         
     def stats():        
@@ -431,14 +430,14 @@ if __name__ == '__main__':
         for delete in _dellist:
             IPBlackList.pop(delete)
             if ClientInfo:
-                print('Remove dynamic blacklist entry for {}'.format(delete))
+                print('(PROXY)Remove dynamic blacklist entry for {}'.format(delete))
             if PRIV_HELPER:
-                print('Ask priv helper to remove blacklist entry for {} from iptables'.format(delete))
+                print('(PROXY)Ask priv helper to remove blacklist entry for {} from iptables'.format(delete))
                 reactor.callInThread(PRIV_HELPER.delBL,ListenPort,delete)
 
     def rptlTrimmer():
         RPTLTRACK.clear()
-        print('Purge RPTL table')
+        print('(PROXY)Purge RPTL table')
 
 
         
