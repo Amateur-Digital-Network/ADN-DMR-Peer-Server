@@ -362,16 +362,19 @@ if __name__ == '__main__':
         print('(PROXY)(GLOBAL) SHUTDOWN: PROXY IS TERMINATING WITH SIGNAL {}'.format(str(_signal)))
         reactor.stop()
 
+    def sigt(_signal,_frame):
+        print('oooh')
+
     #Install signal handlers
     signal.signal(signal.SIGINT, sig_handler)
-    signal.signal(signal.SIGTERM, sig_handler)
+    signal.signal(signal.SIGTERM, sigt)
         
     #readState()
     
     #If IPv6 is enabled by enivornment variable...
     if ListenIP == '' and 'FDPROXY_IPV6' in os.environ and bool(os.environ['FDPROXY_IPV6']):
         ListenIP = '::'
-        
+
     #Override static config from Environment
     if 'FDPROXY_STATS' in os.environ:
         Stats = bool(os.environ['FDPROXY_STATS'])
