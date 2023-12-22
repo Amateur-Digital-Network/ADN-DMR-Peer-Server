@@ -63,8 +63,7 @@ class FD_APIUserDefinedContext(object):
         self.CONFIG['SYSTEMS'][system]['OPTIONS'] = options
 
     def getoptions(self,system):
-        print(self.CONFIG['SYSTEMS'][system]['OPTIONS'])
-        return self.CONFIG['SYSTEMS'][system]['OPTIONS']
+        return self.CONFIG['SYSTEMS'][system]
 
     def killserver(self):
         self.CONFIG['GLOBAL']['_KILL_SERVER'] = True
