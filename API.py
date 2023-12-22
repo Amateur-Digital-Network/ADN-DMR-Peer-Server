@@ -76,7 +76,7 @@ class FD_API(ServiceBase):
     #return API version
     @rpc(Unicode, _returns=Decimal())
     def version(ctx, sessionid):
-        return({result: 'OK', version: FD_API._version})
+        return("{result: 'OK', version: " + FD_API._version + "}")
 
     @rpc()
     def dummy(ctx):
@@ -90,7 +90,7 @@ class FD_API(ServiceBase):
         system = ctx.udc.validateKey(int(dmrid),key)
         if system:
             ctx.udc.reset(system)
-            return({result: 'OK'})
+            return("result: 'OK'")
         else:
             raise error.InvalidCredentialsError()
 
@@ -99,7 +99,7 @@ class FD_API(ServiceBase):
         system = ctx.udc.validateKey(int(dmrid),key)
         if system:
             ctx.udc.options(system,options)
-            return({result: 'OK'})
+            return("result: 'OK'")
         else:
             raise error.InvalidCredentialsError()
 
@@ -107,7 +107,7 @@ class FD_API(ServiceBase):
     def getoptions(ctx,dmrid,key):
         system = ctx.udc.validateKey(int(dmrid),key)
         if system:
-            return {result: 'OK', options: ctx.udc.getoptions(system)}
+            return("{result: 'OK', options: " + ctx.udc.getoptions(system) + "}")
         else:
             raise error.InvalidCredentialsError()
 
@@ -118,21 +118,21 @@ class FD_API(ServiceBase):
     def killserver(ctx,systemkey):
         if ctx.udc.validateSystemKey(systemkey):
             ctx.udc.killserver()
-            return {result: 'OK'}
+            return("{result: 'OK'}")
         else:
             raise error.InvalidCredentialsError()
 
     @rpc(Unicode,_returns=Unicode())
     def getconfig(ctx,systemkey):
         if ctx.udc.validateSystemKey(systemkey):
-            return {result: 'OK', config: ctx.udc.getconfig()}
+            return("{result: 'OK', config: " + ctx.udc.getconfig()+"}")
         else:
             raise error.InvalidCredentialsError()
 
     @rpc(Unicode,_returns=Unicode())
     def getbridges(ctx,systemkey):
         if ctx.udc.validateSystemKey(systemkey):
-            return {result: 'OK', bridges: ctx.udc.getbridges()}
+            return ("{result: 'OK', bridges: " + ctx.udc.getbridges() + "}")
         else:
             raise error.InvalidCredentialsError()
 
