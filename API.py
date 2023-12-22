@@ -102,7 +102,7 @@ class FD_API(ServiceBase):
     def getoptions(ctx,dmrid,key):
         system = ctx.udc.validateKey(int(dmrid),key)
         if system:
-            return ctx.udc.getoptions(system,options)
+            return ctx.udc.getoptions(system)
         else:
             raise error.InvalidCredentialsError()
 
