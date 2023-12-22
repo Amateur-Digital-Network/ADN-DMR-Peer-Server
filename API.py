@@ -41,9 +41,12 @@ class FD_APIUserDefinedContext(object):
                 for peerid in systems[system]['PEERS']:
                     print(peerid)
                     if peerid == dmrid:
-                        if key == systems[system]['_opt_key']:
-                            return(system)
-                        else:
+                        try:
+                            if key == systems[system]['_opt_key']:
+                                return(system)
+                            else:
+                                return(False)
+                        except KeyError:
                             return(False)
         return(False)
 
@@ -60,6 +63,7 @@ class FD_APIUserDefinedContext(object):
         self.CONFIG['SYSTEMS'][system]['OPTIONS'] = options
 
     def getoptions(self,system):
+        print(self.CONFIG['SYSTEMS'][system]['OPTIONS'])
         return self.CONFIG['SYSTEMS'][system]['OPTIONS']
 
     def killserver(self):
