@@ -63,7 +63,7 @@ class FD_APIUserDefinedContext(object):
         self.CONFIG['SYSTEMS'][system]['OPTIONS'] = options
 
     def getoptions(self,system):
-        return 'SYSTEM'
+        return self.CONFIG['SYSTEMS'][system]['OPTIONS']
 
     def killserver(self):
         self.CONFIG['GLOBAL']['_KILL_SERVER'] = True
@@ -101,7 +101,7 @@ class FD_API(ServiceBase):
         else:
             raise error.InvalidCredentialsError()
 
-    @rpc(UnsignedInteger32,Unicode)
+    @rpc(UnsignedInteger32,Unicode,_returns=Unicode())
     def getoptions(ctx,dmrid,key):
         system = ctx.udc.validateKey(int(dmrid),key)
         if system:
