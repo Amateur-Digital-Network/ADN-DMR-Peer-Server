@@ -16,37 +16,7 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 ###############################################################################
 voiceMap = {
-   'en_GB': {
-                'A': 'alpha',
-                'B': 'bravo',
-                'C': 'charlie',
-                'D': 'delta',
-                'E': 'echo',
-                'F': 'foxtrot',
-                'G': 'golf',
-                'H': 'hotel',
-                'I': 'india',
-                'J': 'juliet',
-                'K': 'kilo',
-                'L': 'lima',
-                'M': 'mike',
-                'N': 'november',
-                'O': 'oscar',
-                'P': 'papa',
-                'Q': 'quebec',
-                'R': 'romeo',
-                'S': 'sierra',
-                'T': 'tango',
-                'U': 'uniform',
-                'V': 'victor',
-                'W': 'whiskey',
-                'X': 'x-ray',
-                'Y': 'yankee',
-                'Z': 'zulu',
-                'to': 'silence',
-                'notlinked': 'not-linked',
-                'linkedto': 'linked-to'
-    },
+   'en_GB': {,
 
     
     'en_GB_2': {
@@ -264,6 +234,7 @@ voiceMap = {
     'de_DE': {
 
                 'to': 'silence',
+                'this-is': 'silence',
                 'allstar-link-mode': 'A'
     },
     
