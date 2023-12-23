@@ -365,7 +365,23 @@ def remove_bridge_system(system):
                 _bridgestemp[_bridge].append({'SYSTEM': system, 'TS': _bridgesystem['TS'], 'TGID': _bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  _bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [_bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + _bridgesystem['TIMEOUT']})
             
     BRIDGES.update(_bridgestemp)
-                
+
+def update_timeout(system,_tmout):
+    _bridgestemp = {}
+    _bridgetemp = {}
+    for _bridge in BRIDGES:
+        for _bridgesystem in BRIDGES[_bridge]:
+            if _bridgesystem['SYSTEM'] != system:
+                continue
+            else:
+                if _bridge not in _bridgestemp:
+                    _bridgestemp[_bridge] = []
+                _bridgesystem['TIMEOUT'] = _tmout * 60
+                _bridgestemp[_bridge].append(_bridgesystem)
+
+
+    BRIDGES.update(_bridgestemp)
+
 
 # Run this every minute for rule timer updates
 def rule_timer_loop():
@@ -847,7 +863,7 @@ def bridge_reset():
     logger.debug('(BRIDGERESET) Running bridge resetter')
     for _system in CONFIG['SYSTEMS']:
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
-            logger.info('(BRIDGERESET) Bridge reset for %s - no peers',_system)
+            logger.info('(BRIDGERESET) Bridge reset for %s - no peers or connection reset called',_system)
             remove_bridge_system(_system)
             try:
                 del(CONFIG['SYSTEMS'][_system]['_opt_key'])
@@ -1033,34 +1049,36 @@ def options_config():
                     
                     if int(_options['DEFAULT_UA_TIMER']) != CONFIG['SYSTEMS'][_system]['DEFAULT_UA_TIMER']:
                         logger.debug('(OPTIONS) %s Updating DEFAULT_UA_TIMER for existing bridges.',_system)
-                        remove_bridge_system(_system)
-                        for _bridge in BRIDGES:
-                            ts1 = False 
-                            ts2 = False
-                            for i,e in enumerate(BRIDGES[_bridge]):
-                                if e['SYSTEM'] == _system and e['TS'] == 1:
-                                    ts1 = True
-                                if e['SYSTEM'] == _system and e['TS'] == 2:
-                                    ts2 = True
-                            if _bridge[0:1] != '#':
-                                if ts1 == False:
-                                    BRIDGES[_bridge].append({'SYSTEM': _system, 'TS': 1, 'TGID': bytes_3(int(_bridge)),'ACTIVE': False,'TIMEOUT': _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(_bridge)),],'RESET': [], 'TIMER': time()})
-                                if ts2 == False:
-                                    BRIDGES[_bridge].append({'SYSTEM': _system, 'TS': 2, 'TGID': bytes_3(int(_bridge)),'ACTIVE': False,'TIMEOUT': _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(_bridge)),],'RESET': [], 'TIMER': time()})
-                            else:
-                                if ts2 == False:
-                                    BRIDGES[_bridge].append({'SYSTEM': _system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT': _tmout * 60,'TO_TYPE': 'ON','OFF': [bytes_3(4000)],'ON': [],'RESET': [], 'TIMER': time()})
+                        #remove_bridge_system(_system)
+                        #for _bridge in BRIDGES:
+                            #ts1 = False
+                            #ts2 = False
+                            #for i,e in enumerate(BRIDGES[_bridge]):
+                                #if e['SYSTEM'] == _system and e['TS'] == 1:
+                                    #ts1 = True
+                                #if e['SYSTEM'] == _system and e['TS'] == 2:
+                                    #ts2 = True
+                            #if _bridge[0:1] != '#':
+                                #if ts1 == False:
+                                    #BRIDGES[_bridge].append({'SYSTEM': _system, 'TS': 1, 'TGID': bytes_3(int(_bridge)),'ACTIVE': False,'TIMEOUT': _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(_bridge)),],'RESET': [], 'TIMER': time()})
+                                #if ts2 == False:
+                                    #BRIDGES[_bridge].append({'SYSTEM': _system, 'TS': 2, 'TGID': bytes_3(int(_bridge)),'ACTIVE': False,'TIMEOUT': _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(_bridge)),],'RESET': [], 'TIMER': time()})
+                            #else:
+                                #if ts2 == False:
+                                    #BRIDGES[_bridge].append({'SYSTEM': _system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT': _tmout * 60,'TO_TYPE': 'ON','OFF': [bytes_3(4000)],'ON': [],'RESET': [], 'TIMER': time()})
+
+                        update_timeout(_system,_tmout)
             
                     if int(_options['DEFAULT_REFLECTOR']) != CONFIG['SYSTEMS'][_system]['DEFAULT_REFLECTOR']:
 
                         if int(_options['DEFAULT_REFLECTOR']) in prohibitedTGs and _options['DEFAULT_REFLECTOR'] > 0:
-                            logger.debug('(OPTIONS) %s default reflector is prohibited, ignoring change',_system)
+                            logger.debug('(OPTIONS) %s default dial-a-tg is prohibited, ignoring change',_system)
                         elif int(_options['DEFAULT_REFLECTOR']) > 0:
-                            logger.debug('(OPTIONS) %s default reflector changed, updating',_system)
+                            logger.debug('(OPTIONS) %s default dial-a-tg changed, updating',_system)
                             reset_all_reflector_system(_tmout,_system)
                             make_default_reflector(int(_options['DEFAULT_REFLECTOR']),_tmout,_system)
                         else:
-                            logger.debug('(OPTIONS) %s default reflector disabled, updating',_system) 
+                            logger.debug('(OPTIONS) %s default dial-a-tg disabled, updating',_system)
                             reset_all_reflector_system(_tmout,_system)
                     
                     ts1 = []
@@ -2851,7 +2869,7 @@ if __name__ == '__main__':
     prohibitedTGs = [0,1,2,3,4,5,9,9990,9991,9992,9993,9994,9995,9996,9997,9998,9999]
     
     # Default reflector
-    logger.debug('(ROUTER) Setting default reflectors')
+    logger.debug('(ROUTER) Setting default dial-a-tgs')
     for system in CONFIG['SYSTEMS']:
         if CONFIG['SYSTEMS'][system]['MODE'] != 'MASTER':
             continue
