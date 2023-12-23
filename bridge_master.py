@@ -1052,13 +1052,13 @@ def options_config():
                                     BRIDGES[_bridge].append({'SYSTEM': _system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT': _tmout * 60,'TO_TYPE': 'ON','OFF': [bytes_3(4000)],'ON': [],'RESET': [], 'TIMER': time()})
             
                     if int(_options['DEFAULT_REFLECTOR']) != CONFIG['SYSTEMS'][_system]['DEFAULT_REFLECTOR']:
-                        if int(_options['DEFAULT_REFLECTOR']) > 0:
-                            logger.debug('(OPTIONS) %s default reflector changed, updating',_system) 
+
+                        if int(_options['DEFAULT_REFLECTOR']) in prohibitedTGs and _options['DEFAULT_REFLECTOR'] > 0:
+                            logger.debug('(OPTIONS) %s default reflector is prohibited, ignoring change',_system)
+                        elif int(_options['DEFAULT_REFLECTOR']) > 0:
+                            logger.debug('(OPTIONS) %s default reflector changed, updating',_system)
                             reset_all_reflector_system(_tmout,_system)
                             make_default_reflector(int(_options['DEFAULT_REFLECTOR']),_tmout,_system)
-                        elif int(_options['DEFAULT_REFLECTOR']) in prohibitedTGs and not bool(_options['DEFAULT_REFLECTOR']):
-                            logger.debug('(OPTIONS) %s default reflector is prohibited, ignoring change',_system)
-
                         else:
                             logger.debug('(OPTIONS) %s default reflector disabled, updating',_system) 
                             reset_all_reflector_system(_tmout,_system)
