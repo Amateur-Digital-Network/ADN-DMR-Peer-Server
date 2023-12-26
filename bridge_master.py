@@ -1047,7 +1047,7 @@ def options_config():
                         
                     _tmout = int(_options['DEFAULT_UA_TIMER'])
                     
-                    if  CONFIG['SYSTEMS'][_system]['_reloadoptions'] or (int(_options['DEFAULT_UA_TIMER']) != CONFIG['SYSTEMS'][_system]['DEFAULT_UA_TIMER']):
+                    if ('_reloadoptions' in CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reloadoptions']) or (int(_options['DEFAULT_UA_TIMER']) != CONFIG['SYSTEMS'][_system]['DEFAULT_UA_TIMER']):
                         logger.debug('(OPTIONS) %s Updating DEFAULT_UA_TIMER for existing bridges.',_system)
                         update_timeout(_system,_tmout)
             
@@ -1064,7 +1064,7 @@ def options_config():
                             reset_all_reflector_system(_tmout,_system)
                     
                     ts1 = []
-                    if CONFIG['SYSTEMS'][_system]['_reloadoptions'] or (_options['TS1_STATIC'] != CONFIG['SYSTEMS'][_system]['TS1_STATIC']):
+                    if ('_reloadoptions' in CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reloadoptions']) or (_options['TS1_STATIC'] != CONFIG['SYSTEMS'][_system]['TS1_STATIC']):
                         _tmout = int(_options['DEFAULT_UA_TIMER'])
                         logger.debug('(OPTIONS) %s TS1 static TGs changed, updating',_system)
                         ts1 = []
@@ -1085,7 +1085,7 @@ def options_config():
                                 tg = int(tg)
                                 make_static_tg(tg,1,_tmout,_system)
                     ts2 = []
-                    if CONFIG['SYSTEMS'][_system]['_reloadoptions'] or (_options['TS2_STATIC'] != CONFIG['SYSTEMS'][_system]['TS2_STATIC']):
+                    if ('_reloadoptions' in CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reloadoptions']) or (_options['TS2_STATIC'] != CONFIG['SYSTEMS'][_system]['TS2_STATIC']):
                         _tmout = int(_options['DEFAULT_UA_TIMER'])
                         logger.debug('(OPTIONS) %s TS2 static TGs changed, updating',_system)
                         if CONFIG['SYSTEMS'][_system]['TS2_STATIC']:
@@ -1113,7 +1113,7 @@ def options_config():
                     CONFIG['SYSTEMS'][_system]['DEFAULT_REFLECTOR'] = int(_options['DEFAULT_REFLECTOR'])
                     CONFIG['SYSTEMS'][_system]['DEFAULT_UA_TIMER'] = int(_options['DEFAULT_UA_TIMER'])
 
-                    if CONFIG['SYSTEMS'][_system]['_reloadoptions']:
+                    if '_reloadoptions' in CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reloadoptions']:
                         CONFIG['SYSTEMS'][_system]['_reloadoptions'] = False
         except Exception as e:
             logger.exception('(OPTIONS) caught exception: %s',e)
@@ -2213,7 +2213,7 @@ class routerHBP(HBSYSTEM):
             
                 
         
-        #Handle  private voice calls (for reflectors)
+        #Handle  private voice calls (for dial-a-tg)
         elif _call_type == 'unit' and not _data_call and not self.STATUS[_slot]['_allStarMode']:
             if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
                 
