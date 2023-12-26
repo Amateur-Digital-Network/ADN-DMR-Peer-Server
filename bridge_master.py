@@ -461,7 +461,7 @@ def bridgeDebug():
     _rst_time = time()
     statroll = 0
 
-    #Kill off any bridges that should nnot exist, ever.
+    #Kill off any bridges that should not exist, ever.
     for b in ['0','1','2','3','4','5','6','7','8','9']:
         BRIDGES.pop(b,None)
         BRIDGES.pop('#'+b, None)
@@ -862,7 +862,7 @@ def bridge_reset():
     logger.debug('(BRIDGERESET) Running bridge resetter')
     for _system in CONFIG['SYSTEMS']:
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
-            logger.info('(BRIDGERESET) Bridge reset for %s - no peers or connection reset called',_system)
+            logger.info('(BRIDGERESET) Bridge reset for %s - no peers',_system)
             remove_bridge_system(_system)
             try:
                 del(CONFIG['SYSTEMS'][_system]['_opt_key'])
@@ -870,6 +870,7 @@ def bridge_reset():
                 pass
             CONFIG['SYSTEMS'][_system]['_reset'] = False
             CONFIG['SYSTEMS'][_system]['_resetlog'] = False
+            CONFIG['SYSTEMS'][_system]['_reloadoptions'] = True
 
 def options_config():
     logger.debug('(OPTIONS) Running options parser')
@@ -1052,8 +1053,8 @@ def options_config():
             
                     if int(_options['DEFAULT_REFLECTOR']) != CONFIG['SYSTEMS'][_system]['DEFAULT_REFLECTOR']:
 
-                        if int(_options['DEFAULT_REFLECTOR']) in prohibitedTGs and _options['DEFAULT_REFLECTOR'] > 0:
-                            logger.debug('(OPTIONS) %s default dial-a-tg is prohibited, ignoring change',_system)
+                        if int(_options['DEFAULT_REFLECTOR']) in prohibitedTGs and int(_options['DEFAULT_REFLECTOR']) > 0:
+                            logger.debug('(OPTIONS) %s default dial-a-tg is in prohibited list, ignoring change',_system)
                         elif int(_options['DEFAULT_REFLECTOR']) > 0:
                             logger.debug('(OPTIONS) %s default dial-a-tg changed, updating',_system)
                             reset_all_reflector_system(_tmout,_system)
