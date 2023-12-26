@@ -2018,12 +2018,11 @@ class routerHBP(HBSYSTEM):
     def dmrd_received(self, _peer_id, _rf_src, _dst_id, _seq, _slot, _call_type, _frame_type, _dtype_vseq, _stream_id, _data):
 
         try:
-            if CONFIG['SYSTEMS'][self._system]['_reset'] and not CONFIG['SYSTEMS'][self._system]['_resetlog']:
-                logger.info('(%s) disallow transmission until reset cycle is complete',_system)
-                CONFIG['SYSTEMS'][self._system]['_resetlog'] = True
-
-
-                return
+            if CONFIG['SYSTEMS'][self._system]['_reset'] or CONFIG['SYSTEMS'][_system]['_reloadoptions']:
+                if not CONFIG['SYSTEMS'][self._system]['_resetlog']:
+                    logger.info('(%s) disallow transmission until reset cycle is complete',_system)
+                    CONFIG['SYSTEMS'][self._system]['_resetlog'] = True
+            return
         except KeyError:
             pass
 
@@ -2223,11 +2222,11 @@ class routerHBP(HBSYSTEM):
                 
                 self.STATUS[_slot]['_stopTgAnnounce'] = False
                 
-                logger.info('(%s) Reflector: Private call from %s to %s',self._system, int_id(_rf_src), _int_dst_id)
+                logger.info('(%s) Dial-A-TG: Private call from %s to %s',self._system, int_id(_rf_src), _int_dst_id)
                 if _int_dst_id >= 5 and _int_dst_id != 8  and _int_dst_id != 9 and _int_dst_id <= 999999:
                     _bridgename = ''.join(['#',str(_int_dst_id)])
                     if _bridgename not in BRIDGES and not (_int_dst_id >= 4000 and _int_dst_id <= 5000) and not (_int_dst_id >=9991 and _int_dst_id <= 9999):
-                            logger.info('(%s) [A] Reflector for TG %s does not exist. Creating as User Activated. Timeout: %s',self._system, _int_dst_id,CONFIG['SYSTEMS'][self._system]['DEFAULT_UA_TIMER'])
+                            logger.info('(%s) [A] Dial-A-TG for TG %s does not exist. Creating as User Activated. Timeout: %s',self._system, _int_dst_id,CONFIG['SYSTEMS'][self._system]['DEFAULT_UA_TIMER'])
                             make_single_reflector(_dst_id,CONFIG['SYSTEMS'][self._system]['DEFAULT_UA_TIMER'],self._system)
                     
                     if _int_dst_id > 5 and _int_dst_id != 9 and _int_dst_id != 5000 and not (_int_dst_id >=9991 and _int_dst_id <= 9999):
@@ -2240,7 +2239,7 @@ class routerHBP(HBSYSTEM):
                                     # TGID matches a rule source, reset its timer
                                     if _slot == _system['TS'] and _dst_id == _system['TGID'] and ((_system['TO_TYPE'] == 'ON' and (_system['ACTIVE'] == True)) or (_system['TO_TYPE'] == 'OFF' and _system['ACTIVE'] == False)):
                                         _system['TIMER'] = pkt_time + _system['TIMEOUT']
-                                        logger.info('(%s) [B] Transmission match for Reflector: %s. Reset timeout to %s', self._system, _bridge, _system['TIMER'])
+                                        logger.info('(%s) [B] Transmission match for Dial-A-TG: %s. Reset timeout to %s', self._system, _bridge, _system['TIMER'])
                             
                                 # TGID matches an ACTIVATION trigger
                                 if _int_dst_id == int(_dehash_bridge) and _system['SYSTEM'] == self._system and  _slot == _system['TS']:
@@ -2248,15 +2247,15 @@ class routerHBP(HBSYSTEM):
                                     if _system['ACTIVE'] == False:
                                         _system['ACTIVE'] = True
                                         _system['TIMER'] = pkt_time + _system['TIMEOUT']
-                                        logger.info('(%s) [C] Reflector: %s, connection changed to state: %s', self._system, _bridge, _system['ACTIVE'])
+                                        logger.info('(%s) [C] Dial-A-TG: %s, connection changed to state: %s', self._system, _bridge, _system['ACTIVE'])
                                         # Cancel the timer if we've enabled an "OFF" type timeout
                                         if _system['TO_TYPE'] == 'OFF':
                                             _system['TIMER'] = pkt_time
-                                            logger.info('(%s) [D] Reflector: %s has an "OFF" timer and set to "ON": timeout timer cancelled', self._system, _bridge)
+                                            logger.info('(%s) [D] Dial-A-TG: %s has an "OFF" timer and set to "ON": timeout timer cancelled', self._system, _bridge)
                                 # Reset the timer for the rule
                                 if _system['ACTIVE'] == True and _system['TO_TYPE'] == 'ON':
                                     _system['TIMER'] = pkt_time + _system['TIMEOUT']
-                                    logger.info('(%s) [E] Reflector: %s, timeout timer reset to: %s', self._system, _bridge, _system['TIMER'] - pkt_time)
+                                    logger.info('(%s) [E] Dial-A-TG: %s, timeout timer reset to: %s', self._system, _bridge, _system['TIMER'] - pkt_time)
 
                                 # TGID matches an DE-ACTIVATION trigger
                                 #Single TG mode
@@ -2266,19 +2265,19 @@ class routerHBP(HBSYSTEM):
                                         if _dst_id in _system['OFF'] or _int_dst_id != int(_dehash_bridge) :
                                             if _system['ACTIVE'] == True:
                                                 _system['ACTIVE'] = False
-                                                logger.info('(%s) [F] Reflector: %s, connection changed to state: %s', self._system, _bridge, _system['ACTIVE'])
+                                                logger.info('(%s) [F] Dial-A-TG: %s, connection changed to state: %s', self._system, _bridge, _system['ACTIVE'])
                                                 # Cancel the timer if we've enabled an "ON" type timeout
                                                 if _system['TO_TYPE'] == 'ON':
                                                     _system['TIMER'] = pkt_time
-                                                    logger.info('(%s) [G] Reflector: %s has ON timer and set to "OFF": timeout timer cancelled', self._system, _bridge)
+                                                    logger.info('(%s) [G] Dial-A-TG: %s has ON timer and set to "OFF": timeout timer cancelled', self._system, _bridge)
                                         # Reset the timer for the rule
                                         if _system['ACTIVE'] == False and _system['TO_TYPE'] == 'OFF':
                                             _system['TIMER'] = pkt_time + _system['TIMEOUT']
-                                            logger.info('(%s) [H] Reflector: %s, timeout timer reset to: %s', self._system, _bridge, _system['TIMER'] - pkt_time)
+                                            logger.info('(%s) [H] Dial-A-TG: %s, timeout timer reset to: %s', self._system, _bridge, _system['TIMER'] - pkt_time)
                                         # Cancel the timer if we've enabled an "ON" type timeout
                                         if _system['ACTIVE'] == True and _system['TO_TYPE'] == 'ON' and _dst_id in _system['OFF']:
                                             _system['TIMER'] = pkt_time
-                                            logger.info('(%s) [I] Reflector: %s has ON timer and set to "OFF": timeout timer cancelled', self._system, _bridge)
+                                            logger.info('(%s) [I] Dial-A-TG: %s has ON timer and set to "OFF": timeout timer cancelled', self._system, _bridge)
             
             
             if (_frame_type == HBPF_DATA_SYNC) and (_dtype_vseq == HBPF_SLT_VTERM) and (self.STATUS[_slot]['RX_TYPE'] != HBPF_SLT_VTERM):
@@ -2286,21 +2285,21 @@ class routerHBP(HBSYSTEM):
                 _say = [words[_lang]['silence']]
 
                 if _int_dst_id < 8 or _int_dst_id == 9 :
-                    logger.info('(%s) Reflector: voice called - TG <  8 or 9 - "busy""', self._system)
+                    logger.info('(%s) Dial-A-TG: voice called - TG <  8 or 9 - "busy""', self._system)
                     _say.append(words[_lang]['busy'])
                     _say.append(words[_lang]['silence'])
                     self.STATUS[_slot]['_stopTgAnnounce'] = True
                     
                 #Allstar mode switch
                 if CONFIG['ALLSTAR']['ENABLED'] and _int_dst_id == 8:
-                    logger.info('(%s) Reflector: voice called - TG 8 AllStar"', self._system)
+                    logger.info('(%s) Dial-A-TG: voice called - TG 8 AllStar"', self._system)
                     _say.append(words[_lang]['all-star-link-mode'])
                     _say.append(words[_lang]['silence'])
                     self.STATUS[_slot]['_stopTgAnnounce'] = True
                     self.STATUS[_slot]['_allStarMode'] = True
                     reactor.callLater(30,resetallStarMode)
                 elif not CONFIG['ALLSTAR']['ENABLED'] and _int_dst_id == 8:
-                    logger.info('(%s) Reflector: TG 8 AllStar not enabled"', self._system)
+                    logger.info('(%s) Dial-A-TG: TG 8 AllStar not enabled"', self._system)
                     _say.append(words[_lang]['busy'])
                     _say.append(words[_lang]['silence'])
                     self.STATUS[_slot]['_stopTgAnnounce'] = True
@@ -2309,7 +2308,7 @@ class routerHBP(HBSYSTEM):
                 
                 #If disconnection called
                 if _int_dst_id == 4000:
-                    logger.info('(%s) Reflector: voice called - 4000 "not linked"', self._system)
+                    logger.info('(%s) Dial-A-TG: voice called - 4000 "not linked"', self._system)
                     _say.append(words[_lang]['notlinked'])
                     _say.append(words[_lang]['silence'])
                  
@@ -2323,7 +2322,7 @@ class routerHBP(HBSYSTEM):
                             _dehash_bridge = _bridge[1:]
                             if _system['SYSTEM'] == self._system and _slot == _system['TS']:
                                     if _system['ACTIVE'] == True:
-                                        logger.info('(%s) Reflector: voice called - 5000 status - "linked to %s"', self._system,_dehash_bridge)
+                                        logger.info('(%s) Dial-A-TG: voice called - 5000 status - "linked to %s"', self._system,_dehash_bridge)
                                         _say.append(words[_lang]['silence'])
                                         _say.append(words[_lang]['linkedto'])
                                         _say.append(words[_lang]['silence'])
@@ -2338,7 +2337,7 @@ class routerHBP(HBSYSTEM):
                                         break
                         
                     if _active == False:
-                        logger.info('(%s) Reflector: voice called - 5000 status - "not linked"', self._system)
+                        logger.info('(%s) Dial-A-TG: voice called - 5000 status - "not linked"', self._system)
                         _say.append(words[_lang]['notlinked'])
                 
                 #Information services
@@ -2350,7 +2349,7 @@ class routerHBP(HBSYSTEM):
                 
                 #Speak what TG was requested to link
                 elif not self.STATUS[_slot]['_stopTgAnnounce']:
-                    logger.info('(%s) Reflector: voice called (linking)  "linked to %s"', self._system,_int_dst_id)
+                    logger.info('(%s) Dial-A-TG: voice called (linking)  "linked to %s"', self._system,_int_dst_id)
                     _say.append(words[_lang]['silence'])
                     _say.append(words[_lang]['linkedto'])
                     _say.append(words[_lang]['silence'])
