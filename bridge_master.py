@@ -357,7 +357,9 @@ def remove_bridge_system(system):
         for _bridgesystem in BRIDGES[_bridge]:
             if _bridgesystem['SYSTEM'] != system:
                 if _bridge not in _bridgestemp:
-                    continue
+                    _bridgestemp[_bridge] = []
+                _bridgestemp[_bridge].append(_bridgesystem)
+
             else:
                 if _bridge not in _bridgestemp:
                     _bridgestemp[_bridge] = []
@@ -862,7 +864,7 @@ def bridge_reset():
     logger.debug('(BRIDGERESET) Running bridge resetter')
     for _system in CONFIG['SYSTEMS']:
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
-            logger.info('(BRIDGERESET) Bridge reset for %s - no peers',_system)
+            logger.info('(BRIDGERESET) Bridge reset for %s - no peers or API reset called',_system)
             remove_bridge_system(_system)
             try:
                 del(CONFIG['SYSTEMS'][_system]['_opt_key'])
@@ -875,7 +877,7 @@ def bridge_reset():
 def options_config():
     logger.debug('(OPTIONS) Running options parser')
 
-    prohibitedTGs = [0,1,2,3,4,5,9,9990,9991,9992,9993,9994,9995,9996,9997,9998,9999]
+    prohibitedTGs = [0,1,2,3,4,5,6,7,8,9,9990,9991,9992,9993,9994,9995,9996,9997,9998,9999]
 
 
     for _system in CONFIG['SYSTEMS']:

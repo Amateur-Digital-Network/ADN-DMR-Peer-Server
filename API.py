@@ -68,6 +68,11 @@ class FD_APIUserDefinedContext(object):
     def killserver(self):
         self.CONFIG['GLOBAL']['_KILL_SERVER'] = True
 
+    def resetAllConnections(self):
+        systems = self.CONFIG['SYSTEMS']
+        for system in systems:
+            self.CONFIG['SYSTEMS'][system]['_reset'] = True
+
 
 
 class FD_API(ServiceBase):
@@ -116,6 +121,13 @@ class FD_API(ServiceBase):
     def killserver(ctx,systemkey):
         if ctx.udc.validateSystemKey(systemkey):
             return ctx.udc.killserver()
+        else:
+            raise error.InvalidCredentialsError()
+
+    @rpc(Unicode)
+    def resetall(ctx,systemkey):
+        if ctx.udc.validateSystemKey(systemkey):
+            return ctx.udc.resetAllConnections()
         else:
             raise error.InvalidCredentialsError()
 
