@@ -317,17 +317,23 @@ def reset_static_tg(tg,ts,_tmout,system):
             #bridgetemp.append(bridgesystem)
         #print(bridgetemp)
         #BRIDGES[bridge] = bridgetemp
-        print(BRIDGES[bridge])
+        #print(BRIDGES[bridge])
 
 def reset_all_reflector_system(_tmout,resetSystem):
+    logger.trace('RST: In reset_all_reflector_system - timeout: %s, resetSystem: %s',_tmout,resetSystem)
     for system in CONFIG['SYSTEMS']:
+        logger.trace('RST: for %s in SYSTEMS',system)
         for bridge in BRIDGES:
+            logger.trace('RST: for %s in BRIDGES',bridge)
             if bridge[0:1] == '#':
                 for bridgesystem in BRIDGES[bridge]:
+                    logger.trace('RST: for %s in BRIDGES[%s]',bridgesystem,bridge)
                     bridgetemp = deque()
                     if bridgesystem['SYSTEM'] == resetSystem and bridgesystem['TS'] == 2:
+                        logger.trace('RST: MATCH: setting inactive for %s',bridgesystem['SYSTEM'])
                         bridgetemp.append({'SYSTEM': resetSystem, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(bridge[1:])),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
                     else:
+                        logger.trace('RST: NO MATCH: using existing: %s',bridgesystem)
                         bridgetemp.append(bridgesystem)
                     BRIDGES[bridge] = bridgetemp
 
