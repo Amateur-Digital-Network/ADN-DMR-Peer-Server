@@ -377,6 +377,7 @@ def make_single_reflector(_tgid,_tmout,_sourcesystem):
                 #_bridgestemp[_bridge].append({'SYSTEM': system, 'TS': _bridgesystem['TS'], 'TGID': _bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  _bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [_bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + _bridgesystem['TIMEOUT']})
 
 def remove_bridge_system(system):
+    bt = {}
     for system in CONFIG['SYSTEMS']:
         for bridge in BRIDGES:
             bridgetemp = []
@@ -385,7 +386,9 @@ def remove_bridge_system(system):
                     bridgetemp.append({'SYSTEM': system, 'TS': _bridgesystem['TS'], 'TGID': _bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  _bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [_bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + _bridgesystem['TIMEOUT']})
                 else:
                     bridetemp.append(bridgesystem)
-            BRIDGES[bridge] = bridgetemp
+            bt[bridge] = bridgetemp
+    for bridge in bt:
+        BRIDGES[bridge] = bt[bridge]
             
 def update_timeout(system,_tmout):
     _bridgestemp = {}
