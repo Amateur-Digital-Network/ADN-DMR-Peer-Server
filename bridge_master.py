@@ -881,7 +881,7 @@ def bridge_reset():
     for _system in CONFIG['SYSTEMS']:
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
             logger.info('(BRIDGERESET) Bridge reset for %s - no peers or API reset called',_system)
-            remove_bridge_system(_system)
+            #remove_bridge_system(_system)
             try:
                 del(CONFIG['SYSTEMS'][_system]['_opt_key'])
             except:
