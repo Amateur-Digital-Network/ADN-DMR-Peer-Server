@@ -335,8 +335,8 @@ def reset_all_reflector_system(_tmout,resetSystem):
                     else:
                         logger.trace('RST: NO MATCH: using existing: %s',bridgesystem)
                         bridgetemp.append(bridgesystem)
-                    logger.trace('RST: bridgetemp %s',bridgetemp)
-                    BRIDGES[bridge] = bridgetemp
+                logger.trace('RST: bridgetemp %s',bridgetemp)
+                BRIDGES[bridge] = bridgetemp
 
             
 def make_single_reflector(_tgid,_tmout,_sourcesystem):
