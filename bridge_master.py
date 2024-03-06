@@ -326,9 +326,9 @@ def reset_all_reflector_system(_tmout,resetSystem):
         for bridge in BRIDGES:
             logger.trace('RST: for %s in BRIDGES',bridge)
             if bridge[0:1] == '#':
+                bridgetemp = []
                 for bridgesystem in BRIDGES[bridge]:
                     logger.trace('RST: for %s in BRIDGES[%s]',bridgesystem,bridge)
-                    bridgetemp = []
                     if bridgesystem['SYSTEM'] == resetSystem and bridgesystem['TS'] == 2:
                         logger.trace('RST: MATCH: setting inactive for %s',bridgesystem['SYSTEM'])
                         bridgetemp.append({'SYSTEM': resetSystem, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(bridge[1:])),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
