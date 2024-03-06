@@ -321,6 +321,7 @@ def reset_static_tg(tg,ts,_tmout,system):
 
 def reset_all_reflector_system(_tmout,resetSystem):
     logger.trace('RST: In reset_all_reflector_system - timeout: %s, resetSystem: %s',_tmout,resetSystem)
+    bt = {}
     for system in CONFIG['SYSTEMS']:
         logger.trace('RST: for %s in SYSTEMS',system)
         for bridge in BRIDGES:
@@ -336,7 +337,10 @@ def reset_all_reflector_system(_tmout,resetSystem):
                         logger.trace('RST: NO MATCH: using existing: %s',bridgesystem)
                         bridgetemp.append(bridgesystem)
                 logger.trace('RST: bridgetemp %s',bridgetemp)
-                BRIDGES[bridge] = bridgetemp
+                #BRIDGES[bridge] = bridgetemp
+                bt[bridge] = bridgetemp
+    for bridge in bt:
+        BRIDGES[bridge] = bt[bridge]
 
 
 def make_single_reflector(_tgid,_tmout,_sourcesystem):
