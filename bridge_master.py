@@ -262,7 +262,7 @@ def make_default_reflector(reflector,_tmout,system):
     if bridge not in BRIDGES:
         BRIDGES[bridge] = []
         make_single_reflector(bytes_3(reflector),_tmout, system)
-    bridgetemp = deque()
+    bridgetemp = []
     for bridgesystem in BRIDGES[bridge]:
         if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == 2:
             bridgetemp.append({'SYSTEM': system, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': True,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'OFF','OFF': [],'ON': [bytes_3(reflector),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
@@ -275,7 +275,7 @@ def make_static_tg(tg,ts,_tmout,system):
     #_tmout = CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER']
     if str(tg) not in BRIDGES:
         make_single_bridge(bytes_3(tg),system,ts,_tmout)
-    bridgetemp = deque()
+    bridgetemp = []
     for bridgesystem in BRIDGES[str(tg)]:
         if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == ts:
             bridgetemp.append({'SYSTEM': system, 'TS': ts, 'TGID': bytes_3(tg),'ACTIVE': True,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'OFF','OFF': [],'ON': [bytes_3(tg),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
@@ -286,7 +286,7 @@ def make_static_tg(tg,ts,_tmout,system):
     
 def reset_static_tg(tg,ts,_tmout,system):
     #_tmout = CONFIG['SYSTEMS'][system]['DEFAULT_UA_TIMER']
-    bridgetemp = deque()
+    bridgetemp = []
     try:
         for bridgesystem in BRIDGES[str(tg)]:
             if bridgesystem['SYSTEM'] == system and bridgesystem['TS'] == ts:
@@ -328,7 +328,7 @@ def reset_all_reflector_system(_tmout,resetSystem):
             if bridge[0:1] == '#':
                 for bridgesystem in BRIDGES[bridge]:
                     logger.trace('RST: for %s in BRIDGES[%s]',bridgesystem,bridge)
-                    bridgetemp = deque()
+                    bridgetemp = []
                     if bridgesystem['SYSTEM'] == resetSystem and bridgesystem['TS'] == 2:
                         logger.trace('RST: MATCH: setting inactive for %s',bridgesystem['SYSTEM'])
                         bridgetemp.append({'SYSTEM': resetSystem, 'TS': 2, 'TGID': bytes_3(9),'ACTIVE': False,'TIMEOUT':  _tmout * 60,'TO_TYPE': 'ON','OFF': [],'ON': [bytes_3(int(bridge[1:])),],'RESET': [], 'TIMER': time() + (_tmout * 60)})
@@ -508,7 +508,7 @@ def bridgeDebug():
             if CONFIG['SYSTEMS'][system]['MODE'] == 'MASTER':
                 for _bridge in set(times.values()):
                     logger.warning('(BRIDGEDEBUG) deactivating system: %s for bridge: %s',system,_bridge)
-                    bridgetemp = deque()
+                    bridgetemp = []
                     for bridgesystem in BRIDGES[_bridge]:
                         if _bridge[0:1] == '#':
                             _setbridge = int(_bridge[1:])
