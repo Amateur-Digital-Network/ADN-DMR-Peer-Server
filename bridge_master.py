@@ -357,23 +357,32 @@ def make_single_reflector(_tgid,_tmout,_sourcesystem):
         if _system[0:3] == 'OBP' and (int_id(_tgid) >= 79 and (int_id(_tgid) < 9990 or int_id(_tgid) > 9999)):
             BRIDGES[_bridge].append({'SYSTEM': _system, 'TS': 1, 'TGID': _tgid,'ACTIVE': True,'TIMEOUT': '','TO_TYPE': 'NONE','OFF': [],'ON': [],'RESET': [], 'TIMER': time()})
         
+#def remove_bridge_system(system):
+    #_bridgestemp = {}
+    #_bridgetemp = {}
+    #for _bridge in BRIDGES:
+        #for _bridgesystem in BRIDGES[_bridge]:
+            #if _bridgesystem['SYSTEM'] != system:
+                #if _bridge not in _bridgestemp:
+                    #_bridgestemp[_bridge] = []
+                #_bridgestemp[_bridge].append(_bridgesystem)
+
+            #else:
+                #if _bridge not in _bridgestemp:
+                    #_bridgestemp[_bridge] = []
+                #_bridgestemp[_bridge].append({'SYSTEM': system, 'TS': _bridgesystem['TS'], 'TGID': _bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  _bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [_bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + _bridgesystem['TIMEOUT']})
+
 def remove_bridge_system(system):
-    _bridgestemp = {}
-    _bridgetemp = {}
-    for _bridge in BRIDGES:
-        for _bridgesystem in BRIDGES[_bridge]:
-            if _bridgesystem['SYSTEM'] != system:
-                if _bridge not in _bridgestemp:
-                    _bridgestemp[_bridge] = []
-                _bridgestemp[_bridge].append(_bridgesystem)
-
-            else:
-                if _bridge not in _bridgestemp:
-                    _bridgestemp[_bridge] = []
-                _bridgestemp[_bridge].append({'SYSTEM': system, 'TS': _bridgesystem['TS'], 'TGID': _bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  _bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [_bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + _bridgesystem['TIMEOUT']})
+    for system in CONFIG['SYSTEMS']:
+        for bridge in BRIDGES:
+            bridgetemp = []
+            for bridgesystem in BRIDGES[bridge]:
+                if bridgesystem['SYSTEM'] == system:
+                    bridgetemp.append({'SYSTEM': system, 'TS': _bridgesystem['TS'], 'TGID': _bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  _bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [_bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + _bridgesystem['TIMEOUT']})
+                else:
+                    bridetemp.append(bridgesystem)
+            BRIDGES[bridge] = bridgetemp
             
-    BRIDGES.update(_bridgestemp)
-
 def update_timeout(system,_tmout):
     _bridgestemp = {}
     _bridgetemp = {}
