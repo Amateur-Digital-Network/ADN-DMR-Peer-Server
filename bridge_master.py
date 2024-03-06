@@ -386,7 +386,7 @@ def remove_bridge_system(system):
                     bridgetemp.append({'SYSTEM': system, 'TS': bridgesystem['TS'], 'TGID': bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + bridgesystem['TIMEOUT']})
                     logger.debug('RBS False: %s',system)
                 else:
-                    bridetemp.append(bridgesystem)
+                    bridgetemp.append(bridgesystem)
                     logger.debug('RBS: existing %s',bridgesystem)
             bt[bridge] = bridgetemp
     for bridge in bt:
