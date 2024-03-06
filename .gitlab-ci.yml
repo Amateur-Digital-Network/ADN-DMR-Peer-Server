@@ -78,10 +78,9 @@ build-release:       # This job runs in the build stage, which runs first.
     - docker buildx build --no-cache -f docker-configs/Dockerfile-ci -t gitlab.hacknix.net:5050/hacknix/freedmr:latest -t gitlab.hacknix.net:5050/hacknix/freedmr:$CI_COMMIT_TAG-with-proxy -t gitlab.hacknix.net:5050/hacknix/freedmr:development-latest --platform linux/arm/v7,linux/amd64,linux/i386,linux/arm64 --push .
     #- docker buildx build --no-cache -f docker-configs/Dockerfile-ci -t hacknix/freedmr:latest -t gitlab.hacknix.net:5050/hacknix/freedmr:latest -t hacknix/$CI_COMMIT_TAG-with-proxy -t gitlab.hacknix.net:5050/hacknix/freedmr:$CI_COMMIT_TAG-with-proxy -t hacknix/freedmr:development-latest -t gitlab.hacknix.net:5050/hacknix/freedmr:development-latest --platform linux/amd64,linux/i386 --push .
   release:
-    tag_name: $CI_COMMIT_TAG
-    name: 'Release $CI_COMMIT_TAG'
+    tag_name: $CI_COMMIT_TAG-with-proxy
+    name: 'Release $CI_COMMIT_TAG-with-proxy'
     description: 'Release created using CI.'
-
 
     - echo "Compile complete."
   only:
