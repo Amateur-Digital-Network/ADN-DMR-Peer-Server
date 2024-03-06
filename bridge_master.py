@@ -338,7 +338,7 @@ def reset_all_reflector_system(_tmout,resetSystem):
                 logger.trace('RST: bridgetemp %s',bridgetemp)
                 BRIDGES[bridge] = bridgetemp
 
-            
+
 def make_single_reflector(_tgid,_tmout,_sourcesystem):
     _tgid_s = str(int_id(_tgid))
     _bridge = ''.join(['#',_tgid_s])
@@ -881,7 +881,7 @@ def bridge_reset():
     for _system in CONFIG['SYSTEMS']:
         if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
             logger.info('(BRIDGERESET) Bridge reset for %s - no peers or API reset called',_system)
-            #remove_bridge_system(_system)
+            remove_bridge_system(_system)
             try:
                 del(CONFIG['SYSTEMS'][_system]['_opt_key'])
             except:
@@ -899,6 +899,8 @@ def options_config():
     for _system in CONFIG['SYSTEMS']:
         try:
             if CONFIG['SYSTEMS'][_system]['MODE'] != 'MASTER':
+                continue
+            if '_reset' in  CONFIG['SYSTEMS'][_system] and CONFIG['SYSTEMS'][_system]['_reset']:
                 continue
             if CONFIG['SYSTEMS'][_system]['ENABLED'] == True:
                 if 'OPTIONS' in CONFIG['SYSTEMS'][_system]:
