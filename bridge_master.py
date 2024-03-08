@@ -376,13 +376,13 @@ def make_single_reflector(_tgid,_tmout,_sourcesystem):
                     #_bridgestemp[_bridge] = []
                 #_bridgestemp[_bridge].append({'SYSTEM': system, 'TS': _bridgesystem['TS'], 'TGID': _bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  _bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [_bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + _bridgesystem['TIMEOUT']})
 
-def remove_bridge_system(system):
+def remove_bridge_system(remsystem):
     bt = {}
     for system in CONFIG['SYSTEMS']:
         for bridge in BRIDGES:
             bridgetemp = []
             for bridgesystem in BRIDGES[bridge]:
-                if bridgesystem['SYSTEM'] == system:
+                if bridgesystem['SYSTEM'] == remsystem:
                     bridgetemp.append({'SYSTEM': system, 'TS': bridgesystem['TS'], 'TGID': bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + bridgesystem['TIMEOUT']})
                     logger.debug('RBS False: %s: %s',system,  {'SYSTEM': system, 'TS': bridgesystem['TS'], 'TGID': bridgesystem['TGID'],'ACTIVE': False,'TIMEOUT':  bridgesystem['TIMEOUT'],'TO_TYPE': 'ON','OFF': [],'ON': [bridgesystem['TGID'],],'RESET': [], 'TIMER': time() + bridgesystem['TIMEOUT']} )
                 else:
@@ -391,8 +391,6 @@ def remove_bridge_system(system):
             bt[bridge] = bridgetemp
     for bridge in bt:
         BRIDGES[bridge] = bt[bridge]
-
-        logger.debug(BRIDGES)
             
 def update_timeout(system,_tmout):
     _bridgestemp = {}
