@@ -391,6 +391,8 @@ def remove_bridge_system(system):
             bt[bridge] = bridgetemp
     for bridge in bt:
         BRIDGES[bridge] = bt[bridge]
+
+        logger.debug(BRIDGES)
             
 def update_timeout(system,_tmout):
     _bridgestemp = {}
