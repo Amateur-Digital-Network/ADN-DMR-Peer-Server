@@ -897,7 +897,8 @@ def bridge_reset():
                 pass
             CONFIG['SYSTEMS'][_system]['_reset'] = False
             CONFIG['SYSTEMS'][_system]['_resetlog'] = False
-            CONFIG['SYSTEMS'][_system]['_reloadoptions'] = True
+            if 'OPTIONS' in CONFIG['SYSTEMS'][_system]['OPTIONS']:
+                CONFIG['SYSTEMS'][_system]['_reloadoptions'] = True
 
 def options_config():
     logger.debug('(OPTIONS) Running options parser')
