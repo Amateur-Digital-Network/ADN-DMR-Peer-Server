@@ -905,8 +905,8 @@ def options_config():
 
     prohibitedTGs = [0,1,2,3,4,5,6,7,8,9,9990,9991,9992,9993,9994,9995,9996,9997,9998,9999]
 
-
-    for _system in CONFIG['SYSTEMS']:
+    systemList = CONFIG['SYSTEMS'].keys()
+    for _system in systemList:
         try:
             if CONFIG['SYSTEMS'][_system]['MODE'] != 'MASTER':
                 continue
