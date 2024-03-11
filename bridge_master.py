@@ -87,6 +87,9 @@ logger = logging.getLogger(__name__)
 #REGEX
 import re
 
+#pretty print
+import pprint
+
 from binascii import b2a_hex as ahex
 
 from AMI import AMI
@@ -453,7 +456,9 @@ def rule_timer_loop():
                 
         if _bridge_used == False:
             _remove_bridges.append(_bridge)
-                
+
+    pretty = pprint.pformat(BRIDGES)
+    logger.debug('(ROUTER) BRIDGES: %s',pretty)
     for _bridgerem in _remove_bridges:
         del BRIDGES[_bridgerem]
         logger.debug('(ROUTER) Unused conference bridge %s removed',_bridgerem)
