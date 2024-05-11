@@ -1,5 +1,5 @@
-### FreeDMR Peer Server is a (now very diverged) fork of the hblink3 project ###
+### ADN Systems DMR Peer Server is a fork from FreeDMR by G7RZU hacknix ###
 
-FreeDMR Peer Server - software to assist in building a peer mesh network
-
-Please see the wiki for documentation.
+Launched on April 21, 2024, by a visionary group of 20 international amateur radio enthusiasts,
+ADN Systems operates on an Open Bridge Protocol (OBP), fostering a decentralized network
+devoid of hierarchical structures.

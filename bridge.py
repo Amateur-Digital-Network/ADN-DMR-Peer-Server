@@ -655,7 +655,7 @@ class routerHBP(HBSYSTEM):
             self.STATUS[_slot]['lastSeq'] = _seq
             #Save this packet
             self.STATUS[_slot]['lastData'] = _data
-      
+            
 
 
             for _bridge in BRIDGES:
