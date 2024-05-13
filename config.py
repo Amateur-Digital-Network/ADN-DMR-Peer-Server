@@ -96,7 +96,7 @@ def acl_build(_acl, _max):
             if (const.ID_MIN <= id <= _max):
                 acl.append((id, id))
             else:
-                 sys.exit('ACL CREATION ERROR, VALUE OUT OF RANGE ({} - {}) IN SINGLE ID ENTRY: {}'.format(const.ID_MIN, _max, entry))
+                sys.exit('ACL CREATION ERROR, VALUE OUT OF RANGE ({} - {}) IN SINGLE ID ENTRY: {}'.format(const.ID_MIN, _max, entry))
 
     return (action, acl)
 
@@ -176,19 +176,19 @@ def build_config(_config_file):
             elif section == 'ALIASES':
                 CONFIG['ALIASES'].update({
                     'TRY_DOWNLOAD': config.getboolean(section, 'TRY_DOWNLOAD', fallback=True),
-                    'PATH': config.get(section, 'PATH', fallback='./json/'),
+                    'PATH': config.get(section, 'PATH', fallback='./data/'),
                     'PEER_FILE': config.get(section, 'PEER_FILE', fallback='peer_ids.json'),
                     'SUBSCRIBER_FILE': config.get(section, 'SUBSCRIBER_FILE', fallback='subscriber_ids.json'),
                     'TGID_FILE': config.get(section, 'TGID_FILE', fallback='talkgroup_ids.json'),
-                    'PEER_URL': config.get(section, 'PEER_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/peer_ids.json'),
-                    'SUBSCRIBER_URL': config.get(section, 'SUBSCRIBER_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/subscriber_ids.json'),
-                    'TGID_URL': config.get(section, 'TGID_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/talkgroup_ids.json'),
+                    'PEER_URL': config.get(section, 'PEER_URL', fallback='https://adn.systems/files/peer_ids.json'),
+                    'SUBSCRIBER_URL': config.get(section, 'SUBSCRIBER_URL', fallback='https://adn.systems/files/subscriber_ids.json'),
+                    'TGID_URL': config.get(section, 'TGID_URL', fallback='https://adn.systems/files/talkgroup_ids.json'),
                     'STALE_TIME': config.getint(section, 'STALE_DAYS', fallback=1) * 86400,
                     'SUB_MAP_FILE': config.get(section, 'SUB_MAP_FILE', fallback='sub_map.pkl'),
                     'LOCAL_SUBSCRIBER_FILE': config.get(section, 'LOCAL_SUBSCRIBER_FILE', fallback='local_subscribers.json'),
-                    'SERVER_ID_URL': config.get(section, 'SERVER_ID_URL', fallback='https://freedmr-lh.gb7fr.org.uk/json/server_ids.tsv'),
+                    'SERVER_ID_URL': config.get(section, 'SERVER_ID_URL', fallback='https://adn.systems/files/server_ids.tsv'),
                     'SERVER_ID_FILE': config.get(section, 'SERVER_ID_FILE', fallback='server_ids.tsv'),
-                    'CHECKSUM_URL': config.get(section, 'CHECKSUM_URL', fallback='https://freedmr-lh.gb7fr.org.uk/file_checksums.json'),
+                    'CHECKSUM_URL': config.get(section, 'CHECKSUM_URL', fallback='https://adn.systems/files/file_checksums.json'),
                     'CHECKSUM_FILE': config.get(section, 'CHECKSUM_FILE', fallback='file_checksums.json'),
                     'KEYS_FILE': config.get(section, 'KEYS_FILE', fallback='keys.json')
                 })
@@ -310,7 +310,7 @@ def build_config(_config_file):
                         'REPEAT': config.getboolean(section, 'REPEAT', fallback=True),
                         'MAX_PEERS': config.getint(section, 'MAX_PEERS', fallback=1),
                         'IP': config.get(section, 'IP', fallback='127.0.0.1'),
-                        'PORT': config.getint(section, 'PORT', fallback=54000),
+                        'PORT': config.getint(section, 'PORT', fallback=56400),
                         'PASSPHRASE': bytes(config.get(section, 'PASSPHRASE', fallback=''), 'utf-8'),
                         'GROUP_HANGTIME': config.getint(section, 'GROUP_HANGTIME',fallback=5),
                         'USE_ACL': config.getboolean(section, 'USE_ACL', fallback=False),
@@ -327,7 +327,7 @@ def build_config(_config_file):
                         'GENERATOR': config.getint(section, 'GENERATOR', fallback=100),
                         'ANNOUNCEMENT_LANGUAGE': config.get(section, 'ANNOUNCEMENT_LANGUAGE', fallback='en_GB'),
                         'ALLOW_UNREG_ID': config.getboolean(section,'ALLOW_UNREG_ID', fallback=False),
-                        'PROXY_CONTROL' : config.getboolean(section,'PROXY_CONTROL', fallback=True),
+                        'PROXY_CONTROL' : config.getboolean(section,'PROXY_CONTROL', fallback=False),
                         'OVERRIDE_IDENT_TG': config.get(section, 'OVERRIDE_IDENT_TG', fallback=False)
                     }})
                     CONFIG['SYSTEMS'][section].update({'PEERS': {}})
@@ -362,7 +362,7 @@ def build_config(_config_file):
                             try:
                                 addr_info = socket.getaddrinfo(CONFIG['SYSTEMS'][section]['TARGET_IP'],CONFIG['SYSTEMS'][section]['TARGET_PORT'],socket.AF_INET6, socket.IPPROTO_IP)
                             except gaierror:
-                                 addr_info = socket.getaddrinfo(CONFIG['SYSTEMS'][section]['TARGET_IP'],CONFIG['SYSTEMS'][section]['TARGET_PORT'],socket.AF_INET, socket.IPPROTO_IP)
+                                addr_info = socket.getaddrinfo(CONFIG['SYSTEMS'][section]['TARGET_IP'],CONFIG['SYSTEMS'][section]['TARGET_PORT'],socket.AF_INET, socket.IPPROTO_IP)
                         
                         elif CONFIG['SYSTEMS'][section]['IP'] and IsIPv6Address(CONFIG['SYSTEMS'][section]['IP']):
                             addr_info = socket.getaddrinfo(CONFIG['SYSTEMS'][section]['TARGET_IP'],CONFIG['SYSTEMS'][section]['TARGET_PORT'],socket.AF_INET6, socket.IPPROTO_IP)
@@ -412,7 +412,7 @@ if __name__ == '__main__':
 
     # Ensure we have a path for the config file, if one wasn't specified, then use the execution directory
     if not cli_args.CONFIG_FILE:
-        cli_args.CONFIG_FILE = os.path.dirname(os.path.abspath(__file__))+'/freedmr.cfg'
+        cli_args.CONFIG_FILE = os.path.dirname(os.path.abspath(__file__))+'/config/adn.cfg'
     
     CONFIG = build_config(cli_args.CONFIG_FILE)
     pprint(CONFIG)

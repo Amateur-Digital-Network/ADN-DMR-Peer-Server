@@ -196,10 +196,10 @@ class Proxy(DatagramProtocol):
                 if _command in (MSTN,MSTC):
                     # Give time to the client for a reply to prevent port reassignment 
                     self.peerTrack[_peer_id]['timer'].reset(15)
- 
+                    
             return
             
-                   
+            
         else:
             _command = data[:4]
             
@@ -307,7 +307,7 @@ if __name__ == '__main__':
 
     # Ensure we have a path for the config file, if one wasn't specified, then use the execution directory
     if not cli_args.CONFIG_FILE:
-        cli_args.CONFIG_FILE = os.path.dirname(os.path.abspath(__file__))+'/freedmr.cfg'
+        cli_args.CONFIG_FILE = os.path.dirname(os.path.abspath(__file__))+'/config/adn.cfg'
     
     _config_file = cli_args.CONFIG_FILE
     
@@ -340,8 +340,8 @@ if __name__ == '__main__':
         ListenPort = 62031
         #'' = all IPv4, '::' = all IPv4 and IPv6 (Dual Stack)
         ListenIP = ''
-        DestportStart = 54000
-        DestPortEnd = 54100
+        DestportStart = 56400
+        DestPortEnd = 56500
         Timeout = 30
         Stats = False
         Debug = False
