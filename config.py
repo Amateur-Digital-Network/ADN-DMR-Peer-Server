@@ -176,7 +176,7 @@ def build_config(_config_file):
             elif section == 'ALIASES':
                 CONFIG['ALIASES'].update({
                     'TRY_DOWNLOAD': config.getboolean(section, 'TRY_DOWNLOAD', fallback=True),
-                    'PATH': config.get(section, 'PATH', fallback='./json/'),
+                    'PATH': config.get(section, 'PATH', fallback='./data/'),
                     'PEER_FILE': config.get(section, 'PEER_FILE', fallback='peer_ids.json'),
                     'SUBSCRIBER_FILE': config.get(section, 'SUBSCRIBER_FILE', fallback='subscriber_ids.json'),
                     'TGID_FILE': config.get(section, 'TGID_FILE', fallback='talkgroup_ids.json'),
