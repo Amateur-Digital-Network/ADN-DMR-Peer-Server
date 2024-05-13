@@ -1,103 +1,90 @@
 #!/bin/bash
+#
+############################################################################### 
+#
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 3 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software Foundation,
+#   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
+#
+###############################################################################
 
 echo FreeDMR Docker installer...
 
 echo Installing required packages...
-apt-get -y install docker.io && 
-#apt-get -y install docker-compose &&
-apt-get -y  install conntrack &&
+echo Install Docker Community Edition...
+apt-get -y remove docker docker-engine docker.io &&
+apt-get -y update &&
+apt-get -y install apt-transport-https ca-certificates curl gnupg2 software-properties-common &&
+curl -fsSL https://download.docker.com/linux/debian/gpg | sudo apt-key add - &&
+ARCH=`/usr/bin/arch`
+echo "System architecture is $ARCH" 
+if [ "$ARCH" == "x86_64" ]
+then
+    ARCH="amd64"
+fi
+add-apt-repository \
+   "deb [arch=$ARCH] https://download.docker.com/linux/debian \
+   $(lsb_release -cs) \
+   stable" &&
+apt-get -y update &&
+apt-get -y install docker-ce &&
+
+echo Install Docker Compose...
+apt-get -y install docker-compose &&
 
 echo Set userland-proxy to false...
-echo '{ "userland-proxy": false}' > /etc/docker/daemon.json &&
+cat <<EOF > /etc/docker/daemon.json &&
+{
+     "userland-proxy": false,
+     "experimental": true,
+     "log-driver": "json-file",
+     "log-opts": {
+        "max-size": "10m",
+        "max-file": "3"
+      }
+}
+EOF
 
 echo Restart docker...
 systemctl restart docker &&
 
-echo Pull FreeDMR latest image...
-docker pull hacknix/freedmr:latest &&
-
 echo Make config directory...
-mkdir /etc/freedmr &&
-chmod 755 /etc/freedmr &&
+mkdir /etc/ADN-Systems &&
+mkdir -p /etc/ADN-Systems/acme.sh && 
+mkdir -p /etc/ADN-Systems/certs &&
+chmod -R 755 /etc/ADN-Systems &&
 
-echo Install /etc/freedmr/freedmr.cfg ... 
-cat << EOF > /etc/freedmr/freedmr.cfg
+echo make json directory...
+mkdir -p /etc/ADN-Systems/data &&
+chown 54000:54000 /etc/ADN-Systems/data &&
+
+echo Install /etc/ADN-Systems/adn.cfg ... 
+cat << EOF > /etc/ADN-Systems/adn.cfg
+#This empty config file will use defaults for everything apart from OBP and HBP config
+#This is usually a sensible choice. 
+
+
 [GLOBAL]
-PATH: ./
-PING_TIME: 10
-MAX_MISSED: 3
-USE_ACL: True
-REG_ACL: DENY:0-100000
-SUB_ACL: DENY:0-100000
-TGID_TS1_ACL: PERMIT:ALL
-TGID_TS2_ACL: PERMIT:ALL
-GEN_STAT_BRIDGES: True
-ALLOW_NULL_PASSPHRASE: True
-ANNOUNCEMENT_LANGUAGES:
-SERVER_ID: 0
-DATA_GATEWAY: False
+SERVER_ID: 0000
+DEBUG_BRIDGES: True
 
 [REPORTS]
-REPORT: True
-REPORT_INTERVAL: 60
-REPORT_PORT: 4321
-REPORT_CLIENTS: *
 
-[LOGGER]
-LOG_FILE: freedmr.log
-LOG_HANDLERS: file-timed
-LOG_LEVEL: INFO
-LOG_NAME: FreeDMR
+[LOGGER] 
 
 [ALIASES]
-TRY_DOWNLOAD: False
-PATH: ./
-PEER_FILE: peer_ids.json
-SUBSCRIBER_FILE: subscriber_ids.json
-TGID_FILE: talkgroup_ids.json
-PEER_URL: https://www.radioid.net/static/rptrs.json
-SUBSCRIBER_URL: https://www.radioid.net/static/users.json
-TGID_URL: TGID_URL: http://downloads.freedmr.uk/downloads/talkgroup_ids.json
-STALE_DAYS: 1
-SERVER_ID_URL: http://downloads.freedmr.uk/downloads/FreeDMR_Hosts.csv
-SERVER_ID_FILE: server_ids.tsv
 
-
-#Control server shared allstar instance via dial / AMI
 [ALLSTAR]
-ENABLED: False
-USER:llcgi
-PASS: mypass
-SERVER: my.asl.server
-PORT: 5038
-NODE: 0000
-
-
-[MYSQL]
-USE_MYSQL: False
-USER: hblink
-PASS: mypassword
-DB: hblink
-SERVER: 127.0.0.1
-PORT: 3306
-TABLE: repeaters
-
-[OBP-TEST]
-MODE: OPENBRIDGE
-ENABLED: False
-IP:
-PORT: 62044
-NETWORK_ID: 1
-PASSPHRASE: mypass
-TARGET_IP: 
-TARGET_PORT: 62044
-USE_ACL: True
-SUB_ACL: DENY:1
-TGID_ACL: PERMIT:ALL
-RELAX_CHECKS: True
-ENHANCED_OBP: True
-PROTO_VER: 4
-
 
 [SYSTEM]
 MODE: MASTER
@@ -106,7 +93,7 @@ REPEAT: True
 MAX_PEERS: 1
 EXPORT_AMBE: False
 IP: 127.0.0.1
-PORT: 54000
+PORT: 56400
 PASSPHRASE:
 GROUP_HANGTIME: 5
 USE_ACL: True
@@ -114,14 +101,17 @@ REG_ACL: DENY:1
 SUB_ACL: DENY:1
 TGID_TS1_ACL: PERMIT:ALL
 TGID_TS2_ACL: PERMIT:ALL
-DEFAULT_UA_TIMER: 10
-SINGLE_MODE: True
-VOICE_IDENT: True
+DEFAULT_UA_TIMER: 60
 TS1_STATIC:
 TS2_STATIC:
 DEFAULT_REFLECTOR: 0
-ANNOUNCEMENT_LANGUAGE: en_GB_2
+SINGLE_MODE: False
+VOICE_IDENT: False
+ANNOUNCEMENT_LANGUAGE: en_GB
 GENERATOR: 100
+ALLOW_UNREG_ID: False
+PROXY_CONTROL: False
+OVERRIDE_IDENT_TG:
 
 [ECHO]
 MODE: PEER
@@ -134,7 +124,7 @@ MASTER_IP: 127.0.0.1
 MASTER_PORT: 54915
 PASSPHRASE: passw0rd
 CALLSIGN: ECHO
-RADIO_ID: 1000001
+RADIO_ID: 9990
 RX_FREQ: 449000000
 TX_FREQ: 444000000
 TX_POWER: 25
@@ -143,44 +133,141 @@ SLOTS: 1
 LATITUDE: 00.0000
 LONGITUDE: 000.0000
 HEIGHT: 0
-LOCATION: Earth
+LOCATION: 9990 Parrot
 DESCRIPTION: ECHO
-URL: www.freedmr.uk
+URL: adn.systems
 SOFTWARE_ID: 20170620
-PACKAGE_ID: MMDVM_FreeDMR
+PACKAGE_ID: MMDVM_ADN-Systems
 GROUP_HANGTIME: 5
 OPTIONS:
 USE_ACL: True
 SUB_ACL: DENY:1
 TGID_TS1_ACL: PERMIT:ALL
 TGID_TS2_ACL: PERMIT:ALL
-ANNOUNCEMENT_LANGUAGE: en_GB_2
+ANNOUNCEMENT_LANGUAGE: en_GB
+EOF
+#
+echo Install /etc/ADN-Systems/fdmr-mon.cfg ... 
+cat << EOF > /etc/ADN-Systems/fdmr-mon.cfg
+[GLOBAL]
+# Display Bridge status
+BRIDGES_INC = False
+# Display Peers status
+HOMEBREW_INC = True
+# Lastheard table on main page                                                  
+LASTHEARD_ROWS = 20
+# Display empty masters                          
+EMPTY_MASTERS = False                          
+# TG Count on TOP TG's page
+TGCOUNT_ROWS = 20
+
+[FDMR CONNECTION]
+# FDMR server's IP Address or hostname
+FDMR_IP = 172.16.238.10
+# FDMR server's TCP reporting socket
+FDMR_PORT = 4321
+
+[OPB FILTER]
+# if you don't want to show in lastherad received traffic from OBP link put NETWORK ID
+# for example: 260210, 260211, 260212
+OPB_FILTER =
+
+[FILES]
+# Files and stuff for loading alias files for mapping numbers to names
+FILES_PATH = ./data
+# This files will auto-download
+PEER_FILE = peer_ids.json
+SUBSCRIBER_FILE = subscriber_ids.json
+TGID_FILE = talkgroup_ids.json
+# User provided files, if you don't use it, you can comment it.
+LOCAL_SUB_FILE = local_subscriber_ids.json
+LOCAL_PEER_FILE = local_peer_ids.json
+LOCAL_TGID_FILE = local_talkgroup_ids.json
+# Number of days before we reload DMR-MARC database files.
+RELOAD_TIME = 1
+PEER_URL = https://adn.systems/files/peer_ids.json
+SUBSCRIBER_URL = https://adn.systems/files/subscriber_ids.json
+TGID_URL = https://adn.systems/files/talkgroup_ids.json
+
+
+
+[LOGGER]
+# Settings for log files
+LOG_PATH = /dev/
+LOG_FILE = null
+LOG_LEVEL = WARN
+
+[WEBSOCKET SERVER]
+WEBSOCKET_PORT = 9000
+# Frequency to push updates to web clients
+FREQUENCY = 1
+# Clients are timed out after this many seconds, 0 to disable
+CLIENT_TIMEOUT = 0
+# SSL configuration
+USE_SSL = False
+SSL_PATH = ./ssl
+SSL_CERTIFICATE = cert.pem
+SSL_PRIVATEKEY = key.pem
+
+[DASHBOARD]
+  # Dashboard Title
+DASHTITLE = "DMR Server"
+  # Background image True or False if True put a bk.jpg 1920x1080 in img folder
+BACKGROUND = False
+  # this defines the default language
+  # available languages: en, es, fr, pt, it, nl, de
+LANGUAGE = "en"
+  # Navbar Title
+NAVTITLE= "DMR Server"
+  # --Navbar Links--  #
+#NAV_LNK_NAME = "Links"
+#LINK1 = "Name 1", "http://url.link"
+#LINK2 = "Name 2", "https://site.link"
+#LINK3 = "Name 3", "https://goaway.link"
+  #LINKx put as many as you want
+  # World Wide Server List
+#SERVER_LIST = "http://url/Hosts.txt"
+  # World Wide Bridge List
+#BRIDGES_LIST = "https://url/Bridges.csv"
+  # World Wide TalkGroups List
+#TG_LIST = "https://url/Talkgroups.csv"
+#TELEGRAM = "url"
+#WHATSAPP = "url"
+#FACEBOOK = "url"
+#SERVER_LIST = "http://yourwebsite/Hosts.txt"
+  # --Footer Links-- #
+  # Beginning of footer
+#FOOTER1 = "SYSOP <a href='http://your.link'>N0CALL</a>"
+  # End of footer
+#FOOTER2 = "Your Project <a href='http://your.link'>Project</a>"
+
 EOF
 
-echo Install rules.py ...
-echo "BRIDGES = {'9990': [{'SYSTEM': 'ECHO', 'TS': 2, 'TGID': 9990, 'ACTIVE': True, 'TIMEOUT': 2, 'TO_TYPE': 'NONE', 'ON': [], 'OFF': [], 'RESET': []},]}" > /etc/freedmr/rules.py &&
 
 echo Set perms on config directory...
-chown -R 54000 /etc/freedmr &&
+chown -R 54000 /etc/ADN-Systems &&
 
-echo Setup logging...
-mkdir -p /var/log/freedmr &&
-touch /var/log/freedmr/freedmr.log &&
-chown -R 54000 /var/log/freedmr &&
+echo Get docker-compose.yml...
+cd /etc/ADN-Systems &&
+curl https://raw.githubusercontent.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/develop/docker-configs/docker-compose.yml -o docker-compose.yml &&
 
-echo Run FreeDMR container...
-docker run --name=freedmr -d --read-only -v /etc/freedmr/freedmr.cfg:/opt/freedmr/freedmr.cfg \
--v /var/log/freedmr/freedmr.log:/opt/freedmr/freedmr.log \
--v /etc/freedmr/rules.py:/opt/freedmr/rules.py -p 62031:62031/udp -p 62036-62046:62036-62046/udp \
--p 4321:4321/tcp hacknix/freedmr:latest &&
+chmod 755 /etc/cron.daily/lastheard
 
-echo Set to restart on boot and when it dies...
-docker update --restart unless-stopped freedmr &&
+echo Tune network stack...
+cat << EOF > /etc/sysctl.conf &&
+net.core.rmem_default=134217728
+net.core.rmem_max=134217728
+net.core.wmem_max=134217728                       
+net.core.rmem_default=134217728
+net.core.netdev_max_backlog=250000
+net.netfilter.nf_conntrack_udp_timeout=15
+net.netfilter.nf_conntrack_udp_timeout_stream=35
+EOF
 
-echo Download update script for future use...
-curl https://raw.githubusercontent.com/hacknix/FreeDMR/master/docker-configs/update_freedmr.sh -o update_freedmr.sh &&
-chmod 700 ./update_freedmr.sh
+/usr/sbin/sysctl -p &&
 
-echo FreeDMR setup complete!
+echo Run ADN-Systems container...
+docker-compose up -d
 
-
+echo Read notes in /etc/ADN-Systems/docker-compose.yml to understand how to implement extra functionality.
+echo ADN-Systems setup complete!
