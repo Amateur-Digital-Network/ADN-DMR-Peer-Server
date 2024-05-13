@@ -24,7 +24,7 @@ services:
         cpu_shares: 1024
         mem_reservation: 600m
         volumes:
-            - '/etc/ADN-Systems/ADN.cfg:/opt/ADN-DMR-Peer-Server/config/ADN.cfg'
+            - '/etc/ADN-Systems/adn.cfg:/opt/ADN-DMR-Peer-Server/config/adn.cfg'
 
         ports:
             - '62031:62031/udp'
