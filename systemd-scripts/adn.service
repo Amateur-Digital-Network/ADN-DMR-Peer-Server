@@ -1,0 +1,11 @@
+[Unit]
+Description= ADN DMR Repeaters Service 
+After=syslog.target network.target
+
+[Service]
+User=root
+WorkingDirectory=/opt/adn
+ExecStart=/usr/bin/python3 bridge_master.py -c ./config/adn.cfg -r ./config/rules.py
+
+[Install]
+WantedBy=multi-user.target

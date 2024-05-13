@@ -20,7 +20,7 @@
 
 #Some utilty functions from dmr_utils3 have been modified. These live here.
 
-# Also new FreeDMR specific functions.
+# Also new ADN specific functions.
 
 import ssl
 from time import time

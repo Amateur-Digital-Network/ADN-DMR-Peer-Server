@@ -169,7 +169,7 @@ def build_config(_config_file):
                     'LOG_FILE': config.get(section, 'LOG_FILE', fallback='/dev/null'),
                     'LOG_HANDLERS': config.get(section, 'LOG_HANDLERS', fallback='console-timed'),
                     'LOG_LEVEL': config.get(section, 'LOG_LEVEL', fallback='INFO'),
-                    'LOG_NAME': config.get(section, 'LOG_NAME', fallback='FreeDMR')
+                    'LOG_NAME': config.get(section, 'LOG_NAME', fallback='ADN')
                 })
 
 
@@ -406,7 +406,7 @@ if __name__ == '__main__':
 
     # CLI argument parser - handles picking up the config file from the command line, and sending a "help" message
     parser = argparse.ArgumentParser()
-    parser.add_argument('-c', '--config', action='store', dest='CONFIG_FILE', help='/full/path/to/config.file (usually freedmr.cfg)')
+    parser.add_argument('-c', '--config', action='store', dest='CONFIG_FILE', help='/full/path/to/config.file (usually adn.cfg)')
     cli_args = parser.parse_args()
 
 

@@ -329,7 +329,7 @@ class Proxy(DatagramProtocol):
                     if data[8:].upper().startswith(b"PASS="):
                         _psswd = data[13:]
                         if len(_psswd) >= 6:
-                            dk = pbkdf2_hmac("sha256", _psswd, b"FreeDMR", 2000).hex()
+                            dk = pbkdf2_hmac("sha256", _psswd, b"ADN", 2000).hex()
                             self.db_proxy.updt_tbl("psswd", _peer_id, psswd=dk)
                             self.transport.write(b"".join([RPTACK, _peer_id]), addr)
                             print(f"Password stored for: {int_id(_peer_id)}")
@@ -454,7 +454,7 @@ if __name__ == "__main__":
         "--config",
         action="store",
         dest="CONFIG_FILE",
-        help="/full/path/to/config.file (usually freedmr.cfg)",
+        help="/full/path/to/config.file (usually adn.cfg)",
     )
     cli_args = parser.parse_args()
 
