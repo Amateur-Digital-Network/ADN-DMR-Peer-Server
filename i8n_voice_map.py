@@ -115,7 +115,7 @@ voiceMap = {
 
     'en_US': {
                 'to': '2',
-                'freedmr': 'silence',
+                'adn': 'silence',
                 'this-is': 'silence',
                 'allstar-link-mode': 'alpha'
     },
@@ -269,7 +269,7 @@ voiceMap = {
     
     'dk_DK': {
                 'to': 'silence',
-                'freedmr': 'silence',
+                'adn': 'silence',
                 'this-is': 'silence',
                 'allstar-link-mode': 'A'
                     
@@ -277,35 +277,35 @@ voiceMap = {
     
     'it_IT': {
                 'to': 'silence',
-                'freedmr': 'silence',
+                'adn': 'silence',
                 'this-is': 'silence',
                 'allstar-link-mode': 'A'
     },
     
     'no_NO': {
                 'to': 'silence',
-                'freedmr': 'silence',
+                'adn': 'silence',
                 'this-is': 'silence',
                 'allstar-link-mode': 'A'
     },
     
     'pl_PL': {
                 'to': 'silence',
-                'freedmr': 'silence',
+                'adn': 'silence',
                 'this-is': 'silence',
                 'allstar-link-mode': 'A'
     },
     
     'se_SE': {
                 'to': 'silence',
-                'freedmr': 'silence',
+                'adn': 'silence',
                 'this-is': 'silence',
                 'allstar-link-mode': 'A'
     },
     
     'CW': {
                 'to': 'silence',
-                'freedmr': 'silence',
+                'adn': 'silence',
                 'this-is': 'silence',
                 'linkedto': 'silence',
                 'allstar-link-mode': 'T'

@@ -447,7 +447,7 @@ class routerOBP(OPENBRIDGE):
                                         logger.debug('(%s) Generating TX FULL and EMB LCs for HomeBrew destination: System: %s, TS: %s, TGID: %s', self._system, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
                                         logger.info('(%s) Conference Bridge: %s, Call Bridged to HBP System: %s TS: %s, TGID: %s', self._system, _bridge, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
                                         if CONFIG['REPORTS']['REPORT']:
-                                           systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,START,TX,{},{},{},{},{},{}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID'])).encode(encoding='utf-8', errors='ignore'))
+                                            systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,START,TX,{},{},{},{},{},{}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID'])).encode(encoding='utf-8', errors='ignore'))
 
                                     # Set other values for the contention handler to test next time there is a frame to forward
                                     _target_status[_target['TS']]['TX_TIME'] = pkt_time
@@ -494,8 +494,8 @@ class routerOBP(OPENBRIDGE):
                 logger.info('(%s) *CALL END*   STREAM ID: %s SUB: %s (%s) PEER: %s (%s) TGID %s (%s), TS %s, Duration: %.2f', \
                         self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot, call_duration)
                 if CONFIG['REPORTS']['REPORT']:
-                   self._report.send_bridgeEvent('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), call_duration).encode(encoding='utf-8', errors='ignore'))
-                   self.STATUS[_stream_id]['_fin'] = True
+                    self._report.send_bridgeEvent('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), call_duration).encode(encoding='utf-8', errors='ignore'))
+                    self.STATUS[_stream_id]['_fin'] = True
                 #removed = self.STATUS.pop(_stream_id)
                 #logger.debug('(%s) OpenBridge sourced call stream end, remove terminated Stream ID: %s', self._system, int_id(_stream_id))
                 #if not removed:
@@ -746,20 +746,20 @@ class routerHBP(HBSYSTEM):
 
                                         # Is this a new call stream?
                                         if (_stream_id != self.STATUS[_slot]['RX_STREAM_ID']):
-                                             # Record the DST TGID and Stream ID
-                                             _target_status[_target['TS']]['TX_START'] = pkt_time
-                                             _target_status[_target['TS']]['TX_TGID'] = _target['TGID']
-                                             _target_status[_target['TS']]['TX_STREAM_ID'] = _stream_id
-                                             _target_status[_target['TS']]['TX_RFS'] = _rf_src
-                                             _target_status[_target['TS']]['TX_PEER'] = _peer_id
-                                             # Generate LCs (full and EMB) for the TX stream
-                                             dst_lc = self.STATUS[_slot]['RX_LC'][0:3] + _target['TGID'] + _rf_src
-                                             _target_status[_target['TS']]['TX_H_LC'] = bptc.encode_header_lc(dst_lc)
-                                             _target_status[_target['TS']]['TX_T_LC'] = bptc.encode_terminator_lc(dst_lc)
-                                             _target_status[_target['TS']]['TX_EMB_LC'] = bptc.encode_emblc(dst_lc)
-                                             logger.debug('(%s) Generating TX FULL and EMB LCs for HomeBrew destination: System: %s, TS: %s, TGID: %s', self._system, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
-                                             logger.info('(%s) Conference Bridge: %s, Call Bridged to HBP System: %s TS: %s, TGID: %s', self._system, _bridge, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
-                                             if CONFIG['REPORTS']['REPORT']:
+                                            # Record the DST TGID and Stream ID
+                                            _target_status[_target['TS']]['TX_START'] = pkt_time
+                                            _target_status[_target['TS']]['TX_TGID'] = _target['TGID']
+                                            _target_status[_target['TS']]['TX_STREAM_ID'] = _stream_id
+                                            _target_status[_target['TS']]['TX_RFS'] = _rf_src
+                                            _target_status[_target['TS']]['TX_PEER'] = _peer_id
+                                            # Generate LCs (full and EMB) for the TX stream
+                                            dst_lc = self.STATUS[_slot]['RX_LC'][0:3] + _target['TGID'] + _rf_src
+                                            _target_status[_target['TS']]['TX_H_LC'] = bptc.encode_header_lc(dst_lc)
+                                            _target_status[_target['TS']]['TX_T_LC'] = bptc.encode_terminator_lc(dst_lc)
+                                            _target_status[_target['TS']]['TX_EMB_LC'] = bptc.encode_emblc(dst_lc)
+                                            logger.debug('(%s) Generating TX FULL and EMB LCs for HomeBrew destination: System: %s, TS: %s, TGID: %s', self._system, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
+                                            logger.info('(%s) Conference Bridge: %s, Call Bridged to HBP System: %s TS: %s, TGID: %s', self._system, _bridge, _target['SYSTEM'], _target['TS'], int_id(_target['TGID']))
+                                            if CONFIG['REPORTS']['REPORT']:
                                                 systems[_target['SYSTEM']]._report.send_bridgeEvent('GROUP VOICE,START,TX,{},{},{},{},{},{}'.format(_target['SYSTEM'], int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _target['TS'], int_id(_target['TGID'])).encode(encoding='utf-8', errors='ignore'))
 
                                         # Set other values for the contention handler to test next time there is a frame to forward
@@ -811,7 +811,7 @@ class routerHBP(HBSYSTEM):
                 logger.info('(%s) *CALL END*   STREAM ID: %s SUB: %s (%s) PEER: %s (%s) TGID %s (%s), TS %s, Duration: %.2f', \
                         self._system, int_id(_stream_id), get_alias(_rf_src, subscriber_ids), int_id(_rf_src), get_alias(_peer_id, peer_ids), int_id(_peer_id), get_alias(_dst_id, talkgroup_ids), int_id(_dst_id), _slot, call_duration)
                 if CONFIG['REPORTS']['REPORT']:
-                   self._report.send_bridgeEvent('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), call_duration).encode(encoding='utf-8', errors='ignore'))
+                    self._report.send_bridgeEvent('GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}'.format(self._system, int_id(_stream_id), int_id(_peer_id), int_id(_rf_src), _slot, int_id(_dst_id), call_duration).encode(encoding='utf-8', errors='ignore'))
 
                 #
                 # Begin in-band signalling for call end. This has nothign to do with routing traffic directly.
