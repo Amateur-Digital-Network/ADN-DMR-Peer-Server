@@ -25,7 +25,6 @@ services:
         mem_reservation: 600m
         volumes:
             - '/etc/ADN-Systems/adn.cfg:/opt/ADN-DMR-Peer-Server/config/adn.cfg'
-
         ports:
             - '62031:62031/udp'
             #Change the below to inlude ports used for your OBP(s)
@@ -33,9 +32,10 @@ services:
             - '8000:8000'
         image: 'registry.gitlab.com/hp3icc/fdmr/adn-server-single:latest'
         restart: "unless-stopped"
+        logging:
+          driver: none
         networks:
-           app_net:
-             ipv4_address: 172.16.238.10
+          - bridge
         #Control parameters inside container
         environment:
             #IPV6 support 
@@ -74,17 +74,12 @@ services:
 
           #Note -the gencert.sh script only works when the webserver is available on the default port 80  
           #If it's on non-standard ports, you'll need to request the certificates manually. 
-        networks:
-           app_net:
-             ipv4_address: 172.16.238.20
         logging:
-              driver: json-file
+          driver: none
+        networks:
+          - bridge
 
 networks:
-  app_net:
+  bridge:
     driver: bridge
-    ipam:
-      driver: default
-      config:
-        - subnet: 172.16.238.0/24
-          gateway: 172.16.238.1
+
