@@ -54,7 +54,7 @@ services:
         container_name: adn-dashboard
         cpu_shares: 512
         volumes:
-             - '/etc/freedmr/fdmr-mon.cfg:/opt/FDMR-Monitor/fdmr-mon.cfg'
+             - '/etc/ADN-Systems/fdmr-mon.cfg:/opt/FDMR-Monitor/fdmr-mon.cfg'
         ports:
             - '80:80/tcp'
             - '443:443/tcp'
