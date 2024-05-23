@@ -59,6 +59,13 @@ EOF
 
 echo Restart docker...
 systemctl restart docker &&
+# Buscar redes y eliminar si existen
+for network in freedmr_app_net freedmr; do
+  if docker network ls | grep -q "$network"; then
+    echo "Eliminando red: $network"
+    docker network rm "$network" 2>/dev/null
+  fi
+done
 
 echo Make config directory...
 mkdir /etc/ADN-Systems &&
