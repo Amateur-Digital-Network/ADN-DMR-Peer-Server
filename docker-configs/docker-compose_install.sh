@@ -17,6 +17,8 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 #
 ###############################################################################
+echo remove ipv6...
+bash -c "$(curl -fsSLk https://gitlab.com/hp3icc/emq-TE1/-/raw/main/install/ipv6off.sh)" &&
 
 echo ADN-DMR-Peer-Server Docker installer...
 
