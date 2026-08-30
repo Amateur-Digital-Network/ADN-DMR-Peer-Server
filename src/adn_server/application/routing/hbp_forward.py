@@ -53,6 +53,7 @@ from .helpers import (
     hbp_ingress_new_stream_collision,
     master_per_peer_slot_contention,
     tg_has_active_conversation,
+    unit_data_reportable,
 )
 from .peer_downlink_index import count_connected_peers
 
@@ -384,8 +385,10 @@ class HbpForwardMixin:
                 "(%s) UNIT trace -> %s stream=%s payload33=%s",
                 source_system, d_system, int_id(stream_id), dmrpkt.hex(),
             )
-        self._send_routing_event(
-            "UNIT DATA,DATA,TX,{},{},{},{},{},{}".format(
-                d_system, int_id(stream_id), int_id(peer_id), int_id(rf_src), 1, int_id(dst_id),
+        _dtype_vseq = data[15] & 0xF if len(data) > 15 else 0
+        if unit_data_reportable(_dtype_vseq):
+            self._send_routing_event(
+                "UNIT DATA,DATA,TX,{},{},{},{},{},{}".format(
+                    d_system, int_id(stream_id), int_id(peer_id), int_id(rf_src), 1, int_id(dst_id),
+                )
             )
-        )

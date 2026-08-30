@@ -815,6 +815,90 @@ def _obp_stream_active(st: dict[str, Any], pkt_time: float) -> bool:
     return True
 
 
+def obp_ingress_stream_on_system(
+    obp_status: dict[Any, Any],
+    stream_id: bytes,
+    dst_id: bytes,
+    rf_src: bytes,
+) -> int:
+    best_sid: bytes | None = None
+    best_first: float | None = None
+    for sid, st in obp_status.items():
+        if not isinstance(sid, (bytes, bytearray)) or not isinstance(st, dict):
+            continue
+        if "H_LC" in st:
+            continue
+        if st.get("TGID") != dst_id:
+            continue
+        if not _same_rf_source(st.get("RFS", b"\x00\x00\x00"), rf_src):
+            continue
+        if st.get("_fin"):
+            continue
+        first = st.get("1ST")
+        if first is None:
+            continue
+        if best_first is None or float(first) < best_first:
+            best_first = float(first)
+            best_sid = sid
+    return int_id(best_sid if best_sid is not None else stream_id)
+
+
+def obp_cross_system_winner(
+    protocols: dict[str, Any],
+    systems_cfg: dict[str, Any],
+    system_name: str,
+    stream_id: bytes,
+    dst_id: bytes,
+) -> str:
+    hr_times: dict[str, float] = {}
+    for other_name, proto in protocols.items():
+        if systems_cfg.get(other_name, {}).get("MODE") != "OPENBRIDGE":
+            continue
+        obp_status = getattr(proto, "STATUS", None)
+        if not isinstance(obp_status, dict):
+            continue
+        ent = obp_status.get(stream_id)
+        if not isinstance(ent, dict) or "1ST" not in ent or ent.get("TGID") != dst_id:
+            continue
+        hr_times[other_name] = float(ent["1ST"])
+    if not hr_times:
+        return system_name
+    return min(hr_times, key=hr_times.get)
+
+
+def obp_is_canonical_ingress(
+    protocols: dict[str, Any],
+    systems_cfg: dict[str, Any],
+    system_name: str,
+    stream_id: bytes,
+    dst_id: bytes,
+    rf_src: bytes,
+) -> bool:
+    src_proto = protocols.get(system_name)
+    obp_status = getattr(src_proto, "STATUS", None) if src_proto else None
+    if not isinstance(obp_status, dict):
+        return False
+    sid = int_id(stream_id)
+    if sid != obp_ingress_stream_on_system(obp_status, stream_id, dst_id, rf_src):
+        return False
+    return system_name == obp_cross_system_winner(
+        protocols, systems_cfg, system_name, stream_id, dst_id
+    )
+
+
+def obp_status_plugin_voice(
+    protocols: dict[str, Any],
+    system_name: str,
+    stream_id: bytes,
+) -> bool:
+    proto = protocols.get(system_name)
+    status = getattr(proto, "STATUS", None) if proto else None
+    if not isinstance(status, dict):
+        return False
+    ent = status.get(stream_id)
+    return isinstance(ent, dict) and bool(ent.get("_plugin_voice"))
+
+
 def tg_has_active_conversation(
     protocols: dict[str, Any],
     systems_cfg: dict[str, Any],
@@ -1004,6 +1088,15 @@ def unit_data_hbp_target_idle(
         and dst_slot.get("TX_TYPE") == HBPF_SLT_VTERM
         and (pkt_time - dst_slot.get("TX_TIME", 0) > hangtime)
     )
+
+
+def unit_data_reportable(dtype_vseq: int) -> bool:
+    """True when a unit-data frame should emit monitor/report events.
+
+    CSBK prelude (dtype 3) is routed but omitted from BRDG_EVENT — same policy as
+    data-log ``log_dtypes`` — to avoid SMS/GPS setup storms in logs and monitors.
+    """
+    return dtype_vseq in (6, 7, 8)
 
 
 def is_unit_data_ingress(

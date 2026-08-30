@@ -20,6 +20,7 @@ El **ADN DMR Peer Server** es un puente de conferencia [GPL-3.0](https://www.gnu
 | Quiero… | Empieza aquí |
 |---------|----------------|
 | Ejecutar y configurar | [Introducción](server/user-guide/introduction.md), [Configuración](server/user-guide/configuration.md) |
+| Escribir un plugin drop-in | [Plugins](server/user-guide/plugins.md), skeleton `plugins/example/` |
 | TG 4000, 999x, eco | [Números especiales](server/user-guide/special-numbers.md) |
 | Llamadas privadas | [Llamadas privadas](server/user-guide/private-calls.md) |
 | Voz / TTS | [Voz, anuncios y TTS](server/user-guide/voice-and-tts.md) |

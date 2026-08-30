@@ -38,6 +38,11 @@ from adn_server.application import (
     VoiceUseCases,
 )
 from adn_server.application.dynamic_tg_use_cases import DynamicTgUseCases
+from adn_server.application.plugins.application.bus import PluginBus
+from adn_server.application.plugins.application.context import ServerContext
+from adn_server.application.plugins.application.data_bridge import DataPluginBridge
+from adn_server.application.plugins.application.manager import PluginManager
+from adn_server.application.plugins.application.voice_bridge import VoicePluginBridge
 from adn_server.application.proxy.deployment import (
     is_obp_proxy_managed,
     is_proxy_inject_only,
@@ -431,6 +436,19 @@ def run_peer_server(
         call_from_reactor=reactor.callFromThread,
     )
 
+    plugin_bus = PluginBus()
+    plugin_bus.set_call_later(reactor.callLater)
+    server_ctx = ServerContext(
+        config=config,
+        project_root=project_root,
+        defer_to_thread=threads.deferToThread,
+        call_from_reactor=reactor.callFromThread,
+        call_later=reactor.callLater,
+    )
+    plugin_manager = PluginManager(plugin_bus, server_ctx, project_root)
+    voice_plugin_bridge = VoicePluginBridge(plugin_bus, config, get_dmra_blocks=get_dmra_blocks)
+    data_plugin_bridge = DataPluginBridge(plugin_bus, config)
+
     routing_use_cases = RoutingUseCases(
         acl_router,
         config,
@@ -445,7 +463,11 @@ def run_peer_server(
         call_later=reactor.callLater,
         encode_emblc=encode_emblc,
         ta_emblc_encoder=default_ta_emblc_encoder,
+        voice_plugin_bridge=voice_plugin_bridge,
+        data_plugin_bridge=data_plugin_bridge,
     )
+    plugin_manager.discover_and_load(config)
+    reactor.addSystemEventTrigger("before", "shutdown", plugin_manager.shutdown_all)
     routing_use_cases.apply_startup_subscriptions()
     dynamic_tg_uc = DynamicTgUseCases(
         dynamic_tg_store,
@@ -756,6 +778,9 @@ def run_peer_server(
             obp_proxy_state = start_obp_proxy_service(config, protocols, logger=logger)
         if result.added or result.removed or result.updated or result.rebound:
             _on_config_systems_changed()
+        voice_plugin_bridge.update_config(config)
+        data_plugin_bridge.update_config(config)
+        plugin_manager.rescan(config)
 
     def _do_config_reload() -> None:
         nonlocal report_mqtt, proxy_state, obp_proxy_state

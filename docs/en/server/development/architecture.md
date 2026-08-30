@@ -28,6 +28,8 @@ Conceptual comparison with legacy **`BRIDGES`**: [BRIDGES vs Subscriptions](brid
 
 Performance changes in 2.x (indexes, reporting, integrated proxy): [Performance (2.x)](performance.md).
 
+**Drop-in plugins** (voice/unit-data bus, `ServerPlugin` contract): [Plugins user guide](../user-guide/plugins.md). Reference skeleton: `plugins/example/` in the repository root.
+
 - **`InMemoryAclRouter`** (`AclRouter` port) — ACL range checks only (`acl_check`).
 - **`routing_table_for_report()`** — export shim for monitor/report (legacy BRIDGE_SND shape); not used for runtime forwards.
 
