@@ -31,6 +31,7 @@ from tests.harness.deterministic import (
     minimal_config,
     parse_dmr_fields,
     patch_routing_wall_time,
+    FakeClock,
 )
 from tests.routing.unit_data_helpers import idle_hbp_slot
 
@@ -39,6 +40,7 @@ from adn_server.domain.hbp_protocol import HBPF_SLT_VHEAD, HBPF_SLT_VTERM
 
 DAPRS_GATEWAY_ID = 900999
 HOTSPOT_SUB_ID = 7300392
+_HARNESS_T0 = FakeClock().time()
 
 
 @pytest.mark.behavior
@@ -165,6 +167,53 @@ def test_unit_data_fanout_to_other_obp_with_ver_gt_1() -> None:
 
     assert len(scenario.capture.for_system("OBP-FAN")) == 1
     assert parse_dmr_fields(scenario.capture.for_system("OBP-FAN")[0].packet)["call_type"] == "unit"
+
+
+@pytest.mark.behavior
+def test_unit_data_to_fresh_local_sub_is_not_fanned_out_to_obp() -> None:
+    """Unit data to a subscriber recently seen on a local system goes only via SUB_MAP."""
+    config = minimal_config(("D-APRS", "SYSTEM"))
+    add_openbridge_system(config, "OBP-FAN")
+    config["_SUB_MAP"] = {bytes_3(HOTSPOT_SUB_ID): ("SYSTEM", 2, _HARNESS_T0 - 60)}
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["SYSTEM"].STATUS[2] = idle_hbp_slot()
+    base = PacketSpec(call_type="unit", rf_src=DAPRS_GATEWAY_ID, dst_id=HOTSPOT_SUB_ID, stream_id=0x67676767, slot=2)
+
+    with patch_routing_wall_time(scenario.clock):
+        scenario.inject_unit("D-APRS", DeterministicScenario.unit_data_header_spec(base))
+
+    assert len(scenario.capture.for_system("OBP-FAN")) == 0
+    assert len(scenario.capture.for_system("SYSTEM")) >= 1
+
+
+@pytest.mark.behavior
+def test_unit_data_to_stale_local_sub_is_still_fanned_out_to_obp() -> None:
+    config = minimal_config(("D-APRS", "SYSTEM"))
+    add_openbridge_system(config, "OBP-FAN")
+    config["_SUB_MAP"] = {bytes_3(HOTSPOT_SUB_ID): ("SYSTEM", 2, _HARNESS_T0 - 3600)}
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["SYSTEM"].STATUS[2] = idle_hbp_slot()
+    base = PacketSpec(call_type="unit", rf_src=DAPRS_GATEWAY_ID, dst_id=HOTSPOT_SUB_ID, stream_id=0x68686868, slot=2)
+
+    with patch_routing_wall_time(scenario.clock):
+        scenario.inject_unit("D-APRS", DeterministicScenario.unit_data_header_spec(base))
+
+    assert len(scenario.capture.for_system("OBP-FAN")) == 1
+
+
+@pytest.mark.behavior
+def test_unit_data_to_sub_learned_via_obp_is_still_fanned_out_to_obp() -> None:
+    config = minimal_config(("D-APRS",))
+    add_openbridge_system(config, "OBP-FAN")
+    add_openbridge_system(config, "OBP-OTHER")
+    config["_SUB_MAP"] = {bytes_3(HOTSPOT_SUB_ID): ("OBP-OTHER", 1, _HARNESS_T0 - 60)}
+    scenario = DeterministicScenario(config=config)
+    base = PacketSpec(call_type="unit", rf_src=DAPRS_GATEWAY_ID, dst_id=HOTSPOT_SUB_ID, stream_id=0x69696969, slot=2)
+
+    with patch_routing_wall_time(scenario.clock):
+        scenario.inject_unit("D-APRS", DeterministicScenario.unit_data_header_spec(base))
+
+    assert len(scenario.capture.for_system("OBP-FAN")) == 1
 
 
 @pytest.mark.behavior
