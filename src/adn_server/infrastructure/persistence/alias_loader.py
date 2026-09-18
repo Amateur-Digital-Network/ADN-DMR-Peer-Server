@@ -41,8 +41,25 @@ from ...application.ports import AliasLoader
 logger = logging.getLogger(__name__)
 
 
-def try_download(path: Path, file_name: str, url: str, stale_sec: float) -> str:
-    """Legacy try_download: download file from url if missing or older than stale_sec. Returns result message."""
+def try_download(
+    path: Path,
+    file_name: str,
+    url: str,
+    stale_sec: float,
+    *,
+    max_attempts: int = 3,
+    first_timeout: float = 30,
+    retry_timeout: float = 10,
+    retry_delay_sec: float = 3,
+) -> str:
+    """Legacy try_download: download file from url if missing or older than stale_sec.
+
+    Retries up to `max_attempts` times on network failure (timeout, connection refused,
+    DNS failure, etc). The first attempt uses `first_timeout`; retries use the shorter
+    `retry_timeout` so a fully unreachable host can't stall a caller for `max_attempts *
+    first_timeout` (this runs synchronously during startup, and off-thread on the
+    periodic reload — see alias_reload_loop in peer_server.py). Returns a result message.
+    """
     if not url:
         return f"ID ALIAS MAPPER: '{file_name}' URL empty, not downloaded"
     full = path / file_name
@@ -54,14 +71,30 @@ def try_download(path: Path, file_name: str, url: str, stale_sec: float) -> str:
         file_old = True
     if not file_old and file_exists:
         return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
-    try:
-        ctx = ssl.create_default_context()
-        ctx.check_hostname = False
-        ctx.verify_mode = ssl.CERT_NONE
-        with urlopen(url, context=ctx, timeout=30) as response:
-            data = response.read()
-    except OSError as e:
-        return f"ID ALIAS MAPPER: '{file_name}' could not be downloaded due to an IOError: {e}"
+
+    data: bytes | None = None
+    last_error: OSError | None = None
+    for attempt in range(1, max_attempts + 1):
+        timeout = first_timeout if attempt == 1 else retry_timeout
+        try:
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            with urlopen(url, context=ctx, timeout=timeout) as response:
+                data = response.read()
+            last_error = None
+            break
+        except OSError as e:
+            last_error = e
+            if attempt < max_attempts:
+                logger.warning(
+                    "(ALIAS) ID ALIAS MAPPER: '%s' download attempt %d/%d failed (%s), retrying in %gs",
+                    file_name, attempt, max_attempts, e, retry_delay_sec,
+                )
+                if retry_delay_sec:
+                    time.sleep(retry_delay_sec)
+    if last_error is not None:
+        return f"ID ALIAS MAPPER: '{file_name}' could not be downloaded due to an IOError: {last_error}"
     if not data or data == b"{}":
         return f"ID ALIAS MAPPER: '{file_name}' file not written because downloaded data is empty"
     try:
@@ -70,6 +103,21 @@ def try_download(path: Path, file_name: str, url: str, stale_sec: float) -> str:
     except OSError as e:
         return f"ID ALIAS mapper '{file_name}' file could not be written: {e}"
     return f"ID ALIAS MAPPER: '{file_name}' successfully downloaded"
+
+
+_DOWNLOAD_FAILURE_MARKERS = (
+    "could not be downloaded",
+    "could not be written",
+    "file not written because",
+)
+
+
+def _log_download_result(result: str) -> None:
+    """Log a try_download result at a level a monitoring/alerting pipeline can filter on."""
+    if any(marker in result for marker in _DOWNLOAD_FAILURE_MARKERS):
+        logger.error("(ALIAS) %s", result)
+    else:
+        logger.info("(ALIAS) %s", result)
 
 
 def _blake2bsum(file_path: Path) -> str:
@@ -102,7 +150,7 @@ class DefaultAliasLoader(AliasLoader):
         if aliases.get("TRY_DOWNLOAD"):
             if aliases.get("CHECKSUM_FILE") and aliases.get("CHECKSUM_URL"):
                 result = try_download(path, aliases["CHECKSUM_FILE"], aliases.get("CHECKSUM_URL", ""), stale_sec)
-                logger.info("(ALIAS) %s", result)
+                _log_download_result(result)
             for key, url_key in [
                 ("PEER_FILE", "PEER_URL"),
                 ("SUBSCRIBER_FILE", "SUBSCRIBER_URL"),
@@ -112,7 +160,7 @@ class DefaultAliasLoader(AliasLoader):
                 url = aliases.get(url_key)
                 if url and aliases.get(key):
                     result = try_download(path, aliases[key], url, stale_sec)
-                    logger.info("(ALIAS) %s", result)
+                    _log_download_result(result)
         checksums = self._load_checksums(path, aliases.get("CHECKSUM_FILE"))
         peer_file = aliases.get("PEER_FILE", "peer_ids.json")
         sub_file = aliases.get("SUBSCRIBER_FILE", "subscriber_ids.json")
@@ -225,7 +273,10 @@ class DefaultAliasLoader(AliasLoader):
 
         def _load_verified(target: Path) -> dict[int, str]:
             if not target.is_file():
-                return {}
+                # Raise (not return {}) so the caller falls back to .bak below instead of
+                # silently ending up with an empty dictionary when the primary file is
+                # simply missing (e.g. first boot with the download still failing).
+                raise FileNotFoundError(f"'{target.name}' file does not exist")
             if expected_checksum:
                 if _blake2bsum(target) != expected_checksum:
                     raise ValueError("bad checksum")
@@ -239,7 +290,7 @@ class DefaultAliasLoader(AliasLoader):
             loaded_from_primary = True
         except Exception as e:
             logger.error(
-                "(ALIAS) ID ALIAS MAPPER: problem with blake2bsum of %s file. not updating.: %s",
+                "(ALIAS) ID ALIAS MAPPER: problem loading %s file (%s), falling back to .bak",
                 name,
                 e,
             )
@@ -252,8 +303,15 @@ class DefaultAliasLoader(AliasLoader):
                         name,
                         f,
                     )
+            else:
+                logger.warning(
+                    "(ALIAS) ID ALIAS MAPPER: no .bak available for %s, dictionary will be empty",
+                    name,
+                )
         if result:
             logger.info("(ALIAS) ID ALIAS MAPPER: %s dictionary is available", name)
+        else:
+            logger.warning("(ALIAS) ID ALIAS MAPPER: %s dictionary is empty", name)
         if loaded_from_primary and full.is_file():
             try:
                 shutil.copy(full, bak)
@@ -302,16 +360,20 @@ class DefaultAliasLoader(AliasLoader):
         loaded_from_primary = False
 
         try:
-            if expected_checksum and full.is_file():
-                if _blake2bsum(full) != expected_checksum:
-                    raise ValueError("bad checksum")
+            # Raise (not just skip) on a missing primary file too, so the except block
+            # below falls back to .bak instead of silently ending up with an empty dict
+            # (e.g. first boot with the download still failing).
+            if not full.is_file():
+                raise FileNotFoundError(f"'{file_name}' file does not exist")
+            if expected_checksum and _blake2bsum(full) != expected_checksum:
+                raise ValueError("bad checksum")
             result = self._load_server_tsv(path, file_name)
-            if full.is_file() and not result:
+            if not result:
                 raise ValueError("empty server_ids")
-            loaded_from_primary = bool(result)
+            loaded_from_primary = True
         except Exception as e:
             logger.error(
-                "(ALIAS) ID ALIAS MAPPER: problem with blake2bsum of server_ids file: %s",
+                "(ALIAS) ID ALIAS MAPPER: problem loading server_ids file (%s), falling back to .bak",
                 e,
             )
             if bak.is_file():
@@ -324,6 +386,8 @@ class DefaultAliasLoader(AliasLoader):
                     )
         if result:
             logger.info("(ALIAS) ID ALIAS MAPPER: server_ids dictionary is available")
+        else:
+            logger.warning("(ALIAS) ID ALIAS MAPPER: server_ids dictionary is empty")
         if loaded_from_primary and full.is_file():
             try:
                 shutil.copy(full, bak)
