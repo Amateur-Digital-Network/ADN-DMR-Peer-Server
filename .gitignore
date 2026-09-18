@@ -36,6 +36,18 @@ json/*
 # Internal
 docs-priv/
 
+# Runtime drop-in plugins (see plugins/README.md); example skeleton is versioned
+plugins/*
+!plugins/README.md
+!plugins/.gitkeep
+!plugins/example/
+!plugins/example/**
+plugins/example/example-events/
+plugins/example/**/__pycache__/
+
+# Runtime TTS on-demand cache (generated at runtime)
+Audio/es_ES/ondemand/
+
 # Dev-only session captures; anonymize before promoting to fixtures/
 tests/fixtures/sessions/_capture/
 

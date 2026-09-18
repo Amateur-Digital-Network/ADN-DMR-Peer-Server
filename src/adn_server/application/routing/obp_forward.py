@@ -52,7 +52,7 @@ from typing import Any
 from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, int_id
 from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
-from .helpers import group_voice_tg_ingress_collision
+from .helpers import group_voice_tg_ingress_collision, obp_is_canonical_ingress, unit_data_reportable
 
 logger = logging.getLogger(__name__)
 
@@ -152,6 +152,7 @@ class ObpForwardMixin:
         stream_id: bytes,
         data: bytes,
         obp_hops: bytes,
+        synthetic_announcement: bool = False,
     ) -> bool:
         """Port of bridge_master.routerOBP.dmrd_received group/vcsbk (~2269-2411). False = drop packet."""
         pkt_time = time.time()
@@ -221,6 +222,23 @@ class ObpForwardMixin:
                         system_name, int_id(stream_id), int_id(peer_id), int_id(rf_src), slot, int_id(dst_id)
                     )
                 )
+            bridge = self._voice_plugin_bridge
+            if bridge is not None and bridge.has_subscribers() and obp_is_canonical_ingress(
+                protocols, systems_cfg, system_name, stream_id, dst_id, rf_src,
+            ) and bridge.emit_group_voice_start(
+                    system_name=system_name,
+                    peer_id=peer_id,
+                    rf_src=rf_src,
+                    dst_id=dst_id,
+                    slot=slot,
+                    stream_id=stream_id,
+                    pkt_time=pkt_time,
+                    source_is_obp=True,
+                    obp_hops=obp_hops if obp_hops else b"",
+                    synthetic_announcement=synthetic_announcement,
+                    voice_phase="INGRESS",
+                ):
+                status[stream_id]["_plugin_voice"] = True
         else:
             st = status[stream_id]
             if "packets" in st:
@@ -473,8 +491,10 @@ class ObpForwardMixin:
             logger.warning("(%s) send_data_to_obp %s failed: %s", source_system, target, exc)
             return
         logger.debug("(%s) UNIT Data Bridged to OBP System: %s DST_ID: %s", source_system, target, int_id(dst_id))
-        self._send_routing_event(
-            "UNIT DATA,DATA,TX,{},{},{},{},{},{}".format(
-                target, int_id(stream_id), int_id(peer_id), int_id(rf_src), 1, int_id(dst_id),
+        _dtype_vseq = data[15] & 0xF if len(data) > 15 else 0
+        if unit_data_reportable(_dtype_vseq):
+            self._send_routing_event(
+                "UNIT DATA,DATA,TX,{},{},{},{},{},{}".format(
+                    target, int_id(stream_id), int_id(peer_id), int_id(rf_src), 1, int_id(dst_id),
+                )
             )
-        )

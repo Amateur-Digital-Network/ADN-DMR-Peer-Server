@@ -296,6 +296,20 @@ class RoutingTimerMixin:
                                     system_name, int_id(stream_id), int_id(peer), int_id(rfs), 1, int_id(tgid), duration
                                 )
                             )
+                            bridge = self._voice_plugin_bridge
+                            if st.get("_plugin_voice") and bridge is not None:
+                                bridge.emit_group_voice_end(
+                                    system_name=system_name,
+                                    peer_id=peer,
+                                    rf_src=rfs,
+                                    dst_id=tgid,
+                                    slot=1,
+                                    stream_id=stream_id,
+                                    pkt_time=last,
+                                    duration_s=duration,
+                                    source_is_obp=True,
+                                )
+                                st.pop("_plugin_voice", None)
                             st["_to"] = True
                             self._obp_emit_end_tx_for_forward_legs(stream_id, system_name, now)
                             continue
@@ -331,6 +345,19 @@ class RoutingTimerMixin:
                             _slot.get("RX_TIME", 0) - _slot.get("RX_START", 0),
                         )
                     )
+                    bridge = self._voice_plugin_bridge
+                    if bridge is not None:
+                        bridge.emit_group_voice_end(
+                            system_name=system_name,
+                            peer_id=_slot.get("RX_PEER", b"\x00\x00\x00\x00"),
+                            rf_src=_slot.get("RX_RFS", b"\x00\x00\x00"),
+                            dst_id=_slot.get("RX_TGID", b"\x00\x00\x00"),
+                            slot=slot,
+                            stream_id=_slot.get("RX_STREAM_ID", b"\x00"),
+                            pkt_time=_slot.get("RX_TIME", now),
+                            duration_s=_slot.get("RX_TIME", 0) - _slot.get("RX_START", 0),
+                            source_is_obp=False,
+                        )
                 if _slot.get("RX_TIME", 0) < now - 60:
                     _slot["RX_STREAM_ID"] = b"\x00"
                 tx_streams = _slot.get("TX_STREAMS")

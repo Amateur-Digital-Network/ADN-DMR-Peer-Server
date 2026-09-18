@@ -72,6 +72,17 @@ def reopen_file_handlers(logger: logging.Logger | None = None) -> int:
     return count
 
 
+def _silence_noisy_library_loggers() -> None:
+    """Keep third-party DEBUG chatter out of the server log when LOG_LEVEL=DEBUG."""
+    for name in (
+        "watchdog",
+        "watchdog.observers",
+        "watchdog.observers.inotify",
+        "watchdog.observers.inotify_buffer",
+    ):
+        logging.getLogger(name).setLevel(logging.WARNING)
+
+
 def reapply_log_level(log_config: dict[str, Any]) -> str:
     """Apply LOGGER.LOG_LEVEL after SIGHUP reload (handlers unchanged).
 
@@ -90,6 +101,7 @@ def reapply_log_level(log_config: dict[str, Any]) -> str:
         handler.setLevel(level)
     for handler in app_logger.handlers:
         handler.setLevel(level)
+    _silence_noisy_library_loggers()
     return logging.getLevelName(level)
 
 
@@ -134,4 +146,5 @@ def setup_logging(log_config: dict[str, Any]) -> logging.Logger:
     logging.basicConfig(level=level, handlers=handlers or [logging.NullHandler()], force=True)
     logger = logging.getLogger(log_name)
     logger.setLevel(level)
+    _silence_noisy_library_loggers()
     return logger

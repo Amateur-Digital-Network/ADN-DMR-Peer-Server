@@ -55,6 +55,7 @@ nav:
       - User guide:
           - Introduction: server/user-guide/introduction.md
           - Configuration: server/user-guide/configuration.md
+          - Plugins: server/user-guide/plugins.md
           - Talker Alias: server/user-guide/talker-alias.md
           - Bridges and talkgroups: server/user-guide/bridges-and-talkgroups.md
           - Special numbers (4000, 999x, echo): server/user-guide/special-numbers.md

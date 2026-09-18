@@ -52,13 +52,8 @@ _CSV_FAMILIES = {
     "GROUP VOICE": "GROUP",
     "PRIVATE VOICE": "PRIVATE",
     "UNIT DATA": "UNIT",
-    # routing_use_cases._dtype_labels emits one of these instead of the generic
-    # "UNIT DATA" label for dtype_vseq in (3, 6, 7, 8) — private-call CSBK setup
-    # signaling and SMS/GPS (ARS/LRRP) header + VCSBK blocks. Without these,
-    # parse_bridge_event_csv() returns None and the event is silently dropped
-    # ("voice_event not emitted (unmapped CSV)"), so a private call whose CSBK
-    # handshake never escalates to voice (e.g. destination unreachable) never
-    # shows up in the monitor at all.
+    # routing_use_cases emits these labels for dtype_vseq in (6, 7, 8). CSBK (3) is
+    # still logged at INFO but no longer emitted to monitor (prelude storm filter).
     "UNIT CSBK": "UNIT",
     "UNIT DATA HEADER": "UNIT",
     "UNIT VCSBK 1/2 DATA BLOCK": "UNIT",
