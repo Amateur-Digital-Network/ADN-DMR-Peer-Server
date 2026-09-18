@@ -247,6 +247,7 @@ class HBPProtocol(DatagramProtocol):
             # cleaned uniformly. No pre-seed of slot keys here.
             self.STATUS: dict[Any, Any] = {}
             self._bcsq_log_once: deque = deque(maxlen=1024)
+            self._obp_target_sync_log_once: deque = deque(maxlen=1024)
         else:
             self._laststrid = {1: b"", 2: b""}
             self.STATUS = {1: _make_slot_status(), 2: _make_slot_status()}
@@ -2109,9 +2110,14 @@ class HBPProtocol(DatagramProtocol):
         else:
             logger.debug("(%s) *BridgeControl* not sending BCVE, TARGET not currently known", self._system)
 
-    def _obp_sync_target_sock_from_peer(self, _sockaddr: tuple[str, int]) -> None:
+    def _obp_sync_target_sock_from_peer(self, _sockaddr: tuple[str, int], _stream_id: bytes | None = None) -> None:
         """If RELAX_CHECKS accepted traffic from a different IP:port than TARGET_SOCK, sync (same idea as BCKA).
-        Ensures BCSQ and outbound DMR go to the peer address we actually receive from."""
+        Ensures BCSQ and outbound DMR go to the peer address we actually receive from.
+
+        A peer behind per-packet load-balanced NAT can flip source address on every frame of the
+        same call, so the sync itself still runs every packet but the log is debug and capped to
+        once per stream_id (same _log_once deque idiom as _bcsq_log_once above).
+        """
         if self._config.get("MODE") != "OPENBRIDGE" or not self._config.get("RELAX_CHECKS"):
             return
         if not _sockaddr or not _sockaddr[0]:
@@ -2120,14 +2126,18 @@ class HBPProtocol(DatagramProtocol):
         if cur == _sockaddr:
             return
         h, p = _sockaddr[0], int(_sockaddr[1])
-        logger.info(
-            "(%s) *BridgeControl* OBP peer address sync to %s:%s (RELAX_CHECKS; was %s:%s)",
-            self._system,
-            h,
-            p,
-            (cur[0] if cur and cur[0] else "?"),
-            (cur[1] if cur and len(cur) > 1 else "?"),
-        )
+        _once = getattr(self, "_obp_target_sync_log_once", None)
+        if _stream_id is None or not isinstance(_once, deque) or _stream_id not in _once:
+            logger.debug(
+                "(%s) *BridgeControl* OBP peer address sync to %s:%s (RELAX_CHECKS; was %s:%s)",
+                self._system,
+                h,
+                p,
+                (cur[0] if cur and cur[0] else "?"),
+                (cur[1] if cur and len(cur) > 1 else "?"),
+            )
+            if _stream_id is not None and isinstance(_once, deque):
+                _once.append(_stream_id)
         self._config["TARGET_IP"] = h
         self._config["TARGET_PORT"] = p
         self._config["TARGET_SOCK"] = (h, p)
@@ -2166,7 +2176,7 @@ class HBPProtocol(DatagramProtocol):
             _ingress = self._try_decode_mesh_ingress(_packet)
             if _ingress is not None and _ingress.codec == "obp_v1" and (_sockaddr == self._config.get("TARGET_SOCK") or self._config.get("RELAX_CHECKS")):
                 _data = _ingress.voice_frame
-                self._obp_sync_target_sock_from_peer(_sockaddr)
+                self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id)
                 _peer_id = _data[11:15]
                 if self._config.get("NETWORK_ID") != _peer_id:
                     if _stream_id not in self._laststrid:
@@ -2294,7 +2304,7 @@ class HBPProtocol(DatagramProtocol):
             _trailer = parse_dmre_trailer(_packet)
             _timestamp = _trailer.timestamp if _trailer is not None else b"\x00" * 8
             _stream_id = _data[16:20]
-            self._obp_sync_target_sock_from_peer(_sockaddr)
+            self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id)
             _peer_id = _data[11:15]
             if self._config.get("NETWORK_ID") != _peer_id:
                 if _stream_id not in self._laststrid:
