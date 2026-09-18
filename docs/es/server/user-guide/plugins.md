@@ -182,16 +182,68 @@ flowchart TD
 
 ---
 
-## Ejemplo de referencia
+## Usando el plugin de ejemplo
 
-Estudia `plugins/example/` en la raíz del repositorio:
+`plugins/example/` es un plugin funcional, deshabilitado por defecto — actívalo para ver el framework en acción, o copia su estructura como punto de partida para el tuyo ([Clean architecture en plugins](#clean-architecture-en-plugins) más arriba).
 
-- `enabled: false` en el `config.yaml` versionado (sin secretos).
-- Log `DEBUG` en cada evento.
-- Escribe un JSON por sesión en `example-events/` al `VoiceCallEnd` / `UnitDataEnd`.
-- Tests en `plugins/example/tests/`.
+### Qué hace
 
-Para probarlo: `enabled: true`, reload, haz una llamada, revisa `example-events/<stream_id>.json`.
+- Loguea una línea `DEBUG` `(EXAMPLE) …` por cada evento del bus (`VoiceCallStart`/`Frame`/`End`, `UnitDataStart`/`Frame`/`End`).
+- Trackea cada sesión, identificada por `(origin_system, stream_id)`, y al `VoiceCallEnd` / `UnitDataEnd` escribe un JSON con metadata de la llamada, duración y cantidad de frames/paquetes.
+- Sin llamadas HTTP, sin filtros, sin secretos — seguro de activar tal cual (`plugins/example/plugin/application/plugin_impl.py`).
+
+### Activarlo
+
+```yaml
+# plugins/example/config.yaml
+enabled: true
+output_dir: example-events   # relativo al project root; se crea en la primera escritura
+```
+
+```bash
+systemctl reload adn-server    # SIGHUP — PluginManager reescanea plugins/
+```
+
+### Opciones de configuración
+
+| Clave | Default | Función |
+|-------|---------|---------|
+| `enabled` | `false` | Debe ser `true` para cargar el plugin |
+| `output_dir` | `example-events` | Dónde se escriben los JSON de sesión, relativo al project root del servidor |
+
+### Salida
+
+Un archivo por sesión: `<output_dir>/<stream_id>.json` (`stream_id` como entero plano, no hex), con formato indentado y claves ordenadas. La escritura corre fuera del hilo del reactor vía `defer_to_thread`, así que nunca bloquea el manejo de llamadas.
+
+Ejemplo — una llamada de voz grupal en `SYSTEM` que terminó tras 2.16s, retransmitida a `OBP-USA`:
+
+```json
+{
+  "call_family": "GROUP",
+  "direction": "RX",
+  "dst_id": 91,
+  "duration_s": 2.16,
+  "ended_at": "2026-09-18T21:05:11.532000Z",
+  "event_kind": "voice",
+  "forwarded_systems": ["OBP-USA"],
+  "frame_count": 36,
+  "is_proxy_ingress": false,
+  "is_synthetic": false,
+  "origin_system": "SYSTEM",
+  "peer_id": 312000,
+  "pkt_time": 1758229511.532,
+  "server_id": 73010,
+  "slot": 1,
+  "src_id": 7300391,
+  "started_at": "2026-09-18T21:05:09.372000Z",
+  "stream_id": 1234567890,
+  "system_mode": "MASTER"
+}
+```
+
+Para sesiones unit-data, `event_kind` es `"unit_data"` y el campo de conteo es `packet_count` en vez de `frame_count`. Las patas que cruzaron un OpenBridge también llevan `obp_source_server_id`, `obp_hops`, `obp_source_rptr_id`, `ber`, `rssi` cuando aplica (ver [Tipos de evento](#tipos-de-evento) más arriba).
+
+Para probarlo de punta a punta: `enabled: true`, reload, haz una llamada o manda unit data a través del servidor, y revisa `example-events/<stream_id>.json` bajo el project root. Sus propios tests (`plugins/example/tests/`) cubren el tracking de sesión y la forma del JSON — ver [Tests](#tests) más abajo para correrlos.
 
 ---
 

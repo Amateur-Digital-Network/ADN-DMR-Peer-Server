@@ -182,16 +182,68 @@ flowchart TD
 
 ---
 
-## Reference example
+## Using the example plugin
 
-Study `plugins/example/` in the repository root:
+`plugins/example/` is a working, disabled-by-default plugin — enable it to see the framework in action, or copy its tree as a starting point for your own ([Clean architecture in plugins](#clean-architecture-in-plugins) above).
 
-- `enabled: false` in committed `config.yaml` (no secrets).
-- `DEBUG` log on every event.
-- Writes one JSON file per session under `example-events/` on `VoiceCallEnd` / `UnitDataEnd`.
-- Tests in `plugins/example/tests/`.
+### What it does
 
-To try it: set `enabled: true`, reload, make a call, inspect `example-events/<stream_id>.json`.
+- Logs a `DEBUG` line `(EXAMPLE) …` for every bus event (`VoiceCallStart`/`Frame`/`End`, `UnitDataStart`/`Frame`/`End`).
+- Tracks each session, keyed by `(origin_system, stream_id)`, and on `VoiceCallEnd` / `UnitDataEnd` writes one JSON file with call metadata, duration, and frame/packet count.
+- No HTTP calls, no filters, no secrets — safe to enable as-is (`plugins/example/plugin/application/plugin_impl.py`).
+
+### Enable it
+
+```yaml
+# plugins/example/config.yaml
+enabled: true
+output_dir: example-events   # relative to the project root; created on first write
+```
+
+```bash
+systemctl reload adn-server    # SIGHUP — PluginManager rescans plugins/
+```
+
+### Config options
+
+| Key | Default | Role |
+|-----|---------|------|
+| `enabled` | `false` | Must be `true` to load the plugin |
+| `output_dir` | `example-events` | Where session JSON files are written, relative to the server's project root |
+
+### Output
+
+One file per session: `<output_dir>/<stream_id>.json` (`stream_id` as a plain integer, not hex), pretty-printed with sorted keys. The write runs off the reactor thread via `defer_to_thread`, so it never blocks call handling.
+
+Example — a group voice call on `SYSTEM` that ended after 2.16s, relayed onward to `OBP-USA`:
+
+```json
+{
+  "call_family": "GROUP",
+  "direction": "RX",
+  "dst_id": 91,
+  "duration_s": 2.16,
+  "ended_at": "2026-09-18T21:05:11.532000Z",
+  "event_kind": "voice",
+  "forwarded_systems": ["OBP-USA"],
+  "frame_count": 36,
+  "is_proxy_ingress": false,
+  "is_synthetic": false,
+  "origin_system": "SYSTEM",
+  "peer_id": 312000,
+  "pkt_time": 1758229511.532,
+  "server_id": 73010,
+  "slot": 1,
+  "src_id": 7300391,
+  "started_at": "2026-09-18T21:05:09.372000Z",
+  "stream_id": 1234567890,
+  "system_mode": "MASTER"
+}
+```
+
+For unit-data sessions `event_kind` is `"unit_data"` and the count field is `packet_count` instead of `frame_count`. Legs that crossed an OpenBridge also carry `obp_source_server_id`, `obp_hops`, `obp_source_rptr_id`, `ber`, `rssi` when present (see [Event types](#event-types) above).
+
+To try it end to end: set `enabled: true`, reload, make a call or send unit data through the server, then check `example-events/<stream_id>.json` under the project root. Its own tests (`plugins/example/tests/`) cover session tracking and the JSON record shape — see [Tests](#tests) below to run them.
 
 ---
 
