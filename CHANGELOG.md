@@ -4,6 +4,14 @@ All notable changes to **adn-server** are documented here.
 
 <!-- version list -->
 
+## v2.5.5 (2026-09-18)
+
+### Bug Fixes
+
+- Retry alias JSON downloads on a short poll instead of waiting a full STALE_DAYS cycle
+  ([`f6cc0fe`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/f6cc0fe2818ab52c91316d623d432451ec1051a4))
+
+
 ## v2.5.4 (2026-08-19)
 
 ### Bug Fixes
