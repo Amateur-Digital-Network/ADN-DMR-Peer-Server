@@ -171,6 +171,75 @@ def _wire_monitor_downlink_ctx(
     report_factory.set_downlink_ctx_for_system(_ctx_for)
 
 
+_DEFAULT_ALIAS_POLL_INTERVAL_SEC = 900.0
+
+
+def _resolve_alias_poll_interval(aliases_cfg: dict[str, Any], logger: logging.Logger) -> float:
+    """ALIASES.POLL_INTERVAL_SEC, defaulting to 900s. Never raises — a bad value (missing,
+    non-numeric, zero/negative) falls back to the default with a warning instead of
+    aborting server startup."""
+    raw = aliases_cfg.get("POLL_INTERVAL_SEC")
+    if raw is None or raw == "":
+        return _DEFAULT_ALIAS_POLL_INTERVAL_SEC
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        logger.warning(
+            "(ALIAS) invalid ALIASES.POLL_INTERVAL_SEC=%r, using default %gs",
+            raw,
+            _DEFAULT_ALIAS_POLL_INTERVAL_SEC,
+        )
+        return _DEFAULT_ALIAS_POLL_INTERVAL_SEC
+    if value <= 0:
+        logger.warning(
+            "(ALIAS) ALIASES.POLL_INTERVAL_SEC=%s must be positive, using default %gs",
+            raw,
+            _DEFAULT_ALIAS_POLL_INTERVAL_SEC,
+        )
+        return _DEFAULT_ALIAS_POLL_INTERVAL_SEC
+    return value
+
+
+def _log_alias_health(config: Any, systems_cfg: dict[str, Any], logger: logging.Logger) -> None:
+    """Warn loudly when peer/subscriber/server ID tables are empty and would fail-closed.
+
+    validate_id() and validate_obp_source_server_id() (udp_hbp.py) reject any ID that is
+    not found in _PEER_IDS/_SUB_IDS/_LOCAL_SUBSCRIBER_IDS whenever ALLOW_UNREG_ID is False,
+    and OBP source-server checks reject on an empty _SERVER_IDS when VALIDATE_SERVER_IDS is
+    True. An empty table under those flags means every registration/relay is silently
+    rejected — this makes that failure mode visible in the logs instead of only showing up
+    as "users can't connect" reports.
+    """
+    peer_ids = config.get("_PEER_IDS") or {}
+    sub_ids = config.get("_SUB_IDS") or {}
+    local_sub_ids = config.get("_LOCAL_SUBSCRIBER_IDS") or {}
+    server_ids = config.get("_SERVER_IDS") or {}
+    logger.info(
+        "(ALIAS) dictionary sizes: peer_ids=%d subscriber_ids=%d local_subscriber_ids=%d "
+        "talkgroup_ids=%d server_ids=%d",
+        len(peer_ids),
+        len(sub_ids),
+        len(local_sub_ids),
+        len(config.get("_TG_IDS") or {}),
+        len(server_ids),
+    )
+    enforces_reg = any(
+        sys_cfg.get("ENABLED", True) and not sys_cfg.get("ALLOW_UNREG_ID", True)
+        for sys_cfg in systems_cfg.values()
+    )
+    if enforces_reg and not peer_ids and not sub_ids and not local_sub_ids:
+        logger.error(
+            "(ALIAS) peer_ids/subscriber_ids/local_subscriber_ids are ALL EMPTY while at "
+            "least one system has ALLOW_UNREG_ID: false — every peer/hotspot registration "
+            "will be rejected until a download succeeds or a .bak file is available"
+        )
+    if config.get("GLOBAL", {}).get("VALIDATE_SERVER_IDS") and not server_ids:
+        logger.error(
+            "(ALIAS) server_ids is EMPTY while GLOBAL.VALIDATE_SERVER_IDS is true — all "
+            "OpenBridge traffic with a 4-5 digit source server will be rejected"
+        )
+
+
 def _looping_errback(logger: logging.Logger, failure):
     """Errback for LoopingCalls (legacy loopingErrHandle). Stops reactor to avoid memory leaks."""
     try:
@@ -210,6 +279,7 @@ def run_peer_server(
     config["_LOCAL_SUBSCRIBER_IDS"] = local_subscriber_ids
     config["_SERVER_IDS"] = server_ids
     config["CHECKSUMS"] = checksums
+    _log_alias_health(config, config.get("SYSTEMS", {}), logger)
 
     # SUB_MAP (shared mutable; used by SubMapTrimmer and shutdown)
     aliases_cfg = config.get("ALIASES", {})
@@ -472,26 +542,55 @@ def run_peer_server(
             )
         ).start(66).addErrback(_looping_errback, logger)
 
-    # Alias reload (STALE_DAYS -> seconds)
-    alias_interval = (aliases_cfg.get("STALE_DAYS") or 1) * 86400
+    # Alias reload: poll every ALIAS_POLL_INTERVAL_SEC (default 900s / 15 min), independent
+    # from STALE_DAYS. STALE_DAYS only controls how old a cached file must be before
+    # try_download re-fetches it (see alias_loader.try_download); polling on a short, fixed
+    # cadence means a failed download (e.g. first boot with no cached files yet) is retried
+    # within minutes instead of waiting up to a full STALE_DAYS cycle. Once files are fresh,
+    # each tick is a cheap mtime check with no network call.
+    alias_poll_interval = _resolve_alias_poll_interval(aliases_cfg, logger)
+    alias_reload_state: dict[str, Any] = {"generation": 0, "pending": False}
 
     def alias_reload_loop():
-        logger.debug("(ALIAS) starting alias thread")
+        alias_reload_state["generation"] += 1
+        my_generation = alias_reload_state["generation"]
+        if alias_reload_state["pending"]:
+            logger.warning(
+                "(ALIAS) previous alias download still running after %gs, starting a new "
+                "attempt (gen %s); its result will be discarded if it arrives late",
+                alias_poll_interval,
+                my_generation,
+            )
+        alias_reload_state["pending"] = True
+        logger.debug("(ALIAS) starting alias thread (gen %s)", my_generation)
         # Downloads run in the thread pool (blocking HTTP would stall hotspot pings);
         # the config swap is applied back on the reactor thread.
         d = threads.deferToThread(alias_loader.load_aliases, config)
-        d.addCallback(
-            lambda loaded: DefaultAliasLoader.merge_reload_into_config(
-                config, alias_loader, *loaded
-            )
-        )
-        d.addErrback(
-            lambda failure: logger.warning(
-                "(ALIAS) alias reload failed: %s", failure.getErrorMessage()
-            )
-        )
 
-    task.LoopingCall(alias_reload_loop).start(alias_interval).addErrback(_looping_errback, logger)
+        def _apply(loaded):
+            if my_generation != alias_reload_state["generation"]:
+                logger.info(
+                    "(ALIAS) discarding alias download result from a superseded attempt "
+                    "(gen %s, current gen %s)",
+                    my_generation,
+                    alias_reload_state["generation"],
+                )
+                return
+            alias_reload_state["pending"] = False
+            DefaultAliasLoader.merge_reload_into_config(config, alias_loader, *loaded)
+            _log_alias_health(config, config.get("SYSTEMS", {}), logger)
+
+        def _fail(failure):
+            if my_generation == alias_reload_state["generation"]:
+                alias_reload_state["pending"] = False
+            logger.warning(
+                "(ALIAS) alias reload failed (gen %s): %s", my_generation, failure.getErrorMessage()
+            )
+
+        d.addCallback(_apply)
+        d.addErrback(_fail)
+
+    task.LoopingCall(alias_reload_loop).start(alias_poll_interval).addErrback(_looping_errback, logger)
 
     # SubMapTrimmer (3600s) + save
     def sub_map_trimmer_loop():

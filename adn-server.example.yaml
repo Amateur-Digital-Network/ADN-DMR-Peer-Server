@@ -64,6 +64,11 @@ ALIASES:
   TGID_URL: https://servers.adn.systems/talkgroup_ids.json
   LOCAL_SUBSCRIBER_FILE: local_subcriber_ids.json
   STALE_DAYS: 1
+  # How often (seconds) the server checks whether alias files need (re)downloading.
+  # Independent of STALE_DAYS: a file already fresh is skipped (no network call), but a
+  # failed/missing download is retried on this short cadence instead of waiting a full
+  # STALE_DAYS cycle. Optional, defaults to 900 (15 minutes).
+  POLL_INTERVAL_SEC: 900
   SUB_MAP_FILE: ""
   SERVER_ID_URL: https://servers.adn.systems/server_ids.tsv
   SERVER_ID_FILE: server_ids.tsv

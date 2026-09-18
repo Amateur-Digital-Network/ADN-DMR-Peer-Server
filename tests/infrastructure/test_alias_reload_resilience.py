@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from unittest.mock import patch
 
 from adn_server.infrastructure.persistence.alias_loader import DefaultAliasLoader, try_download
 
@@ -17,10 +18,78 @@ def test_try_download_failure_does_not_erase_existing_file(tmp_path: Path) -> No
     file_name = "subscriber_ids.json"
     full = tmp_path / file_name
     full.write_bytes(b'{"subscribers":[{"id":7300391,"callsign":"CE5RPY"}]}')
-    # stale_sec=0 forces download attempt; bad URL simulates selfcare down
-    result = try_download(tmp_path, file_name, "http://127.0.0.1:1/nope.json", stale_sec=0)
+    # stale_sec=0 forces download attempt; bad URL simulates selfcare down.
+    # max_attempts=1 keeps the test fast; retry behavior is covered separately below.
+    result = try_download(
+        tmp_path, file_name, "http://127.0.0.1:1/nope.json", stale_sec=0, max_attempts=1
+    )
     assert "could not be downloaded" in result or "IOError" in result
     assert full.read_bytes().startswith(b"{")
+
+
+def test_try_download_retries_and_recovers_from_transient_failure(tmp_path: Path) -> None:
+    file_name = "peer_ids.json"
+    calls: list[float] = []
+
+    def _flaky_urlopen(url, context=None, timeout=None):
+        calls.append(timeout)
+        if len(calls) < 3:
+            raise OSError("connection refused")
+        return _FakeResponse(b'{"peers":[{"id":1,"callsign":"X"}]}')
+
+    with patch(
+        "adn_server.infrastructure.persistence.alias_loader.urlopen", side_effect=_flaky_urlopen
+    ):
+        result = try_download(
+            tmp_path,
+            file_name,
+            "https://example.invalid/peer_ids.json",
+            stale_sec=0,
+            max_attempts=3,
+            retry_delay_sec=0,
+        )
+    assert "successfully downloaded" in result
+    assert len(calls) == 3
+    # first attempt uses the longer timeout, retries use the shorter one
+    assert calls[0] == 30
+    assert calls[1] == 10
+
+
+def test_try_download_gives_up_after_max_attempts(tmp_path: Path) -> None:
+    file_name = "peer_ids.json"
+    calls: list[float] = []
+
+    def _always_fails(url, context=None, timeout=None):
+        calls.append(timeout)
+        raise OSError("connection refused")
+
+    with patch(
+        "adn_server.infrastructure.persistence.alias_loader.urlopen", side_effect=_always_fails
+    ):
+        result = try_download(
+            tmp_path,
+            file_name,
+            "https://example.invalid/peer_ids.json",
+            stale_sec=0,
+            max_attempts=3,
+            retry_delay_sec=0,
+        )
+    assert "could not be downloaded" in result
+    assert len(calls) == 3
+
+
+class _FakeResponse:
+    def __init__(self, data: bytes) -> None:
+        self._data = data
+
+    def read(self) -> bytes:
+        return self._data
+
+    def __enter__(self) -> "_FakeResponse":
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
 
 
 def test_merge_reload_keeps_previous_sub_ids_on_empty_reload() -> None:
@@ -56,3 +125,28 @@ def test_load_id_dict_with_backup_uses_bak_on_checksum_mismatch(tmp_path: Path) 
         "subscriber_ids",
     )
     assert loaded.get(7300391) == "GOOD"
+
+
+def test_load_id_dict_with_backup_uses_bak_when_primary_missing(tmp_path: Path) -> None:
+    loader = DefaultAliasLoader()
+    file_name = "subscriber_ids.json"
+    # No primary file at all (e.g. first boot, download never succeeded), only a .bak
+    # from a previous successful run.
+    _write_subscriber_file(tmp_path, f"{file_name}.bak", 7300391, "GOOD")
+    loaded = loader._load_id_dict_with_backup(
+        tmp_path,
+        file_name,
+        None,
+        "subscriber_ids",
+    )
+    assert loaded.get(7300391) == "GOOD"
+
+
+def test_load_server_tsv_with_backup_uses_bak_when_primary_missing(tmp_path: Path) -> None:
+    loader = DefaultAliasLoader()
+    file_name = "server_ids.tsv"
+    (tmp_path / f"{file_name}.bak").write_text(
+        "OPB Net ID\tCountry\n1234\tChile\n", encoding="utf-8"
+    )
+    loaded = loader._load_server_tsv_with_backup(tmp_path, file_name, None)
+    assert loaded.get("1234") == "Chile"
