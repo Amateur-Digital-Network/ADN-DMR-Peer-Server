@@ -45,6 +45,26 @@ def test_reports_missing_security_fields_when_url_set() -> None:
     assert "GLOBAL.PASS_SECURITY" in msg
 
 
+def test_rejects_proxy_and_obp_proxy_same_port() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {
+        "MASTER1": {"MODE": "MASTER"},
+        "OBP1": {
+            "MODE": "OPENBRIDGE",
+            "NETWORK_ID": 73044,
+            "PASSPHRASE": "x",
+            "TARGET_IP": "127.0.0.1",
+            "TARGET_PORT": 62044,
+        },
+    }
+    config["PROXY"] = {"TARGET_SYSTEM": "MASTER1", "LISTEN_PORT": 62032}
+    config["OBP_PROXY"] = {"LISTEN_PORT": 62032}
+    config["DATABASE"] = {"DB_NAME": "x", "DB_USERNAME": "x"}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "PROXY.LISTEN_PORT and OBP_PROXY.LISTEN_PORT" in str(exc.value)
+
+
 def test_collects_multiple_errors() -> None:
     with pytest.raises(ConfigError) as exc:
         validate_config(
