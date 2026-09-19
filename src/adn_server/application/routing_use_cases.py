@@ -81,6 +81,10 @@ from .talker_alias_use_cases import TalkerAliasUseCases
 
 logger = logging.getLogger(__name__)
 
+# A SUB_MAP entry younger than this (seconds) on a non-OPENBRIDGE system means the unit is
+# served by this server, so unit data to it is not fanned out to OpenBridges.
+UNIT_DATA_LOCAL_SUB_MAX_AGE = 900.0
+
 
 class RoutingUseCases(
     RoutingTimerMixin,
@@ -1238,8 +1242,21 @@ class RoutingUseCases(
                 )
 
         # Fan-out to all OBP systems with VER > 1 and dst_id >= 1000000 (legacy ~2286-2295 / ~3088-3097)
+        # ...unless the destination is a subscriber recently seen on a LOCAL (non-OPENBRIDGE)
+        # system: SUB_MAP below already delivers it here. Flooding every OpenBridge with e.g.
+        # each ARS/LRRP answer of a D-APRS gateway to a local MOTOTRBO multiplies traffic by
+        # the number of bridges, and remote masters that mis-file those frames create a
+        # dynamic talkgroup named after the radio id.
         protocols = self._get_protocols() if self._get_protocols else {}
+        _local_sub = self._config.get("_SUB_MAP", {}).get(dst_id)
+        _dst_is_fresh_local_sub = bool(
+            _local_sub
+            and systems_cfg.get(_local_sub[0], {}).get("MODE") != "OPENBRIDGE"
+            and pkt_time - _local_sub[2] < UNIT_DATA_LOCAL_SUB_MAX_AGE
+        )
         for sys_name, sys_cfg in systems_cfg.items():
+            if _dst_is_fresh_local_sub:
+                break
             if sys_name == system_name:
                 continue
             if sys_name == "DATA-GATEWAY":
