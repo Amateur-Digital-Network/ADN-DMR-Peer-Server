@@ -29,8 +29,10 @@ import csv
 import hashlib
 import json
 import logging
+import os
 import shutil
 import ssl
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -51,6 +53,7 @@ def try_download(
     first_timeout: float = 30,
     retry_timeout: float = 10,
     retry_delay_sec: float = 3,
+    expected_checksum: str | None = None,
 ) -> str:
     """Legacy try_download: download file from url if missing or older than stale_sec.
 
@@ -73,7 +76,7 @@ def try_download(
         return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
 
     data: bytes | None = None
-    last_error: OSError | None = None
+    last_error: Exception | None = None
     for attempt in range(1, max_attempts + 1):
         timeout = first_timeout if attempt == 1 else retry_timeout
         try:
@@ -82,10 +85,13 @@ def try_download(
             ctx.verify_mode = ssl.CERT_NONE
             with urlopen(url, context=ctx, timeout=timeout) as response:
                 data = response.read()
+            if expected_checksum and hashlib.blake2b(data).hexdigest() != expected_checksum:
+                raise ValueError("downloaded data does not match expected checksum")
             last_error = None
             break
-        except OSError as e:
+        except (OSError, ValueError) as e:
             last_error = e
+            data = None
             if attempt < max_attempts:
                 logger.warning(
                     "(ALIAS) ID ALIAS MAPPER: '%s' download attempt %d/%d failed (%s), retrying in %gs",
@@ -93,13 +99,20 @@ def try_download(
                 )
                 if retry_delay_sec:
                     time.sleep(retry_delay_sec)
+    if isinstance(last_error, ValueError):
+        return f"ID ALIAS MAPPER: '{file_name}' could not be downloaded, checksum mismatch after {max_attempts} attempts"
     if last_error is not None:
         return f"ID ALIAS MAPPER: '{file_name}' could not be downloaded due to an IOError: {last_error}"
     if not data or data == b"{}":
         return f"ID ALIAS MAPPER: '{file_name}' file not written because downloaded data is empty"
     try:
         full.parent.mkdir(parents=True, exist_ok=True)
-        full.write_bytes(data)
+        tmp = full.with_name(f"{full.name}.tmp.{os.getpid()}.{threading.get_ident()}")
+        try:
+            tmp.write_bytes(data)
+            tmp.replace(full)
+        finally:
+            tmp.unlink(missing_ok=True)
     except OSError as e:
         return f"ID ALIAS mapper '{file_name}' file could not be written: {e}"
     return f"ID ALIAS MAPPER: '{file_name}' successfully downloaded"
@@ -129,6 +142,15 @@ def _blake2bsum(file_path: Path) -> str:
     return h.hexdigest()
 
 
+def _atomic_copy(src: Path, dst: Path) -> None:
+    tmp = dst.with_name(f"{dst.name}.tmp.{os.getpid()}.{threading.get_ident()}")
+    try:
+        shutil.copy(src, tmp)
+        tmp.replace(dst)
+    finally:
+        tmp.unlink(missing_ok=True)
+
+
 class DefaultAliasLoader(AliasLoader):
     """Load aliases from JSON files and optional downloads. Legacy mk_aliases."""
 
@@ -151,17 +173,22 @@ class DefaultAliasLoader(AliasLoader):
             if aliases.get("CHECKSUM_FILE") and aliases.get("CHECKSUM_URL"):
                 result = try_download(path, aliases["CHECKSUM_FILE"], aliases.get("CHECKSUM_URL", ""), stale_sec)
                 _log_download_result(result)
-            for key, url_key in [
-                ("PEER_FILE", "PEER_URL"),
-                ("SUBSCRIBER_FILE", "SUBSCRIBER_URL"),
-                ("TGID_FILE", "TGID_URL"),
-                ("SERVER_ID_FILE", "SERVER_ID_URL"),
+            checksums = self._load_checksums(path, aliases.get("CHECKSUM_FILE"))
+            for key, url_key, checksum_key in [
+                ("PEER_FILE", "PEER_URL", "peer_ids"),
+                ("SUBSCRIBER_FILE", "SUBSCRIBER_URL", "subscriber_ids"),
+                ("TGID_FILE", "TGID_URL", "talkgroup_ids"),
+                ("SERVER_ID_FILE", "SERVER_ID_URL", "server_ids"),
             ]:
                 url = aliases.get(url_key)
                 if url and aliases.get(key):
-                    result = try_download(path, aliases[key], url, stale_sec)
+                    result = try_download(
+                        path, aliases[key], url, stale_sec,
+                        expected_checksum=checksums.get(checksum_key),
+                    )
                     _log_download_result(result)
-        checksums = self._load_checksums(path, aliases.get("CHECKSUM_FILE"))
+        else:
+            checksums = self._load_checksums(path, aliases.get("CHECKSUM_FILE"))
         peer_file = aliases.get("PEER_FILE", "peer_ids.json")
         sub_file = aliases.get("SUBSCRIBER_FILE", "subscriber_ids.json")
         tgid_file = aliases.get("TGID_FILE", "talkgroup_ids.json")
@@ -314,7 +341,7 @@ class DefaultAliasLoader(AliasLoader):
             logger.warning("(ALIAS) ID ALIAS MAPPER: %s dictionary is empty", name)
         if loaded_from_primary and full.is_file():
             try:
-                shutil.copy(full, bak)
+                _atomic_copy(full, bak)
             except OSError as g:
                 logger.info(
                     "(ALIAS) ID ALIAS MAPPER: couldn't make backup copy of %s file %s",
@@ -390,7 +417,7 @@ class DefaultAliasLoader(AliasLoader):
             logger.warning("(ALIAS) ID ALIAS MAPPER: server_ids dictionary is empty")
         if loaded_from_primary and full.is_file():
             try:
-                shutil.copy(full, bak)
+                _atomic_copy(full, bak)
             except OSError as g:
                 logger.info(
                     "(ALIAS) ID ALIAS MAPPER: couldn't make backup copy of server_ids file %s",
