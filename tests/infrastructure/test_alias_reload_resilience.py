@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
+import threading
 from pathlib import Path
 from unittest.mock import patch
 
@@ -53,6 +55,49 @@ def test_try_download_retries_and_recovers_from_transient_failure(tmp_path: Path
     # first attempt uses the longer timeout, retries use the shorter one
     assert calls[0] == 30
     assert calls[1] == 10
+
+
+def test_try_download_rejects_data_that_fails_checksum(tmp_path: Path) -> None:
+    file_name = "server_ids.tsv"
+    full = tmp_path / file_name
+    full.write_bytes(b"old-good-content")
+
+    with patch(
+        "adn_server.infrastructure.persistence.alias_loader.urlopen",
+        return_value=_FakeResponse(b"corrupted-content"),
+    ):
+        result = try_download(
+            tmp_path,
+            file_name,
+            "https://example.invalid/server_ids.tsv",
+            stale_sec=0,
+            max_attempts=1,
+            expected_checksum="deadbeef",
+        )
+    assert "checksum mismatch" in result
+    assert full.read_bytes() == b"old-good-content"
+    assert list(tmp_path.glob(f"{file_name}.tmp.*")) == []
+
+
+def test_try_download_accepts_data_matching_checksum(tmp_path: Path) -> None:
+    file_name = "server_ids.tsv"
+    payload = b"good-content"
+    digest = hashlib.blake2b(payload).hexdigest()
+
+    with patch(
+        "adn_server.infrastructure.persistence.alias_loader.urlopen",
+        return_value=_FakeResponse(payload),
+    ):
+        result = try_download(
+            tmp_path,
+            file_name,
+            "https://example.invalid/server_ids.tsv",
+            stale_sec=0,
+            max_attempts=1,
+            expected_checksum=digest,
+        )
+    assert "successfully downloaded" in result
+    assert (tmp_path / file_name).read_bytes() == payload
 
 
 def test_try_download_gives_up_after_max_attempts(tmp_path: Path) -> None:
@@ -150,3 +195,35 @@ def test_load_server_tsv_with_backup_uses_bak_when_primary_missing(tmp_path: Pat
     )
     loaded = loader._load_server_tsv_with_backup(tmp_path, file_name, None)
     assert loaded.get("1234") == "Chile"
+
+
+def test_concurrent_downloads_of_same_file_never_corrupt_it(tmp_path: Path) -> None:
+    file_name = "peer_ids.json"
+    payload_a = b"A" * 500_000
+    payload_b = b"B" * 700_000
+
+    def _urlopen_for(payload):
+        def _fake(url, context=None, timeout=None):
+            return _FakeResponse(payload)
+        return _fake
+
+    barrier = threading.Barrier(2)
+
+    def _run(payload):
+        with patch(
+            "adn_server.infrastructure.persistence.alias_loader.urlopen",
+            side_effect=_urlopen_for(payload),
+        ):
+            barrier.wait()
+            try_download(tmp_path, file_name, "https://example.invalid/peer_ids.json", stale_sec=0)
+
+    t1 = threading.Thread(target=_run, args=(payload_a,))
+    t2 = threading.Thread(target=_run, args=(payload_b,))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    final = (tmp_path / file_name).read_bytes()
+    assert final == payload_a or final == payload_b
+    assert list(tmp_path.glob(f"{file_name}.tmp.*")) == []
