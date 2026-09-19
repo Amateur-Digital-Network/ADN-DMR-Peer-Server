@@ -4,6 +4,14 @@ All notable changes to **adn-server** are documented here.
 
 <!-- version list -->
 
+## v2.5.6 (2026-09-19)
+
+### Bug Fixes
+
+- Write alias downloads atomically and validate checksum before persisting
+  ([`aad30ba`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/aad30baebab0bf5195b9a5313fa5c7a6e82f23e6))
+
+
 ## v2.5.5 (2026-09-18)
 
 ### Bug Fixes
