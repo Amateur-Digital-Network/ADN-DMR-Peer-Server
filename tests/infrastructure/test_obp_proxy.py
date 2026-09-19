@@ -355,3 +355,100 @@ def test_build_obp_bridge_registry_starts_inject_protocol() -> None:
     )
     assert proto.started is True
     assert proto.transport is not None
+
+
+def _shared_passphrase_registry() -> tuple[ObpBridgeRegistry, dict[str, _RecordingObp]]:
+    """Two bridges, one passphrase (ADN Systems mesh), different peers."""
+    registry = ObpBridgeRegistry()
+    protos: dict[str, _RecordingObp] = {}
+    for name, network, peer in (
+        ("OBP-FR", 20840, ("82.65.127.86", 62201)),
+        ("OBP-PT", 26811, ("85.241.222.7", 62268)),
+    ):
+        proto = _RecordingObp()
+        protos[name] = proto
+        registry.register(
+            ObpBridgeEntry(
+                system_name=name,
+                network_id=bytes_4(network),
+                passphrase=_PASS,
+                sink=InProcessObpSink(proto),
+                reply_transport=ObpIngressReplyTransport(_RecordingTransport()),
+                sys_cfg={"TARGET_SOCK": peer, "TARGET_IP": peer[0], "TARGET_PORT": peer[1]},
+            )
+        )
+    return registry, protos
+
+
+def test_control_frame_goes_to_the_bridge_that_sent_it() -> None:
+    """BCKA carries no NETWORK_ID: with a shared passphrase, use the peer address."""
+    registry, protos = _shared_passphrase_registry()
+    demux = ObpFanInDemux(registry)
+    transport = _RecordingTransport()
+    peer = ("85.241.222.7", 62268)
+    demux.deliver(build_bcka(_PASS), peer, local_port=62032, transport=transport)
+    assert protos["OBP-PT"].packets, "the keepalive was attributed to the wrong bridge"
+    assert not protos["OBP-FR"].packets
+
+
+def test_control_frame_matches_peer_answering_from_another_port() -> None:
+    """A peer whose own fan-in answers from LISTEN_PORT still resolves by IP."""
+    registry, protos = _shared_passphrase_registry()
+    demux = ObpFanInDemux(registry)
+    demux.deliver(
+        build_bcka(_PASS),
+        ("85.241.222.7", 62032),
+        local_port=62032,
+        transport=_RecordingTransport(),
+    )
+    assert protos["OBP-PT"].packets
+    assert not protos["OBP-FR"].packets
+
+
+def test_control_frame_unknown_peer_falls_back_to_passphrase() -> None:
+    registry, protos = _shared_passphrase_registry()
+    demux = ObpFanInDemux(registry)
+    demux.deliver(
+        build_bcka(_PASS),
+        ("203.0.113.9", 62044),
+        local_port=62032,
+        transport=_RecordingTransport(),
+    )
+    assert protos["OBP-FR"].packets or protos["OBP-PT"].packets
+
+
+def test_reply_transport_prefers_pinned_socket() -> None:
+    fanin = _RecordingTransport()
+    legacy = _RecordingTransport()
+    legacy.port = 62268
+    ingress = _RecordingTransport()
+    reply = ObpIngressReplyTransport(fanin)
+    reply.pin(legacy)
+    reply.note_ingress(ingress)
+    reply.write(b"ping", _ADDR)
+    assert legacy.sent and not fanin.sent and not ingress.sent
+
+
+def test_yaml_loader_keeps_obp_proxy_block(tmp_path) -> None:
+    """OBP_PROXY was dropped while normalizing top-level keys, so ENABLED/LISTEN_PORT
+    in adn-server.yaml were silently ignored."""
+    import yaml as _yaml
+
+    from adn_server.infrastructure.config_loader import YamlConfigLoader
+
+    raw = minimal_valid_config()
+    raw["SYSTEMS"]["OBP-CL"] = {
+        "MODE": "OPENBRIDGE",
+        "ENABLED": True,
+        "PORT": 62044,
+        "NETWORK_ID": 73044,
+        "PASSPHRASE": "test-passphrase",
+        "TARGET_IP": "127.0.0.1",
+        "TARGET_PORT": 62030,
+    }
+    raw["OBP_PROXY"] = {"ENABLED": False, "LISTEN_PORT": 62099}
+    path = tmp_path / "adn-server.yaml"
+    path.write_text(_yaml.safe_dump(raw), encoding="utf-8")
+    config = YamlConfigLoader().load(str(path))
+    assert config.get("OBP_PROXY") == {"ENABLED": False, "LISTEN_PORT": 62099}
+    assert not obp_proxy_enabled(config)

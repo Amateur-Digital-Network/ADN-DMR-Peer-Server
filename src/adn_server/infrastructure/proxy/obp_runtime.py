@@ -82,6 +82,7 @@ def build_obp_bridge_registry(
             sink=InProcessObpSink(proto),
             reply_transport=reply,
             legacy_port=legacy_port if legacy_port and legacy_port > 0 else None,
+            sys_cfg=sys_cfg,
         )
         registry.register(entry)
         proto.transport = reply  # type: ignore[assignment]
@@ -151,7 +152,7 @@ def _start_listeners(
             seen_ports.add(entry.legacy_port)
             sys_cfg = config.get("SYSTEMS", {}).get(entry.system_name, {})
             bind_ip = str(sys_cfg.get("_REPORT_BIND_IP") or runtime["listen_ip"] or "")
-            _, legacy_port = listen_obp_fanin(
+            legacy_proto, legacy_port = listen_obp_fanin(
                 reactor,
                 bind_ip,
                 entry.legacy_port,
@@ -160,6 +161,10 @@ def _start_listeners(
                 logger=logger,
             )
             state.udp_ports.append(legacy_port)
+            # Egress leaves through this bridge's own socket, so remote peers keep
+            # seeing the port they are configured against instead of LISTEN_PORT.
+            if legacy_proto.transport is not None:
+                entry.reply_transport.pin(legacy_proto.transport)
             logger.info(
                 "(OBP_PROXY) Legacy port %s:%s -> %s",
                 bind_ip or "*",

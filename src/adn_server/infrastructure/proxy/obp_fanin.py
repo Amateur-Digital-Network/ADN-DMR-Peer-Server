@@ -46,17 +46,28 @@ class _ObpReceiver(Protocol):
 
 
 class ObpIngressReplyTransport:
-    """Route OBP egress through the fan-in socket that last received for this bridge."""
+    """Route OBP egress through this bridge's own socket.
+
+    Priority: pinned socket (the bridge's legacy listener, when bound) > socket that
+    last received for this bridge > shared fan-in. Leaving egress on the shared fan-in
+    makes remote peers learn LISTEN_PORT as our source and reply there, where control
+    frames (no NETWORK_ID) can only be told apart by passphrase.
+    """
 
     def __init__(self, fallback: _DatagramWriter) -> None:
         self._fallback = fallback
         self._active: _DatagramWriter | None = None
+        self._pinned: _DatagramWriter | None = None
+
+    def pin(self, transport: _DatagramWriter) -> None:
+        """Bind egress to this bridge's own socket."""
+        self._pinned = transport
 
     def note_ingress(self, transport: _DatagramWriter) -> None:
         self._active = transport
 
     def write(self, data: bytes, addr: tuple[str, int]) -> None:
-        transport = self._active or self._fallback
+        transport = self._pinned or self._active or self._fallback
         transport.write(data, addr)
 
 
@@ -78,6 +89,8 @@ class ObpBridgeEntry:
     sink: InProcessObpSink
     reply_transport: ObpIngressReplyTransport
     legacy_port: int | None = None
+    # Live SYSTEMS.<name> dict; used to tell bridges apart by peer address.
+    sys_cfg: dict[str, Any] | None = None
 
 
 @dataclass
@@ -93,6 +106,31 @@ class ObpBridgeRegistry:
         self.by_network_id[entry.network_id] = entry.system_name
         if entry.legacy_port is not None:
             self.by_legacy_port[entry.legacy_port] = entry.system_name
+
+    def bridges_by_peer(self, addr: tuple[str, int] | None) -> list[tuple[str, ObpBridgeEntry]]:
+        """Bridges ordered by how well their configured peer matches ``addr``.
+
+        Exact IP:port first, then same IP (a peer that answers from another local port,
+        e.g. its own fan-in), then the rest in registration order.
+        """
+        items = list(self.bridges.items())
+        if addr is None:
+            return items
+        exact: list[tuple[str, ObpBridgeEntry]] = []
+        same_host: list[tuple[str, ObpBridgeEntry]] = []
+        rest: list[tuple[str, ObpBridgeEntry]] = []
+        for name, entry in items:
+            cfg = entry.sys_cfg or {}
+            sock = cfg.get("TARGET_SOCK")
+            host = sock[0] if isinstance(sock, tuple) else cfg.get("TARGET_IP")
+            port = sock[1] if isinstance(sock, tuple) else cfg.get("TARGET_PORT")
+            if host == addr[0] and port == addr[1]:
+                exact.append((name, entry))
+            elif host == addr[0]:
+                same_host.append((name, entry))
+            else:
+                rest.append((name, entry))
+        return exact + same_host + rest
 
     def clear(self) -> None:
         self.by_network_id.clear()
@@ -127,7 +165,7 @@ class ObpFanInDemux:
         if system_name is None:
             system_name = self._lookup_by_network_id(data)
         if system_name is None:
-            system_name = self._lookup_control(data)
+            system_name = self._lookup_control(data, addr)
         if system_name is None:
             if self.debug:
                 self._log.debug(
@@ -162,11 +200,19 @@ class ObpFanInDemux:
         network_id = data[11:15]
         return self._registry.by_network_id.get(network_id)
 
-    def _lookup_control(self, data: bytes) -> str | None:
+    def _lookup_control(self, data: bytes, addr: tuple[str, int] | None = None) -> str | None:
+        """Resolve a control frame (BCKA/BCSQ/BCST/BCVE) to a bridge.
+
+        These frames carry no NETWORK_ID, so the only in-band discriminator is the
+        passphrase — and a mesh where every bridge shares one passphrase (as ADN
+        Systems does) would always resolve to whichever bridge is registered first.
+        Try the bridges whose peer address matches the datagram source before falling
+        back to the plain passphrase scan.
+        """
         if len(data) < 4:
             return None
         opcode = data[:4]
-        for name, entry in self._registry.bridges.items():
+        for name, entry in self._registry.bridges_by_peer(addr):
             passphrase = entry.passphrase
             if opcode == BCKA and verify_bcka(data, passphrase):
                 return name
