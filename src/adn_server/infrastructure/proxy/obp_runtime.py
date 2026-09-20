@@ -37,6 +37,7 @@ from adn_server.infrastructure.proxy.obp_fanin import (
     ObpFanInDemux,
     ObpIngressReplyTransport,
     listen_obp_fanin,
+    peer_sock_from_config,
 )
 
 
@@ -82,6 +83,8 @@ def build_obp_bridge_registry(
             sink=InProcessObpSink(proto),
             reply_transport=reply,
             legacy_port=legacy_port if legacy_port and legacy_port > 0 else None,
+            sys_cfg=sys_cfg,
+            peer_hint=peer_sock_from_config(sys_cfg),
         )
         registry.register(entry)
         proto.transport = reply  # type: ignore[assignment]
@@ -98,6 +101,8 @@ class ObpProxyServiceState:
     demux: ObpFanInDemux
     registry: ObpBridgeRegistry
     udp_ports: list[Any] = field(default_factory=list)
+    # Bound legacy port -> its own transport, so egress can be re-pinned on reload.
+    legacy_transports: dict[int, Any] = field(default_factory=dict)
     listen_port: int = 62032
     listen_ip: str = ""
     bind_legacy_ports: bool = True
@@ -110,7 +115,24 @@ class ObpProxyServiceState:
             if port is not None:
                 deferreds.append(port.stopListening())
         self.udp_ports.clear()
+        self.legacy_transports.clear()
         return deferreds
+
+
+def pin_legacy_egress(state: ObpProxyServiceState) -> None:
+    """Pin each bridge's egress to its own bound socket.
+
+    Egress leaves through the bridge's own socket, so remote peers keep seeing the
+    port they are configured against instead of LISTEN_PORT. Must run again after
+    every registry rebuild (SIGHUP), because a rebuild creates fresh reply
+    transports that would otherwise fall back to the shared fan-in socket.
+    """
+    for entry in state.registry.bridges.values():
+        if entry.legacy_port is None:
+            continue
+        transport = state.legacy_transports.get(entry.legacy_port)
+        if transport is not None:
+            entry.reply_transport.pin(transport)
 
 
 def _start_listeners(
@@ -151,7 +173,7 @@ def _start_listeners(
             seen_ports.add(entry.legacy_port)
             sys_cfg = config.get("SYSTEMS", {}).get(entry.system_name, {})
             bind_ip = str(sys_cfg.get("_REPORT_BIND_IP") or runtime["listen_ip"] or "")
-            _, legacy_port = listen_obp_fanin(
+            legacy_proto, legacy_port = listen_obp_fanin(
                 reactor,
                 bind_ip,
                 entry.legacy_port,
@@ -160,12 +182,15 @@ def _start_listeners(
                 logger=logger,
             )
             state.udp_ports.append(legacy_port)
+            if legacy_proto.transport is not None:
+                state.legacy_transports[entry.legacy_port] = legacy_proto.transport
             logger.info(
                 "(OBP_PROXY) Legacy port %s:%s -> %s",
                 bind_ip or "*",
                 entry.legacy_port,
                 entry.system_name,
             )
+        pin_legacy_egress(state)
 
 
 def start_obp_proxy_service(
@@ -224,14 +249,17 @@ def apply_obp_proxy_config_reload(
         primary_proto = getattr(state.udp_ports[0], "protocol", None)
         transport = getattr(primary_proto, "transport", None) if primary_proto is not None else None
         if transport is not None:
+            # Listeners are not rebound here, so the registry must describe the ports
+            # that are actually bound, not the ones the new config asks for.
             state.registry = build_obp_bridge_registry(
                 config,
                 protocols,
-                bind_legacy_ports=incoming["bind_legacy_ports"],
-                listen_port=incoming["listen_port"],
+                bind_legacy_ports=state.bind_legacy_ports,
+                listen_port=state.listen_port,
                 primary_transport=transport,
             )
             state.demux._registry = state.registry  # noqa: SLF001
+            pin_legacy_egress(state)
     if bind_changed:
         logger.warning(
             "(CONFIG-RELOAD) OBP_PROXY bind change ignored at runtime "
@@ -254,5 +282,6 @@ __all__ = [
     "ObpProxyServiceState",
     "apply_obp_proxy_config_reload",
     "build_obp_bridge_registry",
+    "pin_legacy_egress",
     "start_obp_proxy_service",
 ]

@@ -110,6 +110,10 @@ class YamlConfigLoader:
             "DATABASE": data.get("DATABASE", {}),
             "SELF_SERVICE": data.get("SELF_SERVICE", {}),
         }
+        # OBP_PROXY is optional: keep it only when present so callers can tell
+        # "absent" (defaults apply) from "present but disabled".
+        if isinstance(data.get("OBP_PROXY"), dict):
+            config["OBP_PROXY"] = data["OBP_PROXY"]
         apply_proxy_env_overrides(config)
         # Ensure REPORT_CLIENTS is list
         if "REPORT_CLIENTS" in config["REPORTS"] and isinstance(config["REPORTS"]["REPORT_CLIENTS"], str):
