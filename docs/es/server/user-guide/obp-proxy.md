@@ -53,9 +53,12 @@ contra tu propio `adn-server.yaml`. No se envía nada ni se abre ningún puerto,
 así que el servidor puede seguir funcionando:
 
 ```bash
-tcpdump -i any -n -w /tmp/obp.pcap udp port 62201 or udp port 62268   # con un minuto sobra
+tcpdump -i any -n -s 0 -w /tmp/obp.pcap 'udp and portrange 62000-63000'   # con un minuto sobra
 adn-server -c adn-server.yaml --replay /tmp/obp.pcap
 ```
+
+Captura un rango de puertos, no una lista: un peer que contesta desde donde no
+se espera es justo el caso que interesa mirar, y un filtro estrecho lo esconde.
 
 Cada trama vuelve con el bridge al que pertenece y un veredicto:
 
@@ -74,8 +77,19 @@ Cada trama vuelve con el bridge al que pertenece y un veredicto:
 ```
 
 `unmatched` significa que ningún bridge habilitado pudo verificar la trama con
-su passphrase. `--system OBP-FR` mira un solo enlace, `--replay-limit N` corta
-antes y `--replay-summary` deja solo el recuento. Solo pcap clásico; un pcapng
-se convierte con `editcap -F pcap in.pcapng out.pcap`.
+su passphrase, y `outbound` es lo que ha enviado este servidor — una captura sin
+filtrar lleva las dos direcciones y solo se juzga lo que llegó
+(`--replay-both-directions` juzga también el resto). `--system OBP-FR` mira un
+solo enlace, `--replay-limit N` corta antes y `--replay-summary` deja solo el
+recuento. Solo pcap clásico; un pcapng se convierte con
+`editcap -F pcap in.pcapng out.pcap`.
+
+Dos cosas que el informe no es. Termina donde empieza el enrutado: en una malla
+la misma llamada llega legítimamente por varios bridges a la vez, y es el
+control de bucles —después, en routing— quien se queda con una y descarta el
+resto, así que una llamada que el servidor registró una vez puede aparecer aquí
+entregada en más de un enlace. Y las tablas de alias y la lista de server-ids se
+cargan en ejecución, no del YAML, así que sin conexión esas dos comprobaciones
+se saltan en vez de adivinarse.
 
 Ver también: [protocolo OpenBridge](../protocols/openbridge.md).

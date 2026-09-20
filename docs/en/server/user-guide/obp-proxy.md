@@ -55,9 +55,13 @@ your own `adn-server.yaml`. Nothing is sent and no port is bound, so the server
 can keep running:
 
 ```bash
-tcpdump -i any -n -w /tmp/obp.pcap udp port 62201 or udp port 62268   # a minute is plenty
+tcpdump -i any -n -s 0 -w /tmp/obp.pcap 'udp and portrange 62000-63000'   # a minute is plenty
 adn-server -c adn-server.yaml --replay /tmp/obp.pcap
 ```
+
+Capture a port range rather than a list of ports: a peer that answers from
+somewhere unexpected is exactly the case worth looking at, and a narrow filter
+hides it.
 
 Each frame comes back with the bridge it belongs to and a verdict:
 
@@ -75,9 +79,18 @@ Each frame comes back with the bridge it belongs to and a verdict:
        1  unmatched
 ```
 
-`unmatched` means no enabled bridge could verify the frame with its passphrase.
-Add `--system OBP-FR` to look at one link, `--replay-limit N` to stop early and
-`--replay-summary` for the tally alone. Classic pcap only; convert a pcapng with
-`editcap -F pcap in.pcapng out.pcap`.
+`unmatched` means no enabled bridge could verify the frame with its passphrase,
+and `outbound` is what this server sent — an unfiltered capture holds both
+directions and only what arrived is judged (`--replay-both-directions` judges
+the rest too). Add `--system OBP-FR` to look at one link, `--replay-limit N` to
+stop early and `--replay-summary` for the tally alone. Classic pcap only;
+convert a pcapng with `editcap -F pcap in.pcapng out.pcap`.
+
+Two things the report is not. It stops where routing begins: on a mesh the same
+call legitimately arrives on several bridges at once, and it is loop control —
+later, in routing — that keeps one and drops the rest, so a call the server
+logged once may show as delivered on more than one link here. And the alias
+tables and the server-id list are loaded at runtime, not from the YAML, so
+offline those two checks are skipped rather than guessed.
 
 See also: [OpenBridge protocol](../protocols/openbridge.md).
