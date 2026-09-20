@@ -79,6 +79,18 @@ from ...domain import bytes_3, bytes_4, int_id
 from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
 from ...domain.hbp_protocol import normalize_fixed_width_ascii, normalize_fixed_width_bytes
+from ...domain.mesh_admission import (
+    AclRules,
+    AdmissionContext,
+    MeshEnvelope,
+    ObpFrame,
+    Rejection,
+    admit_dmrd_v1,
+    admit_dmre_v5,
+    call_attributes,
+    check_network_id,
+    server_prefix,
+)
 from ...domain.mesh_routing import MeshEgress, MeshIngress, PeerMeshConfig
 from ...domain.talker_alias import (
     DMRA_PACKET_LEN,
@@ -2142,6 +2154,38 @@ class HBPProtocol(DatagramProtocol):
         self._config["TARGET_PORT"] = p
         self._config["TARGET_SOCK"] = (h, p)
 
+    def _obp_admission_context(self) -> AdmissionContext:
+        """Snapshot of everything the admission rules need, read once per frame."""
+        _global = self._CONFIG.get("GLOBAL", {})
+        return AdmissionContext(
+            stunned="STUN" in self._CONFIG,
+            acl_check=self._router.acl_check if self._router else None,
+            global_rules=AclRules(
+                enabled=bool(_global.get("USE_ACL")),
+                sub_acl=_global.get("SUB_ACL", (True, [])),
+                tg1_acl=_global.get("TG1_ACL", (True, [])),
+            ),
+            system_rules=AclRules(
+                enabled=bool(self._config.get("USE_ACL")),
+                sub_acl=self._config.get("SUB_ACL", (True, [])),
+                tg1_acl=self._config.get("TG1_ACL", (True, [])),
+            ),
+            server_id=server_prefix(_global.get("SERVER_ID", 0)),
+            validate_server_ids=bool(_global.get("VALIDATE_SERVER_IDS")),
+            known_server_prefixes=self._CONFIG.get("_SERVER_IDS", set()),
+            resolve_server_id=self.validate_obp_source_server_id,
+        )
+
+    def _obp_reject(self, rejection: Rejection, _dst_id: bytes, _stream_id: bytes) -> None:
+        """Apply one admission decision: log it (once per stream) and quench the peer."""
+        if rejection.log_once:
+            if _stream_id in self._laststrid:
+                return
+            self._laststrid.append(_stream_id)
+        logger.log(rejection.level, rejection.message, *rejection.args)
+        if rejection.quench:
+            self._obp_send_bcsq(_dst_id, _stream_id)
+
     def _obp_send_bcsq(self, _tgid: bytes, _stream_id: bytes) -> None:
         """Legacy send_bcsq: BCSQ + tgid + stream_id + HMAC-SHA1. Uses TARGET_SOCK (IP only)."""
         _addr = self._config.get("TARGET_SOCK")
@@ -2178,67 +2222,35 @@ class HBPProtocol(DatagramProtocol):
                 _data = _ingress.voice_frame
                 self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id)
                 _peer_id = _data[11:15]
-                if self._config.get("NETWORK_ID") != _peer_id:
-                    if _stream_id not in self._laststrid:
-                        logger.error("(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s", self._system, int_id(self._config.get("NETWORK_ID", b"")), int_id(_peer_id))
-                        self._laststrid.append(_stream_id)
+                _dst_id = _data[8:11]
+                _rejection = check_network_id(
+                    self._system,
+                    _stream_id,
+                    expected=self._config.get("NETWORK_ID", b""),
+                    received=_peer_id,
+                )
+                if _rejection is not None:
+                    self._obp_reject(_rejection, _dst_id, _stream_id)
                     return
                 _seq = _data[4]
                 _rf_src = _data[5:8]
-                _dst_id = _data[8:11]
-                _bits = _data[15]
-                _slot = 2 if (_bits & 0x80) else 1
-                if _bits & 0x40:
-                    _call_type = "unit"
-                elif (_bits & 0x23) == 0x23:
-                    _call_type = "vcsbk"
-                else:
-                    _call_type = "group"
-                _frame_type = (_bits & 0x30) >> 4
-                _dtype_vseq = _bits & 0xF
-                if _slot != 1:
-                    logger.error("(%s) OpenBridge packet discarded because it was not received on slot 1. SID: %s, TGID %s", self._system, int_id(_rf_src), int_id(_dst_id))
+                _attrs = call_attributes(_data[15])
+                _slot = _attrs.slot
+                _call_type = _attrs.call_type
+                _frame_type = _attrs.frame_type
+                _dtype_vseq = _attrs.dtype_vseq
+                _frame = ObpFrame(
+                    system=self._system,
+                    stream_id=_stream_id,
+                    rf_src=_rf_src,
+                    dst_id=_dst_id,
+                    slot=_slot,
+                    call_type=_call_type,
+                )
+                _rejection = admit_dmrd_v1(_frame, self._obp_admission_context())
+                if _rejection is not None:
+                    self._obp_reject(_rejection, _dst_id, _stream_id)
                     return
-                if "STUN" in self._CONFIG:
-                    if _stream_id not in self._laststrid:
-                        logger.warning("(%s) Bridge STUNned, discarding", self._system)
-                        self._laststrid.append(_stream_id)
-                    return
-                _int_dst_id = int_id(_dst_id)
-                if _call_type != "unit":
-                    if _int_dst_id <= 79 or (_int_dst_id >= 9990 and _int_dst_id <= 9999) or (_int_dst_id >= 92 and _int_dst_id <= 199) or _int_dst_id == 900999:
-                        if _stream_id not in self._laststrid:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL TG FILTER", self._system, int_id(_stream_id), _int_dst_id)
-                            self._obp_send_bcsq(_dst_id, _stream_id)
-                            self._laststrid.append(_stream_id)
-                        return
-                _global = self._CONFIG.get("GLOBAL", {})
-                if self._router and _global.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, _global.get("SUB_ACL", (True, []))):
-                        if _stream_id not in self._laststrid:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._obp_send_bcsq(_dst_id, _stream_id)
-                            self._laststrid.append(_stream_id)
-                        return
-                    if _slot == 1 and not self._router.acl_check(_dst_id, _global.get("TG1_ACL", (True, []))):
-                        if _stream_id not in self._laststrid:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._obp_send_bcsq(_dst_id, _stream_id)
-                            self._laststrid.append(_stream_id)
-                        return
-                if self._router and self._config.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, self._config.get("SUB_ACL", (True, []))):
-                        if _stream_id not in self._laststrid:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._obp_send_bcsq(_dst_id, _stream_id)
-                            self._laststrid.append(_stream_id)
-                        return
-                    if not self._router.acl_check(_dst_id, self._config.get("TG1_ACL", (True, []))):
-                        if _stream_id not in self._laststrid:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._obp_send_bcsq(_dst_id, _stream_id)
-                            self._laststrid.append(_stream_id)
-                        return
                 if _call_type == "group" and _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
                     logger.info(
                         "(%s) CALL RX (OBP) src %s -> TG %s slot %s",
@@ -2306,128 +2318,52 @@ class HBPProtocol(DatagramProtocol):
             _stream_id = _data[16:20]
             self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id)
             _peer_id = _data[11:15]
-            if self._config.get("NETWORK_ID") != _peer_id:
-                if _stream_id not in self._laststrid:
-                    logger.error("(%s) OpenBridge DMRE discarded because NETWORK_ID: %s Does not match sent Peer ID: %s", self._system, int_id(self._config.get("NETWORK_ID", b"")), int_id(_peer_id))
-                    self._laststrid.append(_stream_id)
+            _dst_id = _data[8:11]
+            _rejection = check_network_id(
+                self._system,
+                _stream_id,
+                expected=self._config.get("NETWORK_ID", b""),
+                received=_peer_id,
+                dmre=True,
+            )
+            if _rejection is not None:
+                self._obp_reject(_rejection, _dst_id, _stream_id)
                 return
             _seq = _data[4]
             _rf_src = _data[5:8]
-            _dst_id = _data[8:11]
-            _int_dst_id = int_id(_dst_id)
-            _bits = _data[15]
-            _slot = 2 if (_bits & 0x80) else 1
+            _attrs = call_attributes(_data[15])
+            _slot = _attrs.slot
             if self._config.get("MODE") == "OPENBRIDGE":
                 # Legacy bridge_master: OpenBridge streams are effectively TS1 (DMRD v1 rejects slot != 1).
                 # DMRE can still carry TS2 in bits; BRIDGES use TS:1 for OBP — normalize before STATUS/dmrd.
                 _slot = 1
-            if _bits & 0x40:
-                _call_type = "unit"
-            elif (_bits & 0x23) == 0x23:
-                _call_type = "vcsbk"
-            else:
-                _call_type = "group"
-            _frame_type = (_bits & 0x30) >> 4
-            _dtype_vseq = _bits & 0xF
-            if "STUN" in self._CONFIG:
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) Bridge STUNned, discarding", self._system)
-                    self._laststrid.append(_stream_id)
+            _call_type = _attrs.call_type
+            _frame_type = _attrs.frame_type
+            _dtype_vseq = _attrs.dtype_vseq
+            _frame = ObpFrame(
+                system=self._system,
+                stream_id=_stream_id,
+                rf_src=_rf_src,
+                dst_id=_dst_id,
+                slot=_slot,
+                call_type=_call_type,
+            )
+            _envelope = MeshEnvelope(
+                source_server=int.from_bytes(_source_server, "big"),
+                hops=_hops if isinstance(_hops, int) else int.from_bytes(_hops, "big"),
+                timestamp_ns=int.from_bytes(_timestamp, "big"),
+                source_server_id=_source_server,
+            )
+            _rejection = admit_dmre_v5(
+                _frame,
+                _envelope,
+                self._obp_admission_context(),
+                now=time.time(),
+            )
+            if _rejection is not None:
+                self._obp_reject(_rejection, _dst_id, _stream_id)
                 return
-            _ts_sec = int.from_bytes(_timestamp, "big") / 1_000_000_000
-            if _ts_sec < (time.time() - 5):
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) Packet from server %s more than 5s old!, discarding", self._system, int.from_bytes(_source_server, "big"))
-                    self._obp_send_bcsq(_dst_id, _stream_id)
-                    self._laststrid.append(_stream_id)
-                return
-            _src_srv_int = int.from_bytes(_source_server, "big")
-            _src_srv_str = str(_src_srv_int)
-            _src_srv_len = len(_src_srv_str)
-            if _src_srv_len < 4 or _src_srv_len > 7:
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) Source Server should be between 4 and 7 digits, discarding Src: %s", self._system, _src_srv_int)
-                    self._obp_send_bcsq(_dst_id, _stream_id)
-                    self._laststrid.append(_stream_id)
-                return
-            _global = self._CONFIG.get("GLOBAL", {})
-            _server_ids = self._CONFIG.get("_SERVER_IDS", set())
-            if _global.get("VALIDATE_SERVER_IDS") and _src_srv_len in (4, 5) and (_src_srv_str[:4] not in _server_ids):
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) Source Server ID is 4 or 5 digits but not in list: %s", self._system, _src_srv_int)
-                    self._obp_send_bcsq(_dst_id, _stream_id)
-                    self._laststrid.append(_stream_id)
-                return
-            if _src_srv_len > 5 and not self.validate_obp_source_server_id(_source_server):
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) Source Server 6 or 7 digits but not a valid DMR ID, discarding Src: %s", self._system, _src_srv_int)
-                    self._obp_send_bcsq(_dst_id, _stream_id)
-                    self._laststrid.append(_stream_id)
-                return
-            _inthops = (_hops if isinstance(_hops, int) else int.from_bytes(_hops, "big")) + 1
-            if _inthops > 10:
-                logger.debug(
-                    "(%s) MAX HOPS exceed, dropping. Hops: %s, DST: %s, SRC: %s",
-                    self._system,
-                    _inthops,
-                    _int_dst_id,
-                    _src_srv_int,
-                )
-                self._obp_send_bcsq(_dst_id, _stream_id)
-                return
-            if _call_type != "unit":
-                if _int_dst_id <= 79:
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s BY GLOBAL TG FILTER (local to repeater)", self._system, int_id(_stream_id), _int_dst_id)
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-                if (_int_dst_id >= 9990 and _int_dst_id <= 9999) or _int_dst_id == 900999:
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s BY GLOBAL TG FILTER (local to server)", self._system, int_id(_stream_id), _int_dst_id)
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-                _sid = _global.get("SERVER_ID", 0)
-                _our_srv = int(str(_sid)[:4]) if isinstance(_sid, int) else int(str(int.from_bytes(_sid, "big"))[:4])
-                if (_int_dst_id >= 92 and _int_dst_id <= 199) and int(_src_srv_str[:4]) != _our_srv:
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s BY GLOBAL TG FILTER (local to server main ID)", self._system, int_id(_stream_id), _int_dst_id)
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-                if ((_int_dst_id >= 80 and _int_dst_id <= 89) or (_int_dst_id >= 800 and _int_dst_id <= 899)) and int(_src_srv_str[:3]) != int(str(_our_srv)[:3]):
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s BY GLOBAL TG FILTER (local to MCC)", self._system, int_id(_stream_id), _int_dst_id)
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-            if _global.get("USE_ACL") and self._router:
-                if not self._router.acl_check(_rf_src, _global.get("SUB_ACL", (True, []))):
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-                if _slot == 1 and not self._router.acl_check(_dst_id, _global.get("TG1_ACL", (True, []))):
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-            if self._config.get("USE_ACL") and self._router:
-                if not self._router.acl_check(_rf_src, self._config.get("SUB_ACL", (True, []))):
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-                if not self._router.acl_check(_dst_id, self._config.get("TG1_ACL", (True, []))):
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
+            _inthops = _envelope.hops + 1
             self.note_dmrd_stream(_peer_id, _rf_src, _stream_id)
             if (
                 _call_type in ("group", "vcsbk")
