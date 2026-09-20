@@ -28,6 +28,7 @@ ADN DMR Peer Server entrypoint.
 Run: python -m adn_server.main [-c adn-server.yaml] [--logging LEVEL]
        python -m adn_server.main --echo [-c adn-echo.yaml]
        python -m adn_server.main --doctor [-c adn-server.yaml]
+       python -m adn_server.main --replay capture.pcap [--system OBP-FR]
 Config default: adn-server.yaml (or adn-echo.yaml with --echo).
 """
 
@@ -46,8 +47,9 @@ if str(_ROOT) not in sys.path:
 from adn_server.domain.errors import ConfigError
 from adn_server.infrastructure import YamlConfigLoader, setup_logging
 from adn_server.infrastructure.bootstrap import run_peer_server
-from adn_server.infrastructure.config_normalizer import apply_talker_alias_defaults
+from adn_server.infrastructure.config_normalizer import apply_talker_alias_defaults, normalize_obp_config
 from adn_server.infrastructure.doctor import run_doctor
+from adn_server.infrastructure.obp_replay import run_replay
 from adn_server.infrastructure.echo import run_echo
 
 
@@ -78,6 +80,31 @@ def _parse_args() -> argparse.Namespace:
         "--doctor",
         action="store_true",
         help="Validate config, ports, and peers; exit non-zero on errors",
+    )
+    parser.add_argument(
+        "--replay",
+        dest="REPLAY_CAPTURE",
+        default=None,
+        metavar="CAPTURE.pcap",
+        help="Replay OpenBridge frames from a pcap through the ingress and report what it would do",
+    )
+    parser.add_argument(
+        "--system",
+        dest="REPLAY_SYSTEM",
+        default=None,
+        help="With --replay: only this OPENBRIDGE system",
+    )
+    parser.add_argument(
+        "--replay-limit",
+        dest="REPLAY_LIMIT",
+        type=int,
+        default=None,
+        help="With --replay: stop after this many datagrams",
+    )
+    parser.add_argument(
+        "--replay-summary",
+        action="store_true",
+        help="With --replay: print the tally only, not one line per frame",
     )
     parser.add_argument("--version", action="version", version=f"adn-server {__version__}")
     return parser.parse_args()
@@ -118,6 +145,18 @@ def main() -> None:
     except ConfigError as exc:
         print(f"(CONFIG) {exc}", file=sys.stderr)
         sys.exit(1)
+
+    if args.REPLAY_CAPTURE:
+        normalize_obp_config(config)
+        sys.exit(
+            run_replay(
+                config,
+                args.REPLAY_CAPTURE,
+                system=args.REPLAY_SYSTEM,
+                limit=args.REPLAY_LIMIT,
+                summary_only=args.replay_summary,
+            )
+        )
 
     if not args.echo:
         apply_talker_alias_defaults(config)
