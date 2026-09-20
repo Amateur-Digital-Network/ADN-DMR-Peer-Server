@@ -31,6 +31,7 @@ from __future__ import annotations
 from typing import Any
 
 from adn_server.application.ports import ReportWireEncoder
+from adn_server.domain.mesh_session import mesh_sessions
 
 from .opcodes import REPORT_OPCODES
 from .wire import ReportWire
@@ -46,6 +47,5 @@ __all__ = [
 
 
 def create_report_wire(config: dict[str, Any]) -> ReportWireEncoder:
-    """Return the report wire encoder (``config`` reserved for future options)."""
-    del config
-    return ReportWire()
+    """Return the report wire encoder, reading OBP keepalives from the live sessions."""
+    return ReportWire(sessions=mesh_sessions(config))

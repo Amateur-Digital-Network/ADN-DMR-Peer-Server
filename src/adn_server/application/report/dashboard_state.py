@@ -26,6 +26,7 @@ import time
 from typing import Any
 
 from adn_server.domain import int_id
+from adn_server.domain.mesh_session import MeshSessionStore, ObpBridgeSession
 
 from .payloads import _peer_field_json, build_topology
 
@@ -73,17 +74,15 @@ def _upstream_peer_block(name: str, cfg: dict[str, Any]) -> dict[str, Any]:
     return block
 
 
-def _obp_ka_connected(cfg: dict[str, Any], now: float) -> bool | None:
+def _obp_ka_connected(
+    cfg: dict[str, Any], session: ObpBridgeSession | None, now: float
+) -> bool | None:
     """BCKA keepalive status for ENHANCED OBP legs; ``None`` when KA gating does not apply."""
     if not cfg.get("ENHANCED_OBP"):
         return None
-    bcka = cfg.get("_bcka")
-    if bcka is None:
+    if session is None:
         return False
-    try:
-        return float(bcka) >= now - 60
-    except (TypeError, ValueError):
-        return False
+    return session.keepalive_ok(now)
 
 
 def _openbridge_block(
@@ -92,6 +91,7 @@ def _openbridge_block(
     topology_row: dict[str, Any] | None,
     *,
     now: float,
+    session: ObpBridgeSession | None = None,
 ) -> dict[str, Any]:
     """Enabled OPENBRIDGE legs (``CTABLE.OPENBRIDGES``); STREAMS stay empty here (live chips = monitor/voice)."""
     del name
@@ -106,7 +106,7 @@ def _openbridge_block(
         block["port"] = int(row["port"])
     if row.get("enhanced_obp") or cfg.get("ENHANCED_OBP"):
         block["enhanced_obp"] = True
-    connected = _obp_ka_connected(cfg, now)
+    connected = _obp_ka_connected(cfg, session, now)
     if connected is not None:
         block["connected"] = connected
     return block
@@ -117,6 +117,7 @@ def build_dashboard_state(
     *,
     server_id: str | None = None,
     ts: float | None = None,
+    sessions: MeshSessionStore | None = None,
 ) -> dict[str, Any]:
     """Slim linked-systems view (masters with peers, homebrew peers, openbridges).
 
@@ -160,7 +161,13 @@ def build_dashboard_state(
                 block["port"] = int(topo["port"])
             masters[name] = block
         elif mode == "OPENBRIDGE":
-            openbridges[name] = _openbridge_block(name, cfg, topo, now=epoch)
+            openbridges[name] = _openbridge_block(
+                name,
+                cfg,
+                topo,
+                now=epoch,
+                session=sessions.get(name) if sessions is not None else None,
+            )
         elif mode in ("PEER", "XLXPEER") and _upstream_peer_connected(cfg):
             peers[name] = _upstream_peer_block(name, cfg)
 

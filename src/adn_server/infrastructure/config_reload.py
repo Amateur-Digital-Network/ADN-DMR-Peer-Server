@@ -45,6 +45,7 @@ from .logging_config import reapply_log_level
 logger = logging.getLogger(__name__)
 
 _RUNTIME_TOP_KEYS = frozenset({
+    "_MESH_SESSIONS",
     "_SUB_MAP",
     "_SUB_IDS",
     "_SUB_PROFILES",

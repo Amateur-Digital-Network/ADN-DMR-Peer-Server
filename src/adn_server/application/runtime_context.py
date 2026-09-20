@@ -106,14 +106,17 @@ def prepare_reload_config(holder: RuntimeContextHolder) -> dict[str, Any]:
     """
     Build a working copy for SIGHUP reload.
 
-    The live ``_SUB_MAP`` object is shared so subscriber state is not duplicated.
+    The live ``_SUB_MAP`` and ``_MESH_SESSIONS`` objects are shared, not copied:
+    subscriber state and OpenBridge sessions survive the reload, and the readers
+    that hold a reference to the store keep looking at the live one.
     On failure the holder is unchanged; on success call ``swap`` with the merged dict.
     """
     live = holder.get().config
-    sub_map = live.get("_SUB_MAP")
+    shared = {key: live.get(key) for key in ("_SUB_MAP", "_MESH_SESSIONS")}
     new_config = copy.deepcopy(live)
-    if sub_map is not None:
-        new_config["_SUB_MAP"] = sub_map
+    for key, value in shared.items():
+        if value is not None:
+            new_config[key] = value
     return new_config
 
 

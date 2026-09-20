@@ -466,7 +466,7 @@ class ObpForwardMixin:
         """Legacy sendDataToOBP: forward a unit-data packet to an OPENBRIDGE target."""
         systems_cfg = self._config.get("SYSTEMS", {})
         _target_system = systems_cfg.get(target, {})
-        if _target_system.get("ENHANCED_OBP") and "_bcka" in _target_system and _target_system["_bcka"] < pkt_time - 60:
+        if _target_system.get("ENHANCED_OBP") and self._obp_session(target).keepalive_stale(pkt_time):
             return
         protocols = self._get_protocols() if self._get_protocols else {}
         target_proto = protocols.get(target)

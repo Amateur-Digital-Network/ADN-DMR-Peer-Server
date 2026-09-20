@@ -92,6 +92,7 @@ from ...domain.mesh_admission import (
     server_prefix,
 )
 from ...domain.mesh_routing import MeshEgress, MeshIngress, PeerMeshConfig
+from ...domain.mesh_session import ObpBridgeSession, obp_session
 from ...domain.talker_alias import (
     DMRA_PACKET_LEN,
     decode_ta_from_blocks,
@@ -298,15 +299,17 @@ class HBPProtocol(DatagramProtocol):
             if getattr(self, "_obp_protocol_started", False):
                 return
             self._obp_protocol_started = True
+            _peer = self._session.peer
             logger.info(
                 "(%s) Starting OBP. TARGET_IP: %s, TARGET_PORT: %s",
                 self._system,
-                self._config.get("TARGET_IP", ""),
-                self._config.get("TARGET_PORT", ""),
+                _peer[0] or "",
+                _peer[1],
             )
-            # bridge_master.routerOBP.to_target skips ENHANCED targets when '_bcka' not in SYSTEMS[name].
-            # Seed so cross-OBP forwarding works before the first inbound BCKA/DMR on *this* leg.
-            self._config["_bcka"] = time.time()
+            # bridge_master.routerOBP.to_target skips ENHANCED targets when the keepalive
+            # was never seen. Seed it so cross-OBP forwarding works before the first
+            # inbound BCKA/DMR on *this* leg.
+            self._session.note_keepalive(time.time())
             if self._config.get("ENHANCED_OBP"):
                 self._bcka_loop = task.LoopingCall(self._obp_send_bcka)
                 _bcka_d = self._bcka_loop.start(10)
@@ -1039,14 +1042,15 @@ class HBPProtocol(DatagramProtocol):
         if self._config.get("MODE") == "MASTER":
             self.send_peers(_packet, _hops, _ber, _rssi, _source_server, _source_rptr)
         elif self._config.get("MODE") == "OPENBRIDGE":
-            # Global STUN (config) or per-system BCST (hblink sets _config['_STUN'] on BCST RX)
-            if "STUN" in self._CONFIG or self._config.get("_STUN"):
+            # Global STUN (operator, in the config) or this bridge's own BCST
+            if "STUN" in self._CONFIG or self._session.stunned:
                 logger.info("(%s) Bridge STUNned, discarding", self._system)
                 return
             if not _hops:
                 _hops = (1).to_bytes(1, "big")
-            if _packet[:3] == DMR and self._config.get("TARGET_IP"):
-                _target_addr = (self._config["TARGET_IP"], self._config["TARGET_PORT"])
+            _session = self._session
+            if _packet[:3] == DMR and _session.peer_known:
+                _target_addr = _session.peer
                 _ver_cfg = self._config.get("VER")
                 if "VER" in self._config and _ver_cfg in (2, 3):
                     logger.error("(%s) protocol version %s no longer supported", self._system, _ver_cfg)
@@ -1062,7 +1066,7 @@ class HBPProtocol(DatagramProtocol):
                     if _wire is not None:
                         self.transport.write(_wire, _target_addr)
             else:
-                if not self._config.get("TARGET_IP"):
+                if not _session.peer_known:
                     logger.debug("(%s) Not sent packet as TARGET_IP not currently known", self._system)
                 else:
                     logger.error("(%s) OpenBridge system was asked to send non DMR packet with send_system(): %s", self._system, _packet)
@@ -2107,52 +2111,54 @@ class HBPProtocol(DatagramProtocol):
         logger.error("(%s) Unhandled error in timed loop.\n %s", self._system, failure)
 
     def _obp_send_bcka(self) -> None:
-        """Legacy send_bcka: BCKA + HMAC-SHA1 to TARGET. Uses TARGET_SOCK (IP only; hostnames resolved at startup or on first peer packet)."""
-        _addr = self._config.get("TARGET_SOCK")
-        if _addr and _addr[0]:
+        """Legacy send_bcka: BCKA + HMAC-SHA1 to the peer (hostnames resolved at startup)."""
+        _session = self._session
+        _addr = _session.peer
+        if _session.peer_known:
             self.transport.write(build_bcka(_get_passphrase_bytes(self._config)), _addr)
         else:
             logger.debug("(%s) *BridgeControl* not sending KeepAlive, TARGET not currently known", self._system)
 
     def _obp_send_bcve(self) -> None:
-        """Legacy send_bcve: BCVE + VER byte + HMAC-SHA1. Uses TARGET_SOCK (IP only)."""
-        _addr = self._config.get("TARGET_SOCK")
-        if self._config.get("ENHANCED_OBP") and _addr and _addr[0]:
+        """Legacy send_bcve: BCVE + VER byte + HMAC-SHA1 to the peer."""
+        _session = self._session
+        _addr = _session.peer
+        if self._config.get("ENHANCED_OBP") and _session.peer_known:
             self.transport.write(build_bcve(VER, _get_passphrase_bytes(self._config)), _addr)
         else:
             logger.debug("(%s) *BridgeControl* not sending BCVE, TARGET not currently known", self._system)
 
     def _obp_sync_target_sock_from_peer(self, _sockaddr: tuple[str, int], _stream_id: bytes | None = None) -> None:
-        """If RELAX_CHECKS accepted traffic from a different IP:port than TARGET_SOCK, sync (same idea as BCKA).
-        Ensures BCSQ and outbound DMR go to the peer address we actually receive from.
+        """Learn the address RELAX_CHECKS just accepted, so replies go back to it.
 
-        A peer behind per-packet load-balanced NAT can flip source address on every frame of the
-        same call, so the sync itself still runs every packet but the log is debug and capped to
-        once per stream_id (same _log_once deque idiom as _bcsq_log_once above).
+        The configured peer stays where the operator put it; only the session
+        moves. A peer behind per-packet load-balanced NAT can flip source address
+        on every frame of the same call, so the log is debug and capped to once
+        per stream_id (same _log_once deque idiom as _bcsq_log_once above).
         """
         if self._config.get("MODE") != "OPENBRIDGE" or not self._config.get("RELAX_CHECKS"):
             return
-        if not _sockaddr or not _sockaddr[0]:
+        _session = self._session
+        cur = _session.peer
+        if not _session.learn_peer(_sockaddr, at=time.time()):
             return
-        cur = self._config.get("TARGET_SOCK")
-        if cur == _sockaddr:
-            return
-        h, p = _sockaddr[0], int(_sockaddr[1])
         _once = getattr(self, "_obp_target_sync_log_once", None)
         if _stream_id is None or not isinstance(_once, deque) or _stream_id not in _once:
             logger.debug(
                 "(%s) *BridgeControl* OBP peer address sync to %s:%s (RELAX_CHECKS; was %s:%s)",
                 self._system,
-                h,
-                p,
+                _sockaddr[0],
+                int(_sockaddr[1]),
                 (cur[0] if cur and cur[0] else "?"),
                 (cur[1] if cur and len(cur) > 1 else "?"),
             )
             if _stream_id is not None and isinstance(_once, deque):
                 _once.append(_stream_id)
-        self._config["TARGET_IP"] = h
-        self._config["TARGET_PORT"] = p
-        self._config["TARGET_SOCK"] = (h, p)
+
+    @property
+    def _session(self) -> ObpBridgeSession:
+        """Live state of this OpenBridge link (peer, keepalive, quench)."""
+        return obp_session(self._CONFIG, self._system)
 
     def _obp_admission_context(self) -> AdmissionContext:
         """Snapshot of everything the admission rules need, read once per frame."""
@@ -2187,15 +2193,10 @@ class HBPProtocol(DatagramProtocol):
             self._obp_send_bcsq(_dst_id, _stream_id)
 
     def _obp_send_bcsq(self, _tgid: bytes, _stream_id: bytes) -> None:
-        """Legacy send_bcsq: BCSQ + tgid + stream_id + HMAC-SHA1. Uses TARGET_SOCK (IP only)."""
-        _addr = self._config.get("TARGET_SOCK")
-        if not _addr or not _addr[0]:
-            tip = self._config.get("TARGET_IP")
-            tport = int(self._config.get("TARGET_PORT", 62044))
-            if tip:
-                _addr = (tip, tport)
-                self._config["TARGET_SOCK"] = _addr
-        if _addr and _addr[0]:
+        """Legacy send_bcsq: BCSQ + tgid + stream_id + HMAC-SHA1 to the peer."""
+        _session = self._session
+        _addr = _session.peer
+        if _session.peer_known:
             self.transport.write(
                 build_bcsq(_tgid, _stream_id, _get_passphrase_bytes(self._config)),
                 _addr,
@@ -2218,7 +2219,7 @@ class HBPProtocol(DatagramProtocol):
                 self._obp_send_bcve()
                 return
             _ingress = self._try_decode_mesh_ingress(_packet)
-            if _ingress is not None and _ingress.codec == "obp_v1" and (_sockaddr == self._config.get("TARGET_SOCK") or self._config.get("RELAX_CHECKS")):
+            if _ingress is not None and _ingress.codec == "obp_v1" and (_sockaddr == self._session.peer or self._config.get("RELAX_CHECKS")):
                 _data = _ingress.voice_frame
                 self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id)
                 _peer_id = _data[11:15]
@@ -2295,7 +2296,7 @@ class HBPProtocol(DatagramProtocol):
                         obp_rssi=b"\x00",
                         obp_source_rptr=b"\x00\x00\x00\x00",
                     )
-                self._config["_bcka"] = time.time()
+                self._session.note_keepalive(time.time())
             else:
                 logger.warning("(%s) OpenBridge HMAC failed, packet discarded - OPCODE: %s SRC: %s", self._system, _packet[:4], _sockaddr)
         elif _packet[:4] == DMRE:
@@ -2303,7 +2304,7 @@ class HBPProtocol(DatagramProtocol):
             _ingress = self._try_decode_mesh_ingress(_packet)
             if _ingress is None or _ingress.codec != "dmre_v5":
                 return
-            if not (_sockaddr == self._config.get("TARGET_SOCK") or self._config.get("RELAX_CHECKS")):
+            if not (_sockaddr == self._session.peer or self._config.get("RELAX_CHECKS")):
                 logger.warning("(%s) OpenBridge DMRE BLAKE2b failed, packet discarded - SRC: %s", self._system, _sockaddr)
                 return
             _data = _ingress.voice_frame
@@ -2397,20 +2398,19 @@ class HBPProtocol(DatagramProtocol):
                     obp_rssi=_rssi,
                     obp_source_rptr=_source_rptr,
                 )
-            self._config["_bcka"] = time.time()
+            self._session.note_keepalive(time.time())
         elif _packet[:4] == EOBP:
             logger.warning("(%s) *ProtoControl* KF7EEL EOBP protocol not supported", self._system)
         elif self._config.get("ENHANCED_OBP") and _packet[:2] == BC:
             _passphrase = _get_passphrase_bytes(self._config)
             if _packet[:4] == BCKA and len(_packet) >= 24:
                 if verify_bcka(_packet, _passphrase):
-                    self._config["_bcka"] = time.time()
-                    if _sockaddr != self._config.get("TARGET_SOCK"):
-                        logger.info("(%s) *BridgeControl* Source IP and Port has changed for OBP from %s:%s to %s:%s, updating", self._system, self._config.get("TARGET_IP"), self._config.get("TARGET_PORT"), _sockaddr[0], _sockaddr[1])
-                        self._config["TARGET_IP"] = _sockaddr[0]
-                        self._config["TARGET_PORT"] = _sockaddr[1]
-                        self._config["TARGET_SOCK"] = _sockaddr
-                    self._config.pop("_no_target_log_time", None)  # reset so next "no target" logs once
+                    _session = self._session
+                    _was = _session.peer
+                    _now = time.time()
+                    _session.note_keepalive(_now)
+                    if _session.learn_peer(_sockaddr, at=_now):
+                        logger.info("(%s) *BridgeControl* Source IP and Port has changed for OBP from %s:%s to %s:%s, updating", self._system, _was[0], _was[1], _sockaddr[0], _sockaddr[1])
                 else:
                     logger.info("(%s) *BridgeControl* BCKA invalid KeepAlive, packet discarded", self._system)
             # Source quench — legacy hblink.py OPENBRIDGE ~629-639 (sets CONFIG['_bcsq'][tgid]=stream_id)
@@ -2419,9 +2419,7 @@ class HBPProtocol(DatagramProtocol):
                 if _bcsq is not None:
                     _tgid_bcsq = _bcsq.tgid
                     _stream_bcsq = _bcsq.stream_id
-                    if "_bcsq" not in self._config:
-                        self._config["_bcsq"] = {}
-                    self._config["_bcsq"][_tgid_bcsq] = _stream_bcsq
+                    self._session.quench(_tgid_bcsq, _stream_bcsq)
                     if self._config.get("MODE") == "OPENBRIDGE":
                         _key = (_stream_bcsq, _tgid_bcsq)
                         _once = getattr(self, "_bcsq_log_once", None)
@@ -2449,7 +2447,7 @@ class HBPProtocol(DatagramProtocol):
             if _packet[:4] == BCST and len(_packet) >= 24:
                 if verify_bcst(_packet, _passphrase):
                     logger.trace("(%s) *BridgeControl* BCST STUN request received", self._system)
-                    self._config["_STUN"] = True
+                    self._session.stun()
                 else:
                     logger.warning(
                         "(%s) *BridgeControl* BCST invalid STUN, packet discarded - SRC: %s",
