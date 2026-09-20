@@ -22,6 +22,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from tests.conftest import minimal_valid_config
 
@@ -570,11 +572,12 @@ def test_control_frame_prefers_configured_peer_over_relaxed_target() -> None:
     assert not protocols["OBP-FR"].packets
 
 
-def test_debug_rx_log_once_per_stream(caplog) -> None:
-    """A call sends many DMRD/DMRE packets; the RX debug line must fire once per
-    stream_id, not once per packet, or an active call floods the log."""
-    import logging as _logging
-
+def test_debug_does_not_log_voice_packets(caplog) -> None:
+    """DMRD/DMRE demux by NETWORK_ID, never ambiguous, and *CALL START*/*CALL END*
+    (routing_use_cases.py) already give once-per-call visibility. Concurrent calls
+    on the same bridge (BOTH_SLOTS, several TGs) interleave stream_ids packet by
+    packet, so any per-stream tracking here would still log almost every packet —
+    so voice frames are not logged at all, only control frames are."""
     receiver = _RecordingObp()
     transport = _RecordingTransport()
     registry = ObpBridgeRegistry()
@@ -588,13 +591,12 @@ def test_debug_rx_log_once_per_stream(caplog) -> None:
         )
     )
     demux = ObpFanInDemux(registry, debug=True)
-    caplog.set_level(_logging.DEBUG)
+    caplog.set_level(logging.DEBUG)
 
-    wire_a = build_dmrd_v1(_sample_dmr_voice(stream_id=0x11111111), _NETWORK, _PASS)
-    for _ in range(5):
-        demux.deliver(wire_a, _ADDR, local_port=62032, transport=transport)
+    for stream in (0x11111111, 0x22222222, 0x11111111, 0x22222222):
+        wire = build_dmrd_v1(_sample_dmr_voice(stream_id=stream), _NETWORK, _PASS)
+        demux.deliver(wire, _ADDR, local_port=62032, transport=transport)
+    assert not any("RX" in r.getMessage() for r in caplog.records)
+
+    demux.deliver(build_bcka(_PASS), _ADDR, local_port=62032, transport=transport)
     assert sum("RX" in r.getMessage() for r in caplog.records) == 1
-
-    wire_b = build_dmrd_v1(_sample_dmr_voice(stream_id=0x22222222), _NETWORK, _PASS)
-    demux.deliver(wire_b, _ADDR, local_port=62032, transport=transport)
-    assert sum("RX" in r.getMessage() for r in caplog.records) == 2
