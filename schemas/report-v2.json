@@ -243,6 +243,9 @@
               "software_id": { "type": "string" },
               "colorcode": { "type": "string" },
               "tx_power": { "type": "string" },
+              "latitude": { "type": "string", "description": "Latitude as sent by the peer in RPTC (decimal degrees)." },
+              "longitude": { "type": "string", "description": "Longitude as sent by the peer in RPTC (decimal degrees)." },
+              "height": { "type": "string", "description": "Antenna height above ground as sent by the peer in RPTC (metres)." },
               "ts1_static": {
                 "type": "array",
                 "items": { "type": "string" },
