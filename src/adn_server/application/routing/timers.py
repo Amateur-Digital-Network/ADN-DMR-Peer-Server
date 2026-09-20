@@ -314,12 +314,7 @@ class RoutingTimerMixin:
                             self._obp_emit_end_tx_for_forward_legs(stream_id, system_name, now)
                             continue
                     for stream_id in to_remove:
-                        _syscfg = systems_cfg.get(system_name, {})
-                        _bmap = _syscfg.get("_bcsq")
-                        if isinstance(_bmap, dict):
-                            for _tgid_k, _sid in list(_bmap.items()):
-                                if _sid == stream_id:
-                                    _bmap.pop(_tgid_k, None)
+                        self._obp_session(system_name).release_stream(stream_id)
                         st_rem = obp_status.get(stream_id)
                         if isinstance(st_rem, dict) and _obp_status_is_forward_leg(st_rem):
                             self._obp_emit_end_tx_forward_leg(system_name, stream_id, st_rem, now)

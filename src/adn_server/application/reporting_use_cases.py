@@ -29,6 +29,7 @@ import logging
 import time
 from typing import Any
 
+from ..domain.mesh_session import obp_session
 from .ports import ReportSender
 
 logger = logging.getLogger(__name__)
@@ -62,10 +63,19 @@ class ReportingUseCases:
             if not sys_cfg.get("ENABLED", True):
                 continue
             if sys_cfg.get("MODE") == "OPENBRIDGE" and sys_cfg.get("ENHANCED_OBP"):
-                if "_bcka" not in sys_cfg:
+                session = obp_session(self._config, system_name)
+                if not session.keepalive_seen:
                     logger.warning("(ROUTER) not sending to system %s as KeepAlive never seen", system_name)
-                elif sys_cfg["_bcka"] < now - 60:
+                elif session.keepalive_stale(now):
                     logger.warning(
                         "(ROUTER) not sending to system %s as last KeepAlive was %s seconds ago",
-                        system_name, int(now - sys_cfg["_bcka"]),
+                        system_name, int(session.keepalive_age(now) or 0),
+                    )
+                if session.drops:
+                    # Why this bridge refused frames, by reason: the answer to
+                    # "my call does not cross" without reading the whole log.
+                    logger.debug(
+                        "(ROUTER) system %s refused frames: %s",
+                        system_name,
+                        ", ".join(f"{reason}={count}" for reason, count in sorted(session.drops.items())),
                     )

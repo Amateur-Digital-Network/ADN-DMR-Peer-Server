@@ -48,6 +48,7 @@ from typing import Any
 
 from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, bytes_3, bytes_4, int_id
 from ...domain.hbp_protocol import HBPF_SLT_VTERM, STREAM_TO
+from ...domain.mesh_session import obp_session
 from ..server_voice import DEFAULT_SERVER_VOICE_ID
 
 PeerVoiceSlotRow = dict[str, Any]
@@ -1145,24 +1146,10 @@ def is_ua_session_tgid(tgid: int) -> bool:
 
 
 def obp_target_bcsq_quenches_stream(
-    systems_cfg: dict[str, Any], target_name: str, dst_id_b: bytes, stream_id: bytes
+    config: dict[str, Any], target_name: str, dst_id_b: bytes, stream_id: bytes
 ) -> bool:
-    """True if target OBP config has _bcsq[tgid]==stream_id (bytes key or same int TG)."""
-    m = systems_cfg.get(target_name, {}).get("_bcsq")
-    if not isinstance(m, dict) or not m:
-        return False
-    tid = dst_id_b[:3] if isinstance(dst_id_b, bytes) and len(dst_id_b) >= 3 else bytes_3(int_id(dst_id_b))
-    if m.get(tid) == stream_id:
-        return True
-    for k, v in m.items():
-        if v != stream_id:
-            continue
-        try:
-            if isinstance(k, bytes) and len(k) >= 3 and int_id(k) == int_id(tid):
-                return True
-        except Exception:
-            continue
-    return False
+    """True when the target OBP has quenched this stream for this talkgroup."""
+    return obp_session(config, target_name).quenches(dst_id_b, stream_id)
 
 
 def _peer_key_from_int(peer_key: Any) -> bytes:

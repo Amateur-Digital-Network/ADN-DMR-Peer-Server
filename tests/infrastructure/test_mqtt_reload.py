@@ -102,7 +102,7 @@ def test_reload_enables_mqtt(monkeypatch):
 
     monkeypatch.setattr(
         "adn_server.infrastructure.twisted_adapters.report.mqtt_publisher.create_report_mqtt_publisher_from_settings",
-        lambda _s: _NewPub(),
+        lambda _s, **_kw: _NewPub(),
     )
     result = reconcile_mqtt_publisher(factory, None, None, _settings(), report_enabled=True)
     assert isinstance(result, _NewPub)
@@ -119,7 +119,7 @@ def test_reload_restarts_when_broker_changes(monkeypatch):
 
     monkeypatch.setattr(
         "adn_server.infrastructure.twisted_adapters.report.mqtt_publisher.create_report_mqtt_publisher_from_settings",
-        lambda _s: _NewPub(),
+        lambda _s, **_kw: _NewPub(),
     )
     result = reconcile_mqtt_publisher(
         factory,

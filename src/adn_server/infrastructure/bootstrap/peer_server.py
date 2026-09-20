@@ -63,6 +63,7 @@ from adn_server.application.subscription.echo_seed import seed_echo_routing_tabl
 from adn_server.application.subscription.store_sync import replace_store_from_routing_table
 from adn_server.domain import bytes_4
 from adn_server.domain.dmr.bptc import encode_emblc
+from adn_server.domain.mesh_session import mesh_sessions
 from adn_server.infrastructure.acl_router import InMemoryAclRouter
 from adn_server.infrastructure.config_normalizer import (
     ensure_system_runtime_config as _ensure_system_runtime_config,
@@ -743,6 +744,8 @@ def run_peer_server(
         swap_runtime_config(runtime_holder, new_config, config_path=config_path)
         normalize_proxy_target(config)
         normalize_obp_proxy_targets(config)
+        # Follow the new YAML: refresh configured peers, drop sessions of dead links.
+        mesh_sessions(config).sync(config)
         report_factory.set_config(config)
         mqtt_after = mqtt_settings_from_config(config)
         report_mqtt = reconcile_mqtt_publisher(
@@ -751,6 +754,7 @@ def run_peer_server(
             mqtt_before,
             mqtt_after,
             report_enabled=config.get("REPORTS", {}).get("REPORT", True),
+            sessions=mesh_sessions(config),
         )
         if proxy_state is not None:
             apply_proxy_config_reload(proxy_state, config, logger=logger)

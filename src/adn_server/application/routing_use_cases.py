@@ -48,6 +48,7 @@ from ..domain import (
     int_id,
 )
 from ..domain.dmr import bptc
+from ..domain.mesh_session import ObpBridgeSession, obp_session
 from .ports import AclRouter, DmrEmbeddedLcEncoder, SubscriptionStore, TalkerAliasEmblcEncoder
 from .reporting_use_cases import ReportingUseCases
 from .routing.hbp_forward import HbpForwardMixin
@@ -96,6 +97,10 @@ class RoutingUseCases(
     VoiceSubscriptionMixin,
 ):
     """Use cases for subscription-based voice routing."""
+
+    def _obp_session(self, system_name: str) -> ObpBridgeSession:
+        """Live state of an OPENBRIDGE leg (peer, keepalive, quench)."""
+        return obp_session(self._config, system_name)
 
     def __init__(
         self,
@@ -570,12 +575,11 @@ class RoutingUseCases(
                     if isinstance(target_tgid, int):
                         target_tgid = bytes_3(target_tgid)
                     # If target has quenched us, don't send (~1856-1859).
-                    if obp_target_bcsq_quenches_stream(systems_cfg, entry["SYSTEM"], dst_id_b, stream_id):
+                    if obp_target_bcsq_quenches_stream(self._config, entry["SYSTEM"], dst_id_b, stream_id):
                         continue
                     # If target has missed keepalives (ENHANCED_OBP), don't send (~1861-1863)
-                    if _target_system.get("ENHANCED_OBP") and (
-                        "_bcka" not in _target_system or _target_system["_bcka"] < pkt_time - 60
-                    ):
+                    _target_session = self._obp_session(entry["SYSTEM"])
+                    if _target_system.get("ENHANCED_OBP") and not _target_session.keepalive_ok(pkt_time):
                         continue
                     # Talkgroup ACL (global + per-system TG1) (~1865-1873)
                     _global_cfg = self._config.get("GLOBAL", {})
@@ -1456,7 +1460,7 @@ class RoutingUseCases(
             if _target_system.get("MODE") != "OPENBRIDGE":
                 _target_peer_id = getattr(self, "_pvt_target_peer_ids", {}).get(_target)
             if _target_system.get("MODE") == "OPENBRIDGE":
-                if _target_system.get("ENHANCED_OBP") and "_bcka" in _target_system and _target_system["_bcka"] < pkt_time - 60:
+                if _target_system.get("ENHANCED_OBP") and self._obp_session(_target).keepalive_stale(pkt_time):
                     continue
                 if stream_id not in _target_status:
                     _target_status[stream_id] = {
