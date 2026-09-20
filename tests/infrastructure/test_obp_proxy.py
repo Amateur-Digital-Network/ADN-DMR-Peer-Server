@@ -114,7 +114,7 @@ class _FakeReactor:
         return _FakeUdpPort(port, protocol)
 
 
-def _sample_dmr_voice() -> bytes:
+def _sample_dmr_voice(stream_id: int = 0xAABBCCDD) -> bytes:
     return b"".join(
         [
             DMRD,
@@ -123,7 +123,7 @@ def _sample_dmr_voice() -> bytes:
             bytes_4(52090)[1:4],
             bytes_4(1),
             bytes([0x10]),
-            bytes_4(0xAABBCCDD),
+            bytes_4(stream_id),
             b"\x00" * 33,
         ]
     )
@@ -568,3 +568,33 @@ def test_control_frame_prefers_configured_peer_over_relaxed_target() -> None:
     demux.deliver(build_bcka(_PASS), peer_pt, local_port=62032, transport=_RecordingTransport())
     assert protocols["OBP-PT"].packets
     assert not protocols["OBP-FR"].packets
+
+
+def test_debug_rx_log_once_per_stream(caplog) -> None:
+    """A call sends many DMRD/DMRE packets; the RX debug line must fire once per
+    stream_id, not once per packet, or an active call floods the log."""
+    import logging as _logging
+
+    receiver = _RecordingObp()
+    transport = _RecordingTransport()
+    registry = ObpBridgeRegistry()
+    registry.register(
+        ObpBridgeEntry(
+            system_name="OBP-CL",
+            network_id=_NETWORK,
+            passphrase=_PASS,
+            sink=InProcessObpSink(receiver),
+            reply_transport=ObpIngressReplyTransport(transport),
+        )
+    )
+    demux = ObpFanInDemux(registry, debug=True)
+    caplog.set_level(_logging.DEBUG)
+
+    wire_a = build_dmrd_v1(_sample_dmr_voice(stream_id=0x11111111), _NETWORK, _PASS)
+    for _ in range(5):
+        demux.deliver(wire_a, _ADDR, local_port=62032, transport=transport)
+    assert sum("RX" in r.getMessage() for r in caplog.records) == 1
+
+    wire_b = build_dmrd_v1(_sample_dmr_voice(stream_id=0x22222222), _NETWORK, _PASS)
+    demux.deliver(wire_b, _ADDR, local_port=62032, transport=transport)
+    assert sum("RX" in r.getMessage() for r in caplog.records) == 2
