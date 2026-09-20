@@ -70,6 +70,7 @@ class ObpBridgeSession:
     last_keepalive: float | None = None
     quenched: dict[bytes, bytes] = field(default_factory=dict)
     stunned: bool = False
+    drops: dict[str, int] = field(default_factory=dict)
 
     # --- peer address --------------------------------------------------------
 
@@ -148,6 +149,12 @@ class ObpBridgeSession:
             except Exception:
                 continue
         return False
+
+    # --- what this link refuses ----------------------------------------------
+
+    def count_drop(self, reason: str) -> None:
+        """Tally a refused frame by reason, for counters and traces."""
+        self.drops[reason] = self.drops.get(reason, 0) + 1
 
     # --- stun ----------------------------------------------------------------
 

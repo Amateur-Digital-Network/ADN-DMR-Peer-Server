@@ -79,19 +79,23 @@ from ...domain import bytes_3, bytes_4, int_id
 from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
 from ...domain.hbp_protocol import normalize_fixed_width_ascii, normalize_fixed_width_bytes
-from ...domain.mesh_admission import (
-    AclRules,
-    AdmissionContext,
-    MeshEnvelope,
-    ObpFrame,
-    Rejection,
-    admit_dmrd_v1,
-    admit_dmre_v5,
-    call_attributes,
-    check_network_id,
-    server_prefix,
-)
+from ...domain.mesh_admission import AclRules, AdmissionContext, Rejection, server_prefix
 from ...domain.mesh_routing import MeshEgress, MeshIngress, PeerMeshConfig
+from ...domain.mesh_engine import (
+    BridgePolicy,
+    Deliver,
+    Effect,
+    Log,
+    NoteStream,
+    Reject,
+    RequestVersion,
+    StoreTalkerAlias,
+    accepts_source,
+    ingest_dmrd_v1,
+    ingest_dmre_v5,
+    reject_v1_protocol,
+    server_id_bytes,
+)
 from ...domain.mesh_session import ObpBridgeSession, obp_session
 from ...domain.talker_alias import (
     DMRA_PACKET_LEN,
@@ -2182,6 +2186,61 @@ class HBPProtocol(DatagramProtocol):
             resolve_server_id=self.validate_obp_source_server_id,
         )
 
+    def _obp_policy(self) -> BridgePolicy:
+        """This bridge's rules, read once per frame and handed to the engine."""
+        return BridgePolicy(
+            system=self._system,
+            network_id=self._config.get("NETWORK_ID", b""),
+            proto_ver=self._config.get("VER"),
+            relax_checks=bool(self._config.get("RELAX_CHECKS")),
+            server_id=server_id_bytes(self._CONFIG.get("GLOBAL", {}).get("SERVER_ID", 0)),
+            admission=self._obp_admission_context(),
+        )
+
+    def _obp_apply(self, effects: list[Effect] | None) -> None:
+        """Carry out what the engine decided, in order."""
+        if not effects:
+            return
+        for effect in effects:
+            if isinstance(effect, Reject):
+                self._obp_reject(effect.rejection, effect.dst_id, effect.stream_id)
+                self._session.count_drop(effect.reason)
+            elif isinstance(effect, Log):
+                logger.log(effect.level, effect.message, *effect.args)
+            elif isinstance(effect, NoteStream):
+                self.note_dmrd_stream(effect.peer_id, effect.rf_src, effect.stream_id)
+            elif isinstance(effect, StoreTalkerAlias):
+                self.store_ta_from_voice_burst(
+                    effect.peer_id,
+                    effect.rf_src,
+                    effect.stream_id,
+                    effect.dtype_vseq,
+                    effect.burst,
+                )
+            elif isinstance(effect, Deliver):
+                if self._dmrd_received:
+                    self._dmrd_received(
+                        self._system,
+                        effect.peer_id,
+                        effect.rf_src,
+                        effect.dst_id,
+                        effect.seq,
+                        effect.slot,
+                        effect.call_type,
+                        effect.frame_type,
+                        effect.dtype_vseq,
+                        effect.stream_id,
+                        effect.frame,
+                        obp_use_parsed=True,
+                        obp_hops=effect.hops,
+                        obp_source_server=effect.source_server,
+                        obp_ber=effect.ber,
+                        obp_rssi=effect.rssi,
+                        obp_source_rptr=effect.source_rptr,
+                    )
+            elif isinstance(effect, RequestVersion):
+                self._obp_send_bcve()
+
     def _obp_reject(self, rejection: Rejection, _dst_id: bytes, _stream_id: bytes) -> None:
         """Apply one admission decision: log it (once per stream) and quench the peer."""
         if rejection.log_once:
@@ -2208,197 +2267,52 @@ class HBPProtocol(DatagramProtocol):
             )
 
     def _obp_datagram_received(self, _packet: bytes, _sockaddr: tuple[str, int]) -> None:
-        """Port of hblink.py OPENBRIDGE.datagramReceived: DMRD v1 (53+HMAC), BCKA, BCVE."""
+        """OpenBridge ingress: verify, hand to the engine, apply what it answers."""
         if _packet[:3] == DMR and _packet[:4] == DMRD and len(_packet) >= 73:
-            _data = _packet[:53]
-            _stream_id = _data[16:20]
-            if self._config.get("VER", 5) > 1:
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) *ProtoControl* Version 1 protocol prohibited by PROTO_VER, Ver: %s", self._system, self._config.get("VER"))
-                    self._laststrid.append(_stream_id)
-                self._obp_send_bcve()
+            _policy = self._obp_policy()
+            _stream_id = _packet[16:20]
+            if _policy.rejects_v1:
+                self._obp_apply(reject_v1_protocol(_stream_id, policy=_policy))
                 return
             _ingress = self._try_decode_mesh_ingress(_packet)
-            if _ingress is not None and _ingress.codec == "obp_v1" and (_sockaddr == self._session.peer or self._config.get("RELAX_CHECKS")):
-                _data = _ingress.voice_frame
+            if (
+                _ingress is not None
+                and _ingress.codec == "obp_v1"
+                and accepts_source(_sockaddr, policy=_policy, session=self._session)
+            ):
                 self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id)
-                _peer_id = _data[11:15]
-                _dst_id = _data[8:11]
-                _rejection = check_network_id(
-                    self._system,
-                    _stream_id,
-                    expected=self._config.get("NETWORK_ID", b""),
-                    received=_peer_id,
+                self._obp_apply(
+                    ingest_dmrd_v1(
+                        _ingress,
+                        _sockaddr,
+                        policy=_policy,
+                        session=self._session,
+                        now=time.time(),
+                    )
                 )
-                if _rejection is not None:
-                    self._obp_reject(_rejection, _dst_id, _stream_id)
-                    return
-                _seq = _data[4]
-                _rf_src = _data[5:8]
-                _attrs = call_attributes(_data[15])
-                _slot = _attrs.slot
-                _call_type = _attrs.call_type
-                _frame_type = _attrs.frame_type
-                _dtype_vseq = _attrs.dtype_vseq
-                _frame = ObpFrame(
-                    system=self._system,
-                    stream_id=_stream_id,
-                    rf_src=_rf_src,
-                    dst_id=_dst_id,
-                    slot=_slot,
-                    call_type=_call_type,
-                )
-                _rejection = admit_dmrd_v1(_frame, self._obp_admission_context())
-                if _rejection is not None:
-                    self._obp_reject(_rejection, _dst_id, _stream_id)
-                    return
-                if _call_type == "group" and _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
-                    logger.info(
-                        "(%s) CALL RX (OBP) src %s -> TG %s slot %s",
-                        self._system, int_id(_rf_src), int_id(_dst_id), _slot,
-                    )
-                self.note_dmrd_stream(_peer_id, _rf_src, _stream_id)
-                if (
-                    _call_type in ("group", "vcsbk")
-                    and _frame_type != HBPF_DATA_SYNC
-                    and _dtype_vseq in (1, 2, 3, 4)
-                    and len(_data) >= 53
-                ):
-                    self.store_ta_from_voice_burst(
-                        _peer_id, _rf_src, _stream_id, _dtype_vseq, _data[20:53],
-                    )
-                # Group/vcsbk stream state, LC, duplicates: routing_use_cases._obp_group_voice_router_obp (legacy routerOBP.dmrd_received)
-                if self._dmrd_received:
-                    # Legacy hblink DMRD v1: SERVER_ID + default rptr/hops/ber/rssi (`hblink.py` ~338–345, ~416)
-                    _global = self._CONFIG.get("GLOBAL", {})
-                    _sid = _global.get("SERVER_ID", b"\x00\x00\x00\x00")
-                    _obp_ss = (
-                        _sid
-                        if isinstance(_sid, bytes) and len(_sid) >= 4
-                        else bytes_4(int(_sid) & 0xFFFFFFFF if isinstance(_sid, int) else 0)
-                    )
-                    self._dmrd_received(
-                        self._system,
-                        _peer_id,
-                        _rf_src,
-                        _dst_id,
-                        _seq,
-                        _slot,
-                        _call_type,
-                        _frame_type,
-                        _dtype_vseq,
-                        _stream_id,
-                        _data,
-                        obp_use_parsed=True,
-                        obp_hops=b"",
-                        obp_source_server=_obp_ss,
-                        obp_ber=b"\x00",
-                        obp_rssi=b"\x00",
-                        obp_source_rptr=b"\x00\x00\x00\x00",
-                    )
-                self._session.note_keepalive(time.time())
             else:
                 logger.warning("(%s) OpenBridge HMAC failed, packet discarded - OPCODE: %s SRC: %s", self._system, _packet[:4], _sockaddr)
         elif _packet[:4] == DMRE:
-            # Legacy hblink.py OPENBRIDGE: DMRE (v5) incoming – 89-byte or 85-byte format, BLAKE2b
             _ingress = self._try_decode_mesh_ingress(_packet)
             if _ingress is None or _ingress.codec != "dmre_v5":
                 return
-            if not (_sockaddr == self._session.peer or self._config.get("RELAX_CHECKS")):
+            _policy = self._obp_policy()
+            if not accepts_source(_sockaddr, policy=_policy, session=self._session):
                 logger.warning("(%s) OpenBridge DMRE BLAKE2b failed, packet discarded - SRC: %s", self._system, _sockaddr)
                 return
-            _data = _ingress.voice_frame
-            _ber = _ingress.ber
-            _rssi = _ingress.rssi
-            _embedded_version = _ingress.embedded_ver if _ingress.embedded_ver is not None else self._config.get("VER", 5)
-            _source_server = _ingress.source_server
-            _source_rptr = _ingress.source_rptr
-            _hops = _ingress.hops
             _trailer = parse_dmre_trailer(_packet)
             _timestamp = _trailer.timestamp if _trailer is not None else b"\x00" * 8
-            _stream_id = _data[16:20]
-            self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id)
-            _peer_id = _data[11:15]
-            _dst_id = _data[8:11]
-            _rejection = check_network_id(
-                self._system,
-                _stream_id,
-                expected=self._config.get("NETWORK_ID", b""),
-                received=_peer_id,
-                dmre=True,
-            )
-            if _rejection is not None:
-                self._obp_reject(_rejection, _dst_id, _stream_id)
-                return
-            _seq = _data[4]
-            _rf_src = _data[5:8]
-            _attrs = call_attributes(_data[15])
-            _slot = _attrs.slot
-            if self._config.get("MODE") == "OPENBRIDGE":
-                # Legacy bridge_master: OpenBridge streams are effectively TS1 (DMRD v1 rejects slot != 1).
-                # DMRE can still carry TS2 in bits; BRIDGES use TS:1 for OBP — normalize before STATUS/dmrd.
-                _slot = 1
-            _call_type = _attrs.call_type
-            _frame_type = _attrs.frame_type
-            _dtype_vseq = _attrs.dtype_vseq
-            _frame = ObpFrame(
-                system=self._system,
-                stream_id=_stream_id,
-                rf_src=_rf_src,
-                dst_id=_dst_id,
-                slot=_slot,
-                call_type=_call_type,
-            )
-            _envelope = MeshEnvelope(
-                source_server=int.from_bytes(_source_server, "big"),
-                hops=_hops if isinstance(_hops, int) else int.from_bytes(_hops, "big"),
-                timestamp_ns=int.from_bytes(_timestamp, "big"),
-                source_server_id=_source_server,
-            )
-            _rejection = admit_dmre_v5(
-                _frame,
-                _envelope,
-                self._obp_admission_context(),
-                now=time.time(),
-            )
-            if _rejection is not None:
-                self._obp_reject(_rejection, _dst_id, _stream_id)
-                return
-            _inthops = _envelope.hops + 1
-            self.note_dmrd_stream(_peer_id, _rf_src, _stream_id)
-            if (
-                _call_type in ("group", "vcsbk")
-                and _frame_type != HBPF_DATA_SYNC
-                and _dtype_vseq in (1, 2, 3, 4)
-                and len(_data) >= 53
-            ):
-                self.store_ta_from_voice_burst(
-                    _peer_id, _rf_src, _stream_id, _dtype_vseq, _data[20:53],
+            self._obp_sync_target_sock_from_peer(_sockaddr, _ingress.voice_frame[16:20])
+            self._obp_apply(
+                ingest_dmre_v5(
+                    _ingress,
+                    _sockaddr,
+                    policy=_policy,
+                    session=self._session,
+                    timestamp_ns=int.from_bytes(_timestamp, "big"),
+                    now=time.time(),
                 )
-            _data_dmrd = DMRD + _data[4:]
-            _hops_out = _inthops.to_bytes(1, "big")
-            if self._dmrd_received:
-                # Legacy hblink DMRE: same fields passed to dmrd_received as after increment (`hblink.py` ~592–596)
-                self._dmrd_received(
-                    self._system,
-                    _peer_id,
-                    _rf_src,
-                    _dst_id,
-                    _seq,
-                    _slot,
-                    _call_type,
-                    _frame_type,
-                    _dtype_vseq,
-                    _stream_id,
-                    _data_dmrd,
-                    obp_use_parsed=True,
-                    obp_hops=_hops_out,
-                    obp_source_server=_source_server,
-                    obp_ber=_ber,
-                    obp_rssi=_rssi,
-                    obp_source_rptr=_source_rptr,
-                )
-            self._session.note_keepalive(time.time())
+            )
         elif _packet[:4] == EOBP:
             logger.warning("(%s) *ProtoControl* KF7EEL EOBP protocol not supported", self._system)
         elif self._config.get("ENHANCED_OBP") and _packet[:2] == BC:

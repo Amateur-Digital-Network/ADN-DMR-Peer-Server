@@ -265,3 +265,11 @@ def test_asking_for_an_unknown_system_creates_an_empty_session() -> None:
     session = obp_session(_config(), "NOPE")
     assert session.peer_known is False
     assert session.keepalive_seen is False
+
+
+def test_refused_frames_are_tallied_by_reason() -> None:
+    session = _session()
+    session.count_drop("tg-filter")
+    session.count_drop("tg-filter")
+    session.count_drop("max-hops")
+    assert session.drops == {"tg-filter": 2, "max-hops": 1}

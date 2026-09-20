@@ -71,3 +71,11 @@ class ReportingUseCases:
                         "(ROUTER) not sending to system %s as last KeepAlive was %s seconds ago",
                         system_name, int(session.keepalive_age(now) or 0),
                     )
+                if session.drops:
+                    # Why this bridge refused frames, by reason: the answer to
+                    # "my call does not cross" without reading the whole log.
+                    logger.debug(
+                        "(ROUTER) system %s refused frames: %s",
+                        system_name,
+                        ", ".join(f"{reason}={count}" for reason, count in sorted(session.drops.items())),
+                    )
