@@ -181,7 +181,6 @@ class ObpFanInDemux:
         self._registry = registry
         self.debug = debug
         self._log = logger or _logger
-        self._last_stream: dict[str, bytes] = {}
 
     def deliver(
         self,
@@ -210,29 +209,17 @@ class ObpFanInDemux:
         entry = self._registry.bridges.get(system_name)
         if entry is None:
             return
-        if self.debug:
-            opcode = data[:4]
-            if opcode in (DMRD, DMRE) and len(data) >= 20:
-                stream_id = data[16:20]
-                if self._last_stream.get(system_name) != stream_id:
-                    self._last_stream[system_name] = stream_id
-                    self._log.debug(
-                        "(OBP_PROXY) RX %s from %s:%s stream=%s -> %s",
-                        opcode,
-                        host,
-                        port,
-                        stream_id.hex(),
-                        system_name,
-                    )
-            else:
-                self._log.debug(
-                    "(OBP_PROXY) RX %s from %s:%s len=%d -> %s",
-                    opcode,
-                    host,
-                    port,
-                    len(data),
-                    system_name,
-                )
+        if self.debug and data[:4] not in (DMRD, DMRE):
+            # DMRD/DMRE demux by NETWORK_ID, never ambiguous; *CALL START*/*CALL END*
+            # (routing_use_cases.py) already give once-per-call visibility for those.
+            self._log.debug(
+                "(OBP_PROXY) RX %s from %s:%s len=%d -> %s",
+                data[:4],
+                host,
+                port,
+                len(data),
+                system_name,
+            )
         entry.reply_transport.note_ingress(transport)
         entry.sink.inject(data, addr)
 
