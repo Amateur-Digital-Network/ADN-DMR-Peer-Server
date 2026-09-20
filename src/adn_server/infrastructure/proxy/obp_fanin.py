@@ -81,6 +81,23 @@ class InProcessObpSink:
         self._hbp._obp_datagram_received(data, client_addr)
 
 
+def peer_sock_from_config(cfg: dict[str, Any] | None) -> tuple[str, int] | None:
+    """``(ip, port)`` of a bridge's peer, or ``None`` when it is not known yet."""
+    if not cfg:
+        return None
+    sock = cfg.get("TARGET_SOCK")
+    if isinstance(sock, tuple) and len(sock) == 2:
+        host, port = sock
+    else:
+        host, port = cfg.get("TARGET_IP"), cfg.get("TARGET_PORT")
+    if not host:
+        return None
+    try:
+        return str(host), int(port)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class ObpBridgeEntry:
     system_name: str
@@ -91,6 +108,9 @@ class ObpBridgeEntry:
     legacy_port: int | None = None
     # Live SYSTEMS.<name> dict; used to tell bridges apart by peer address.
     sys_cfg: dict[str, Any] | None = None
+    # Peer as configured, snapshotted when the registry is built. RELAX_CHECKS
+    # rewrites TARGET_SOCK in sys_cfg at runtime; this one never moves.
+    peer_hint: tuple[str, int] | None = None
 
 
 @dataclass
@@ -107,30 +127,40 @@ class ObpBridgeRegistry:
         if entry.legacy_port is not None:
             self.by_legacy_port[entry.legacy_port] = entry.system_name
 
-    def bridges_by_peer(self, addr: tuple[str, int] | None) -> list[tuple[str, ObpBridgeEntry]]:
-        """Bridges ordered by how well their configured peer matches ``addr``.
+    @staticmethod
+    def _peer_rank(entry: ObpBridgeEntry, addr: tuple[str, int]) -> int:
+        host, port = addr
+        hint = entry.peer_hint
+        live = peer_sock_from_config(entry.sys_cfg)
+        if hint is not None and hint == (host, port):
+            return 0
+        if live is not None and live == (host, port):
+            return 1
+        if hint is not None and hint[0] == host:
+            return 2
+        if live is not None and live[0] == host:
+            return 3
+        return 4
 
-        Exact IP:port first, then same IP (a peer that answers from another local port,
-        e.g. its own fan-in), then the rest in registration order.
+    def bridges_by_peer(self, addr: tuple[str, int] | None) -> list[tuple[str, ObpBridgeEntry]]:
+        """Bridges ordered by how well their peer matches ``addr``.
+
+        The configured peer (``peer_hint``, taken from the YAML when the registry is
+        built) is tried before the live ``TARGET_SOCK``, which RELAX_CHECKS rewrites
+        in place whenever a bridge accepts traffic from an unexpected source: ranking
+        the live value first would let a single misattributed control frame move a
+        bridge's target and then keep matching that same wrong address. Matching the
+        live value after it still lets a peer that legitimately moved (dynamic IP,
+        learned from a DMRD, which carries NETWORK_ID) be recognised.
+
+        Order: configured IP:port, live IP:port, configured IP, live IP (a peer that
+        answers from another local port, e.g. its own fan-in), then registration
+        order.
         """
         items = list(self.bridges.items())
         if addr is None:
             return items
-        exact: list[tuple[str, ObpBridgeEntry]] = []
-        same_host: list[tuple[str, ObpBridgeEntry]] = []
-        rest: list[tuple[str, ObpBridgeEntry]] = []
-        for name, entry in items:
-            cfg = entry.sys_cfg or {}
-            sock = cfg.get("TARGET_SOCK")
-            host = sock[0] if isinstance(sock, tuple) else cfg.get("TARGET_IP")
-            port = sock[1] if isinstance(sock, tuple) else cfg.get("TARGET_PORT")
-            if host == addr[0] and port == addr[1]:
-                exact.append((name, entry))
-            elif host == addr[0]:
-                same_host.append((name, entry))
-            else:
-                rest.append((name, entry))
-        return exact + same_host + rest
+        return sorted(items, key=lambda item: self._peer_rank(item[1], addr))
 
     def clear(self) -> None:
         self.by_network_id.clear()
@@ -268,4 +298,5 @@ __all__ = [
     "ObpFanInProtocol",
     "ObpIngressReplyTransport",
     "listen_obp_fanin",
+    "peer_sock_from_config",
 ]

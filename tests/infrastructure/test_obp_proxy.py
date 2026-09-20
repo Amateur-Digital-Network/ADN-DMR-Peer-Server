@@ -35,6 +35,7 @@ from adn_server.application.proxy.deployment import (
 )
 from adn_server.domain import bytes_4
 from adn_server.domain.errors import ConfigError
+from adn_server.infrastructure.config_normalizer import normalize_obp_config
 from adn_server.infrastructure.config_validator import validate_config
 from adn_server.infrastructure.hbp_constants import DMRD
 from adn_server.infrastructure.mesh.obp_v1 import build_bcka, build_dmrd_v1
@@ -46,7 +47,11 @@ from adn_server.infrastructure.proxy.obp_fanin import (
     ObpFanInDemux,
     ObpIngressReplyTransport,
 )
-from adn_server.infrastructure.proxy.obp_runtime import build_obp_bridge_registry
+from adn_server.infrastructure.proxy.obp_runtime import (
+    apply_obp_proxy_config_reload,
+    build_obp_bridge_registry,
+    start_obp_proxy_service,
+)
 
 _PASS = b"test-passphrase\x00\x00\x00\x00\x00\x00"
 _NETWORK = bytes_4(73044)
@@ -68,9 +73,45 @@ class _RecordingTransport:
 class _RecordingObp:
     def __init__(self) -> None:
         self.packets: list[tuple[bytes, tuple[str, int]]] = []
+        self.transport: object | None = None
 
     def _obp_datagram_received(self, data: bytes, sockaddr: tuple[str, int]) -> None:
         self.packets.append((data, sockaddr))
+
+
+class _FakeSocket:
+    def setsockopt(self, *_args: object) -> None:
+        return None
+
+    def getsockopt(self, *_args: object) -> int:
+        return 0
+
+
+class _FakeUdpPort:
+    def __init__(self, port: int, protocol: object) -> None:
+        self.protocol = protocol
+        self.socket = _FakeSocket()
+        self.port = port
+
+    def getHost(self) -> _FakeUdpPort:
+        return self
+
+    def stopListening(self) -> None:
+        return None
+
+
+class _FakeReactor:
+    """listenUDP that hands each listener its own recording transport."""
+
+    def __init__(self) -> None:
+        self.transports: dict[int, _RecordingTransport] = {}
+
+    def listenUDP(self, port: int, protocol: object, interface: str = "") -> _FakeUdpPort:
+        transport = _RecordingTransport()
+        transport.port = port
+        protocol.transport = transport  # type: ignore[attr-defined]
+        self.transports[port] = transport
+        return _FakeUdpPort(port, protocol)
 
 
 def _sample_dmr_voice() -> bytes:
@@ -406,6 +447,7 @@ def test_control_frame_matches_peer_answering_from_another_port() -> None:
 
 
 def test_control_frame_unknown_peer_falls_back_to_passphrase() -> None:
+    """No address evidence: the shared passphrase can only pick the first bridge."""
     registry, protos = _shared_passphrase_registry()
     demux = ObpFanInDemux(registry)
     demux.deliver(
@@ -414,7 +456,8 @@ def test_control_frame_unknown_peer_falls_back_to_passphrase() -> None:
         local_port=62032,
         transport=_RecordingTransport(),
     )
-    assert protos["OBP-FR"].packets or protos["OBP-PT"].packets
+    assert protos["OBP-FR"].packets
+    assert not protos["OBP-PT"].packets
 
 
 def test_reply_transport_prefers_pinned_socket() -> None:
@@ -452,3 +495,76 @@ def test_yaml_loader_keeps_obp_proxy_block(tmp_path) -> None:
     config = YamlConfigLoader().load(str(path))
     assert config.get("OBP_PROXY") == {"ENABLED": False, "LISTEN_PORT": 62099}
     assert not obp_proxy_enabled(config)
+
+
+def _obp_mesh_config() -> dict:
+    """Two bridges on their own legacy ports, one shared passphrase."""
+    config = _obp_config()
+    del config["SYSTEMS"]["OBP-CL"]
+    for name, network, port, peer in (
+        ("OBP-FR", 20840, 62201, ("82.65.127.86", 62201)),
+        ("OBP-PT", 26811, 62268, ("85.241.222.7", 62268)),
+    ):
+        config["SYSTEMS"][name] = {
+            "MODE": "OPENBRIDGE",
+            "ENABLED": True,
+            "PORT": port,
+            "NETWORK_ID": network,
+            "PASSPHRASE": "test-passphrase",
+            "TARGET_IP": peer[0],
+            "TARGET_PORT": peer[1],
+        }
+    normalize_obp_config(config)
+    normalize_obp_proxy_targets(config)
+    return config
+
+
+def test_reload_keeps_egress_pinned_to_the_bridge_socket(monkeypatch) -> None:
+    """SIGHUP rebuilds the registry: the new reply transports must be re-pinned,
+    or egress silently goes back out of the shared fan-in port."""
+    import logging
+
+    from adn_server.infrastructure.proxy import obp_runtime
+
+    fake = _FakeReactor()
+    monkeypatch.setattr(obp_runtime, "reactor", fake)
+    config = _obp_mesh_config()
+    protocols = {name: _RecordingObp() for name in ("OBP-FR", "OBP-PT")}
+    logger = logging.getLogger("test-obp-proxy")
+
+    state = start_obp_proxy_service(config, protocols, logger=logger)
+    state.registry.bridges["OBP-FR"].reply_transport.write(b"ping", ("82.65.127.86", 62201))
+    assert len(fake.transports[62201].sent) == 1
+
+    for _ in range(2):
+        apply_obp_proxy_config_reload(state, config, protocols, logger=logger)
+
+    state.registry.bridges["OBP-FR"].reply_transport.write(b"ping", ("82.65.127.86", 62201))
+    state.registry.bridges["OBP-PT"].reply_transport.write(b"ping", ("85.241.222.7", 62268))
+    assert len(fake.transports[62201].sent) == 2
+    assert len(fake.transports[62268].sent) == 1
+    assert fake.transports[62032].sent == []
+
+
+def test_control_frame_prefers_configured_peer_over_relaxed_target() -> None:
+    """RELAX_CHECKS rewrites TARGET_SOCK in place; a bridge dragged onto another
+    bridge's address must not start stealing that peer's control frames."""
+    config = _obp_mesh_config()
+    protocols = {name: _RecordingObp() for name in ("OBP-FR", "OBP-PT")}
+    registry = build_obp_bridge_registry(
+        config,
+        protocols,
+        bind_legacy_ports=True,
+        listen_port=62032,
+        primary_transport=_RecordingTransport(),
+    )
+    peer_pt = ("85.241.222.7", 62268)
+    # What _obp_sync_target_sock_from_peer() does after a misattributed frame.
+    poisoned = config["SYSTEMS"]["OBP-FR"]
+    poisoned["TARGET_IP"], poisoned["TARGET_PORT"] = peer_pt
+    poisoned["TARGET_SOCK"] = peer_pt
+
+    demux = ObpFanInDemux(registry)
+    demux.deliver(build_bcka(_PASS), peer_pt, local_port=62032, transport=_RecordingTransport())
+    assert protocols["OBP-PT"].packets
+    assert not protocols["OBP-FR"].packets
