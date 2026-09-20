@@ -339,6 +339,30 @@ def test_only_the_system_that_was_asked_for() -> None:
         _replay([], config, system="OBP-NOPE")
 
 
+def test_what_this_server_sent_is_not_judged_as_ingress() -> None:
+    """An unfiltered capture carries both directions; egress is not ours to admit."""
+    verdicts = _replay([(_NOW, ("10.0.0.1", 62201), _FR, _voice())])
+    assert verdicts[0].outcome == "outbound"
+    assert verdicts[0].system is None
+
+
+def test_both_directions_can_be_judged_on_purpose() -> None:
+    verdicts = _replay([(_NOW, ("10.0.0.1", 62201), _FR, _voice())], only_inbound=False)
+    assert verdicts[0].outcome != "outbound"
+
+
+def test_server_ids_are_not_validated_without_the_table() -> None:
+    """The server-id list is loaded at runtime: offline it cannot be the reason."""
+    config = _config()
+    config["SYSTEMS"]["OBP-FR"]["VER"] = 5
+    config["GLOBAL"]["VALIDATE_SERVER_IDS"] = True
+    verdicts = _replay([(_NOW, _FR, ("10.0.0.1", 62201), _voice_v5())], config)
+    assert verdicts[0].outcome == "delivered"
+    config["_SERVER_IDS"] = {"9999"}
+    verdicts = _replay([(_NOW, _FR, ("10.0.0.1", 62201), _voice_v5())], config)
+    assert verdicts[0].reason == "source-server-unknown"
+
+
 def test_the_report_tallies_what_happened() -> None:
     verdicts = _replay(
         [

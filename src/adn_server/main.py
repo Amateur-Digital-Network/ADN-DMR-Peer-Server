@@ -102,6 +102,11 @@ def _parse_args() -> argparse.Namespace:
         help="With --replay: stop after this many datagrams",
     )
     parser.add_argument(
+        "--replay-both-directions",
+        action="store_true",
+        help="With --replay: also judge what this server sent (an unfiltered capture has both)",
+    )
+    parser.add_argument(
         "--replay-summary",
         action="store_true",
         help="With --replay: print the tally only, not one line per frame",
@@ -155,6 +160,7 @@ def main() -> None:
                 system=args.REPLAY_SYSTEM,
                 limit=args.REPLAY_LIMIT,
                 summary_only=args.replay_summary,
+                both_directions=args.replay_both_directions,
             )
         )
 

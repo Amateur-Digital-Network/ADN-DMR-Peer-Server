@@ -86,6 +86,32 @@ class Verdict:
         return f"{when}  {source:<24} {system:<12} {self.kind:<9} {call:<24} {verdict}"
 
 
+def _peer_hosts(systems: dict[str, dict[str, Any]]) -> set[str]:
+    """The addresses the configured peers live at."""
+    hosts: set[str] = set()
+    for sys_cfg in systems.values():
+        sock = sys_cfg.get("TARGET_SOCK")
+        host = sock[0] if isinstance(sock, tuple) else sys_cfg.get("TARGET_IP")
+        if host:
+            hosts.add(str(host))
+    return hosts
+
+
+def _listen_ports(systems: dict[str, dict[str, Any]], *, listen_port: int) -> set[int]:
+    """Ports this server receives OpenBridge on: the fan-in and each legacy bind."""
+    ports = {listen_port}
+    for sys_cfg in systems.values():
+        bridge_port = obp_bridge_legacy_listen_port(
+            sys_cfg, listen_port=listen_port, bind_legacy_ports=True
+        )
+        if bridge_port:
+            ports.add(int(bridge_port))
+        port = sys_cfg.get("_REPORT_PORT") or sys_cfg.get("PORT")
+        if port:
+            ports.add(int(port))
+    return ports
+
+
 def _openbridge_systems(config: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return {
         name: sys_cfg
@@ -112,9 +138,12 @@ def _policy(config: dict[str, Any], name: str, sys_cfg: dict[str, Any], router: 
             tg1_acl=sys_cfg.get("TG1_ACL", (True, [])),
         ),
         server_id=server_prefix(global_cfg.get("SERVER_ID", 0)),
-        validate_server_ids=bool(global_cfg.get("VALIDATE_SERVER_IDS")),
+        # The server-id list and the alias tables are loaded at runtime, not from
+        # the YAML, so offline we cannot answer "is this server known?" and saying
+        # "no" would blame every frame on a table we do not have.
+        validate_server_ids=bool(global_cfg.get("VALIDATE_SERVER_IDS")) and bool(config.get("_SERVER_IDS")),
         known_server_prefixes=config.get("_SERVER_IDS", set()),
-        resolve_server_id=lambda _sid: True,  # alias tables are not loaded offline
+        resolve_server_id=lambda _sid: True
     )
     return BridgePolicy(
         system=name,
@@ -174,6 +203,23 @@ def _candidates(
     return exact + same_host + rest
 
 
+def _is_inbound(
+    datagram: CapturedDatagram, peer_hosts: set[str], inbound_ports: set[int]
+) -> bool:
+    """Did this datagram arrive, or did we send it?
+
+    Both ends of an OpenBridge link usually sit on the same port number, so the
+    port alone cannot tell: the address does. A frame from a configured peer is
+    ingress, one addressed to a configured peer is ours. When neither matches
+    (a peer behind NAT, say), fall back to the port it was sent to.
+    """
+    if datagram.source[0] in peer_hosts:
+        return True
+    if datagram.destination[0] in peer_hosts:
+        return False
+    return datagram.destination[1] in inbound_ports
+
+
 def _control_verdict(datagram: CapturedDatagram, payload: bytes, system: str | None) -> Verdict:
     name = _CONTROL_NAMES.get(payload[:4], "BC?")
     return Verdict(
@@ -190,14 +236,19 @@ def replay(
     *,
     system: str | None = None,
     now: float | None = None,
+    only_inbound: bool = True,
 ) -> list[Verdict]:
     """Run captured datagrams through the ingress engine. Sends nothing."""
     systems = _openbridge_systems(config)
+    listen_port = int(config.get("OBP_PROXY", {}).get("LISTEN_PORT", 62032) or 62032)
+    # Which way a datagram was going is a property of the server, not of the
+    # bridge being looked at, so every enabled link counts here.
+    inbound_ports = _listen_ports(systems, listen_port=listen_port)
+    peer_hosts = _peer_hosts(systems)
     if system is not None:
         systems = {name: cfg for name, cfg in systems.items() if name == system}
         if not systems:
             raise KeyError(f"no enabled OPENBRIDGE system named {system!r}")
-    listen_port = int(config.get("OBP_PROXY", {}).get("LISTEN_PORT", 62032) or 62032)
     router = InMemoryAclRouter()
     registry = MeshCodecRegistry()
     store = MeshSessionStore()
@@ -210,6 +261,19 @@ def replay(
         if len(payload) < 4:
             continue
         opcode = payload[:4]
+        if only_inbound and not _is_inbound(datagram, peer_hosts, inbound_ports):
+            # An unfiltered capture carries both directions; what left this server
+            # is not ingress, and judging it would blame our own frames.
+            verdicts.append(
+                Verdict(
+                    datagram=datagram,
+                    kind=_CONTROL_NAMES.get(opcode, "DMRD v1" if opcode == DMRD else "DMRE v5")
+                    if opcode in _CONTROL_NAMES or opcode in (DMRD, DMRE)
+                    else "?",
+                    outcome="outbound",
+                )
+            )
+            continue
         if opcode[:2] == BC and opcode in _CONTROL_NAMES:
             names = _candidates(systems, datagram, listen_port=listen_port)
             verdicts.append(_control_verdict(datagram, payload, names[0] if names else None))
@@ -311,6 +375,7 @@ def run_replay(
     system: str | None = None,
     limit: int | None = None,
     summary_only: bool = False,
+    both_directions: bool = False,
     out: TextIO | None = None,
 ) -> int:
     """Read a capture, replay it, print the report. Returns 0 when it ran."""
@@ -323,7 +388,7 @@ def run_replay(
     if limit is not None:
         datagrams = datagrams[:limit]
     try:
-        verdicts = replay(config, datagrams, system=system)
+        verdicts = replay(config, datagrams, system=system, only_inbound=not both_directions)
     except KeyError as exc:
         print(f"ERROR system: {exc}", file=sys.stderr)
         return 1
