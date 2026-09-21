@@ -28,7 +28,11 @@ from typing import Any
 
 from twisted.internet import reactor
 
-from adn_server.application.proxy.deployment import obp_bridge_legacy_listen_port, obp_proxy_enabled
+from adn_server.application.proxy.deployment import (
+    obp_bridge_legacy_listen_port,
+    obp_proxy_enabled,
+    openbridge_passphrase_collisions,
+)
 from adn_server.domain.mesh_session import mesh_sessions
 from adn_server.infrastructure.proxy.obp_config import obp_proxy_settings
 from adn_server.infrastructure.proxy.obp_fanin import (
@@ -226,6 +230,13 @@ def start_obp_proxy_service(
     )
     if bridge_count == 0:
         logger.warning("(OBP_PROXY) No enabled OPENBRIDGE systems registered")
+    for shared in openbridge_passphrase_collisions(config):
+        logger.warning(
+            "(OBP_PROXY) %s share one PASSPHRASE: a control frame from an address none of "
+            "them is configured with goes to whichever is registered first — give each "
+            "bridge its own passphrase",
+            ", ".join(shared),
+        )
     return state
 
 
