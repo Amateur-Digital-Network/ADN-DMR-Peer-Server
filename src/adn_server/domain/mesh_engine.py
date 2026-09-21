@@ -186,12 +186,15 @@ def accepts_source(
 ) -> bool:
     """A frame counts as ours when it comes from the peer.
 
-    RELAX_CHECKS widens that to any address, for a peer on a dynamic IP — but not
-    when DNS owns the peer, or a second host with the passphrase would pass as it.
+    A name pins the host, never the port: a peer answers from whatever socket it
+    bound, which NAT may rewrite and which needs not be the port we send to. With
+    no name to go by, RELAX_CHECKS decides as it always has.
     """
     if addr == session.peer:
         return True
-    return bool(policy.relax_checks) and not session.dns_anchored
+    if session.dns_anchored:
+        return bool(addr) and addr[0] == session.peer[0]
+    return bool(policy.relax_checks)
 
 
 def _delivery_effects(

@@ -94,15 +94,31 @@ class ObpBridgeSession:
     # --- peer address --------------------------------------------------------
 
     @property
+    def _anchor(self) -> tuple[str, int] | None:
+        """Where the name puts this peer, once it has resolved to an address at all.
+
+        A name that has never resolved anchors nothing: the link has to keep working
+        on whatever RELAX_CHECKS allows, or a name server that was down at startup
+        would take it off the air.
+        """
+        if not self.dns_host:
+            return None
+        host, port = self.resolved_peer or self.configured_peer
+        return (host, port) if host else None
+
+    @property
     def dns_anchored(self) -> bool:
-        return bool(self.dns_host)
+        return self._anchor is not None
 
     @property
     def peer(self) -> tuple[str | None, int]:
-        """Where to send: DNS when it owns this peer, else what the wire taught us."""
-        if self.dns_anchored:
-            return self.resolved_peer or self.configured_peer
-        return self.learned_peer or self.configured_peer
+        """Where to send: DNS owns the host, the wire may still refine the port."""
+        anchor = self._anchor
+        if anchor is None:
+            return self.learned_peer or self.configured_peer
+        if self.learned_peer and self.learned_peer[0] == anchor[0]:
+            return self.learned_peer
+        return anchor
 
     @property
     def peer_known(self) -> bool:
@@ -112,9 +128,10 @@ class ObpBridgeSession:
         """Remember the address a datagram really came from. True when it moved."""
         if not addr or not addr[0]:
             return False
-        if self.dns_anchored:
-            return False
         host, port = str(addr[0]), int(addr[1])
+        anchor = self._anchor
+        if anchor is not None and host != anchor[0]:
+            return False  # only a re-resolution moves an anchored peer to another host
         if self.peer == (host, port):
             return False
         self.learned_peer = (host, port)
@@ -125,10 +142,11 @@ class ObpBridgeSession:
         """Move to where DNS now says the peer is. True when it moved."""
         host, port = str(addr[0]), int(addr[1])
         self.dns_checked_at = at
-        if self.peer == (host, port):
-            return False
+        was = self.peer
+        if self.learned_peer and self.learned_peer[0] != host:
+            self.learned_peer = None  # a port learned for the host it just left
         self.resolved_peer = (host, port)
-        return True
+        return self.peer != was
 
     def forget_learned_peer(self) -> None:
         """Drop what the wire taught us and fall back to the configured peer."""
