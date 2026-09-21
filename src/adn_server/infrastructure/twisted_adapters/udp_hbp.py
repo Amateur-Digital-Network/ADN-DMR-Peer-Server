@@ -155,11 +155,11 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MESH_REGISTRY = MeshCodecRegistry()
 
-# A DNS-anchored OBP peer is re-resolved on this cadence, and on demand when a
-# frame arrives from somewhere else — never more often than the shorter one, so
-# unknown traffic cannot drive a lookup per packet.
 OBP_DNS_REFRESH_S = 300.0
+# Floor for on-demand lookups: unknown traffic must not drive one per packet.
 OBP_DNS_MIN_INTERVAL_S = 15.0
+# How often a refused source is named again, per address and frame type.
+OBP_FOREIGN_LOG_INTERVAL_S = 60.0
 
 
 def get_user_password(radio_id: int):
@@ -272,7 +272,7 @@ class HBPProtocol(DatagramProtocol):
             self._bcsq_log_once: deque = deque(maxlen=1024)
             self._obp_target_sync_log_once: deque = deque(maxlen=1024)
             self._obp_foreign_bcka_log_once: deque = deque(maxlen=1024)
-            self._obp_foreign_source_log_once: deque = deque(maxlen=1024)
+            self._obp_foreign_source_seen: dict[tuple[Any, bytes], float] = {}
         else:
             self._laststrid = {1: b"", 2: b""}
             self.STATUS = {1: _make_slot_status(), 2: _make_slot_status()}
@@ -2172,18 +2172,23 @@ class HBPProtocol(DatagramProtocol):
                 _once.append(_stream_id)
 
     def _obp_reject_source(self, _opcode: bytes, _sockaddr: tuple[str, int]) -> None:
-        """Refuse a frame from an address DNS does not give for this peer, and ask again.
+        """Refuse a frame from an address this peer's name does not resolve to.
 
-        A peer really moving is exactly what this looks like, so the refusal
-        schedules a re-resolution: if the name now answers with this address, the
-        next frame is accepted.
+        A peer that really moved looks exactly like this, so the refusal asks DNS
+        again. Counting is explicit because refusing here never reaches the engine,
+        which is what tallies every other reason.
         """
+        self._session.count_drop("source-not-peer")
         self._obp_resolve_target()
-        _once = getattr(self, "_obp_foreign_source_log_once", None)
-        if isinstance(_once, deque) and _sockaddr in _once:
-            return
-        if isinstance(_once, deque):
-            _once.append(_sockaddr)
+        _seen = getattr(self, "_obp_foreign_source_seen", None)
+        if isinstance(_seen, dict):
+            _key = (_sockaddr, _opcode)
+            _now = time.time()
+            if _now - _seen.get(_key, 0.0) < OBP_FOREIGN_LOG_INTERVAL_S:
+                return
+            if len(_seen) > 256:
+                _seen.clear()
+            _seen[_key] = _now
         _peer = self._session.peer
         _why = (
             f"{self._session.dns_host} resolves to {_peer[0]}:{_peer[1]}"
@@ -2200,11 +2205,7 @@ class HBPProtocol(DatagramProtocol):
         )
 
     def _obp_resolve_target(self) -> None:
-        """Ask DNS where this peer is now: non-blocking, and rate limited.
-
-        Never resolve on the datagram thread — an unknown source must not be able
-        to drive a lookup per packet.
-        """
+        """Ask DNS where this peer is now, off the datagram path and rate limited."""
         _session = self._session
         if not _session.dns_anchored:
             return
@@ -2228,9 +2229,9 @@ class HBPProtocol(DatagramProtocol):
                 _was[0],
                 _was[1],
             )
-            _once = getattr(self, "_obp_foreign_source_log_once", None)
-            if isinstance(_once, deque):
-                _once.clear()
+            _seen = getattr(self, "_obp_foreign_source_seen", None)
+            if isinstance(_seen, dict):
+                _seen.clear()
 
     def _obp_target_resolve_failed(self, _failure: Any) -> None:
         """Keep the address we have: a name server hiccup must not drop the link."""
@@ -2400,8 +2401,7 @@ class HBPProtocol(DatagramProtocol):
         elif _packet[:4] == EOBP:
             logger.warning("(%s) *ProtoControl* KF7EEL EOBP protocol not supported", self._system)
         elif self._config.get("ENHANCED_OBP") and _packet[:2] == BC:
-            # Control frames carry no NETWORK_ID, so the source address is the only
-            # thing telling one sender from another on a shared-passphrase mesh.
+            # No NETWORK_ID here, so the source address is all that tells senders apart.
             if not accepts_source(_sockaddr, policy=self._obp_policy(), session=self._session):
                 self._obp_reject_source(_packet[:4], _sockaddr)
                 return
@@ -2411,10 +2411,8 @@ class HBPProtocol(DatagramProtocol):
                     _session = self._session
                     _now = time.time()
                     _session.note_keepalive(_now)
-                    # BCKA carries no NETWORK_ID, so with a shared passphrase anyone's
-                    # keepalive verifies here: it may bootstrap a peer we have no address
-                    # for, never move one we already have. DMRD/DMRE identify themselves
-                    # and do that instead (_obp_sync_target_sock_from_peer).
+                    # Anyone with the passphrase can send one, so it may bootstrap a peer
+                    # we have no address for, never move one we have. DMRD/DMRE do that.
                     if not _session.peer_known:
                         if _session.learn_peer(_sockaddr, at=_now):
                             logger.info(

@@ -186,10 +186,8 @@ def accepts_source(
 ) -> bool:
     """A frame counts as ours when it comes from the peer.
 
-    RELAX_CHECKS widens that to any address, which is how a peer on a dynamic IP
-    keeps working. It does not widen it when DNS owns the peer: there the name is
-    the identity and only a re-resolution may move it, so a second host holding
-    the same passphrase is not mistaken for the peer.
+    RELAX_CHECKS widens that to any address, for a peer on a dynamic IP — but not
+    when DNS owns the peer, or a second host with the passphrase would pass as it.
     """
     if addr == session.peer:
         return True

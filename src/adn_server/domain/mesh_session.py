@@ -61,12 +61,8 @@ def _peer_from_config(sys_cfg: dict[str, Any] | None) -> tuple[str | None, int]:
 
 
 def dns_host_from_config(sys_cfg: dict[str, Any] | None) -> str | None:
-    """``TARGET_IP`` as written, when it was a hostname rather than a literal address.
-
-    ``normalize_obp_config`` keeps the original under ``_TARGET_IP`` before it
-    overwrites ``TARGET_IP`` with what the name resolved to, the same way PEER
-    systems keep ``_MASTER_IP``.
-    """
+    """``TARGET_IP`` as written, when a hostname: ``normalize_obp_config`` keeps it
+    under ``_TARGET_IP`` before overwriting ``TARGET_IP`` with the resolved address."""
     original = (sys_cfg or {}).get("_TARGET_IP")
     if not original:
         return None
@@ -90,8 +86,7 @@ class ObpBridgeSession:
     quenched: dict[bytes, bytes] = field(default_factory=dict)
     stunned: bool = False
     drops: dict[str, int] = field(default_factory=dict)
-    # TARGET_IP as the operator wrote it, when that was a hostname. Set means DNS
-    # owns this peer's address: nothing the wire says can move it.
+    # Set means DNS owns this address: nothing the wire says can move it.
     dns_host: str | None = None
     resolved_peer: tuple[str, int] | None = None
     dns_checked_at: float = 0.0
@@ -117,7 +112,7 @@ class ObpBridgeSession:
         """Remember the address a datagram really came from. True when it moved."""
         if not addr or not addr[0]:
             return False
-        if self.dns_anchored:  # only a re-resolution may move a DNS-anchored peer
+        if self.dns_anchored:
             return False
         host, port = str(addr[0]), int(addr[1])
         if self.peer == (host, port):
