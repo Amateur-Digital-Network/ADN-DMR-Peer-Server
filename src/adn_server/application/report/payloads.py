@@ -283,6 +283,11 @@ _TOPOLOGY_PEER_FIELDS: tuple[tuple[str, str], ...] = (
     ("SOFTWARE_ID", "software_id"),
     ("COLORCODE", "colorcode"),
     ("TX_POWER", "tx_power"),
+    # Site data the peer sends in RPTC. The monitor needs it to place the peer
+    # on its map; it is the same information the Linked Systems page shows.
+    ("LATITUDE", "latitude"),
+    ("LONGITUDE", "longitude"),
+    ("HEIGHT", "height"),
 )
 
 
