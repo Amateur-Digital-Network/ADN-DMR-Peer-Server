@@ -151,6 +151,9 @@ def normalize_obp_config(config: dict) -> None:
         sys_cfg["NETWORK_ID"] = (net_id & 0xFFFFFFFF).to_bytes(4, "big")
         target_ip = str(sys_cfg.get("TARGET_IP", ""))
         target_port = int(sys_cfg.get("TARGET_PORT", 62044))
+        # Keep the name the operator wrote, like PEER keeps _MASTER_IP: resolving
+        # here overwrites TARGET_IP, and a hostname has to stay re-resolvable.
+        sys_cfg["_TARGET_IP"] = target_ip
         if target_ip:
             try:
                 resolved = socket.gethostbyname(target_ip)

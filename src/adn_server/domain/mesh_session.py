@@ -36,6 +36,7 @@ question it actually means — "has a keepalive ever arrived?", "is it stale?",
 
 from __future__ import annotations
 
+import ipaddress
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -59,6 +60,24 @@ def _peer_from_config(sys_cfg: dict[str, Any] | None) -> tuple[str | None, int]:
     return (str(host) if host else None, port)
 
 
+def dns_host_from_config(sys_cfg: dict[str, Any] | None) -> str | None:
+    """``TARGET_IP`` as written, when it was a hostname rather than a literal address.
+
+    ``normalize_obp_config`` keeps the original under ``_TARGET_IP`` before it
+    overwrites ``TARGET_IP`` with what the name resolved to, the same way PEER
+    systems keep ``_MASTER_IP``.
+    """
+    original = (sys_cfg or {}).get("_TARGET_IP")
+    if not original:
+        return None
+    text = str(original).strip()
+    try:
+        ipaddress.ip_address(text)
+    except ValueError:
+        return text or None
+    return None
+
+
 @dataclass
 class ObpBridgeSession:
     """What one OpenBridge link knows about its peer right now."""
@@ -71,12 +90,23 @@ class ObpBridgeSession:
     quenched: dict[bytes, bytes] = field(default_factory=dict)
     stunned: bool = False
     drops: dict[str, int] = field(default_factory=dict)
+    # TARGET_IP as the operator wrote it, when that was a hostname. Set means DNS
+    # owns this peer's address: nothing the wire says can move it.
+    dns_host: str | None = None
+    resolved_peer: tuple[str, int] | None = None
+    dns_checked_at: float = 0.0
 
     # --- peer address --------------------------------------------------------
 
     @property
+    def dns_anchored(self) -> bool:
+        return bool(self.dns_host)
+
+    @property
     def peer(self) -> tuple[str | None, int]:
-        """Where to send: what the wire taught us, else what the YAML says."""
+        """Where to send: DNS when it owns this peer, else what the wire taught us."""
+        if self.dns_anchored:
+            return self.resolved_peer or self.configured_peer
         return self.learned_peer or self.configured_peer
 
     @property
@@ -87,11 +117,22 @@ class ObpBridgeSession:
         """Remember the address a datagram really came from. True when it moved."""
         if not addr or not addr[0]:
             return False
+        if self.dns_anchored:  # only a re-resolution may move a DNS-anchored peer
+            return False
         host, port = str(addr[0]), int(addr[1])
         if self.peer == (host, port):
             return False
         self.learned_peer = (host, port)
         self.learned_at = at
+        return True
+
+    def adopt_resolved(self, addr: tuple[str, int], *, at: float) -> bool:
+        """Move to where DNS now says the peer is. True when it moved."""
+        host, port = str(addr[0]), int(addr[1])
+        self.dns_checked_at = at
+        if self.peer == (host, port):
+            return False
+        self.resolved_peer = (host, port)
         return True
 
     def forget_learned_peer(self) -> None:
@@ -191,10 +232,12 @@ class MeshSessionStore:
             session = ObpBridgeSession(
                 system_name=system_name,
                 configured_peer=_peer_from_config(sys_cfg),
+                dns_host=dns_host_from_config(sys_cfg),
             )
             self._sessions[system_name] = session
         elif sys_cfg is not None:
             session.configured_peer = _peer_from_config(sys_cfg)
+            session.dns_host = dns_host_from_config(sys_cfg)
         return session
 
     def drop(self, system_name: str) -> None:
