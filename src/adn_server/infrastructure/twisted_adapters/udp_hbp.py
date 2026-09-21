@@ -265,6 +265,7 @@ class HBPProtocol(DatagramProtocol):
             self.STATUS: dict[Any, Any] = {}
             self._bcsq_log_once: deque = deque(maxlen=1024)
             self._obp_target_sync_log_once: deque = deque(maxlen=1024)
+            self._obp_foreign_bcka_log_once: deque = deque(maxlen=1024)
         else:
             self._laststrid = {1: b"", 2: b""}
             self.STATUS = {1: _make_slot_status(), 2: _make_slot_status()}
@@ -2320,11 +2321,34 @@ class HBPProtocol(DatagramProtocol):
             if _packet[:4] == BCKA and len(_packet) >= 24:
                 if verify_bcka(_packet, _passphrase):
                     _session = self._session
-                    _was = _session.peer
                     _now = time.time()
                     _session.note_keepalive(_now)
-                    if _session.learn_peer(_sockaddr, at=_now):
-                        logger.info("(%s) *BridgeControl* Source IP and Port has changed for OBP from %s:%s to %s:%s, updating", self._system, _was[0], _was[1], _sockaddr[0], _sockaddr[1])
+                    # BCKA carries no NETWORK_ID, so with a shared passphrase anyone's
+                    # keepalive verifies here: it may bootstrap a peer we have no address
+                    # for, never move one we already have. DMRD/DMRE identify themselves
+                    # and do that instead (_obp_sync_target_sock_from_peer).
+                    if not _session.peer_known:
+                        if _session.learn_peer(_sockaddr, at=_now):
+                            logger.info(
+                                "(%s) *BridgeControl* OBP peer address learned from keepalive: %s:%s",
+                                self._system,
+                                _sockaddr[0],
+                                _sockaddr[1],
+                            )
+                    elif _sockaddr != _session.peer:
+                        _once = getattr(self, "_obp_foreign_bcka_log_once", None)
+                        if not isinstance(_once, deque) or _sockaddr not in _once:
+                            if isinstance(_once, deque):
+                                _once.append(_sockaddr)
+                            logger.debug(
+                                "(%s) *BridgeControl* BCKA from %s:%s is not this bridge's peer %s:%s "
+                                "(keepalive only; a second instance of the peer, or another bridge sharing the passphrase)",
+                                self._system,
+                                _sockaddr[0],
+                                _sockaddr[1],
+                                _session.peer[0],
+                                _session.peer[1],
+                            )
                 else:
                     logger.info("(%s) *BridgeControl* BCKA invalid KeepAlive, packet discarded", self._system)
             # Source quench — legacy hblink.py OPENBRIDGE ~629-639 (sets CONFIG['_bcsq'][tgid]=stream_id)

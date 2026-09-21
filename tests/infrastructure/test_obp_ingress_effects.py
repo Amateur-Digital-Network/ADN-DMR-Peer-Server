@@ -30,7 +30,16 @@ read it before regenerating with ``CAPTURE=1``.
 from __future__ import annotations
 
 import pytest
-from tests.harness.obp_ingress import CASES, FIXTURE, as_json, capture_enabled, load, observe, record
+from tests.harness.obp_ingress import (
+    CASES,
+    FIXTURE,
+    PEER,
+    as_json,
+    capture_enabled,
+    load,
+    observe,
+    record,
+)
 
 
 @pytest.fixture(scope="module")
@@ -50,3 +59,28 @@ def test_corpus_covers_every_case(recorded: dict[str, dict]) -> None:
 def test_ingress_effects_match_the_recording(case: dict, recorded: dict[str, dict]) -> None:
     expected = recorded[case["name"]]["effects"]
     assert as_json(observe(case)) == expected
+
+
+@pytest.mark.parametrize(
+    "case",
+    [c for c in CASES if c["kind"] == "bcka" and not c.get("no_peer")],
+    ids=lambda c: c["name"],
+)
+def test_a_keepalive_never_moves_egress_off_the_peer(case: dict) -> None:
+    """A keepalive carries no NETWORK_ID, so anyone holding the passphrase can send
+    one: a second instance of the peer, or another bridge on a shared-passphrase
+    mesh. It must not decide where this bridge transmits. Recorded above as well,
+    but asserted here so regenerating the corpus cannot drop it.
+    """
+    for _size, addr in observe(case)["egress"]:
+        assert tuple(addr) == PEER
+
+
+def test_a_keepalive_bootstraps_a_bridge_with_no_configured_peer() -> None:
+    """The other half: with no TARGET_IP there is nothing to protect and nothing to
+    steal, and the keepalive is the only way an inbound-only bridge learns where to
+    answer. Bootstrapping an unknown peer stays allowed.
+    """
+    case = next(c for c in CASES if c.get("no_peer"))
+    for _size, addr in observe(case)["egress"]:
+        assert tuple(addr) == PEER

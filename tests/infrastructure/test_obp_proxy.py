@@ -37,6 +37,7 @@ from adn_server.application.proxy.deployment import (
 )
 from adn_server.domain import bytes_4
 from adn_server.domain.errors import ConfigError
+from adn_server.domain.mesh_session import obp_session
 from adn_server.infrastructure.config_normalizer import normalize_obp_config
 from adn_server.infrastructure.config_validator import validate_config
 from adn_server.infrastructure.hbp_constants import DMRD
@@ -417,7 +418,7 @@ def _shared_passphrase_registry() -> tuple[ObpBridgeRegistry, dict[str, _Recordi
                 passphrase=_PASS,
                 sink=InProcessObpSink(proto),
                 reply_transport=ObpIngressReplyTransport(_RecordingTransport()),
-                sys_cfg={"TARGET_SOCK": peer, "TARGET_IP": peer[0], "TARGET_PORT": peer[1]},
+                peer_hint=peer,
             )
         )
     return registry, protos
@@ -548,9 +549,9 @@ def test_reload_keeps_egress_pinned_to_the_bridge_socket(monkeypatch) -> None:
     assert fake.transports[62032].sent == []
 
 
-def test_control_frame_prefers_configured_peer_over_relaxed_target() -> None:
-    """RELAX_CHECKS rewrites TARGET_SOCK in place; a bridge dragged onto another
-    bridge's address must not start stealing that peer's control frames."""
+def test_control_frame_prefers_configured_peer_over_learned_one() -> None:
+    """A bridge that learned another bridge's address must not start stealing that
+    peer's control frames: the configured peer outranks anything learned."""
     config = _obp_mesh_config()
     protocols = {name: _RecordingObp() for name in ("OBP-FR", "OBP-PT")}
     registry = build_obp_bridge_registry(
@@ -561,14 +562,33 @@ def test_control_frame_prefers_configured_peer_over_relaxed_target() -> None:
         primary_transport=_RecordingTransport(),
     )
     peer_pt = ("85.241.222.7", 62268)
-    # What _obp_sync_target_sock_from_peer() does after a misattributed frame.
-    poisoned = config["SYSTEMS"]["OBP-FR"]
-    poisoned["TARGET_IP"], poisoned["TARGET_PORT"] = peer_pt
-    poisoned["TARGET_SOCK"] = peer_pt
+    obp_session(config, "OBP-FR").learn_peer(peer_pt, at=1.0)
 
     demux = ObpFanInDemux(registry)
     demux.deliver(build_bcka(_PASS), peer_pt, local_port=62032, transport=_RecordingTransport())
     assert protocols["OBP-PT"].packets
+    assert not protocols["OBP-FR"].packets
+
+
+def test_control_frame_follows_a_peer_that_moved() -> None:
+    """Voice (DMRD/DMRE, which carries NETWORK_ID) teaches the session where a peer
+    really is; control frames from there must resolve to it, not to whichever bridge
+    happens to be registered first."""
+    config = _obp_mesh_config()
+    protocols = {name: _RecordingObp() for name in ("OBP-FR", "OBP-PT")}
+    registry = build_obp_bridge_registry(
+        config,
+        protocols,
+        bind_legacy_ports=True,
+        listen_port=62032,
+        primary_transport=_RecordingTransport(),
+    )
+    moved_to = ("129.80.176.29", 62268)
+    obp_session(config, "OBP-PT").learn_peer(moved_to, at=1.0)
+
+    demux = ObpFanInDemux(registry)
+    demux.deliver(build_bcka(_PASS), moved_to, local_port=62032, transport=_RecordingTransport())
+    assert protocols["OBP-PT"].packets, "the keepalive did not follow the peer that moved"
     assert not protocols["OBP-FR"].packets
 
 

@@ -122,6 +122,9 @@ def build_config(case: dict[str, Any]) -> dict[str, Any]:
         "_PEER_IDS": {},
         "_LOCAL_SUBSCRIBER_IDS": {},
     }
+    if case.get("no_peer"):  # inbound-only bridge: the operator set no TARGET_IP
+        system["TARGET_IP"] = None
+        system["TARGET_SOCK"] = (None, PEER[1])
     if case.get("stun"):
         config["STUN"] = True
     return config
@@ -275,6 +278,7 @@ def _cases() -> list[dict[str, Any]]:
     ):
         for relax in (False, True):
             add(kind=kind, desc=f"from {addr[0]}:{addr[1]} relax={relax}", relax=relax, **{"from": list(addr)})
+    add(kind="bcka", desc="with no TARGET_IP configured", no_peer=True, **{"from": list(PEER)})
     return cases
 
 

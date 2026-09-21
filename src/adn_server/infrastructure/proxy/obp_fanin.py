@@ -28,6 +28,7 @@ from typing import Any, Protocol
 
 from twisted.internet.protocol import DatagramProtocol
 
+from adn_server.domain.mesh_session import MeshSessionStore
 from adn_server.infrastructure.hbp_constants import BCKA, BCSQ, BCST, BCVE, DMRD, DMRE
 from adn_server.infrastructure.mesh.obp_v1 import verify_bcka, verify_bcsq, verify_bcst, verify_bcve
 from adn_server.infrastructure.udp_rcvbuf import apply_udp_rcvbuf, udp_rcvbuf_bytes
@@ -106,10 +107,7 @@ class ObpBridgeEntry:
     sink: InProcessObpSink
     reply_transport: ObpIngressReplyTransport
     legacy_port: int | None = None
-    # Live SYSTEMS.<name> dict; used to tell bridges apart by peer address.
-    sys_cfg: dict[str, Any] | None = None
-    # Peer as configured, snapshotted when the registry is built. RELAX_CHECKS
-    # rewrites TARGET_SOCK in sys_cfg at runtime; this one never moves.
+    # Peer as configured, snapshotted when the registry is built.
     peer_hint: tuple[str, int] | None = None
 
 
@@ -120,6 +118,8 @@ class ObpBridgeRegistry:
     by_network_id: dict[bytes, str] = field(default_factory=dict)
     by_legacy_port: dict[int, str] = field(default_factory=dict)
     bridges: dict[str, ObpBridgeEntry] = field(default_factory=dict)
+    # Where each bridge's peer actually is, as DMRD/DMRE taught it.
+    sessions: MeshSessionStore | None = None
 
     def register(self, entry: ObpBridgeEntry) -> None:
         self.bridges[entry.system_name] = entry
@@ -127,35 +127,38 @@ class ObpBridgeRegistry:
         if entry.legacy_port is not None:
             self.by_legacy_port[entry.legacy_port] = entry.system_name
 
-    @staticmethod
-    def _peer_rank(entry: ObpBridgeEntry, addr: tuple[str, int]) -> int:
+    def _learned_peer(self, system_name: str) -> tuple[str, int] | None:
+        if self.sessions is None:
+            return None
+        session = self.sessions.get(system_name)
+        return session.learned_peer if session is not None else None
+
+    def _peer_rank(self, entry: ObpBridgeEntry, addr: tuple[str, int]) -> int:
         host, port = addr
         hint = entry.peer_hint
-        live = peer_sock_from_config(entry.sys_cfg)
+        learned = self._learned_peer(entry.system_name)
         if hint is not None and hint == (host, port):
             return 0
-        if live is not None and live == (host, port):
+        if learned is not None and learned == (host, port):
             return 1
         if hint is not None and hint[0] == host:
             return 2
-        if live is not None and live[0] == host:
+        if learned is not None and learned[0] == host:
             return 3
         return 4
 
     def bridges_by_peer(self, addr: tuple[str, int] | None) -> list[tuple[str, ObpBridgeEntry]]:
         """Bridges ordered by how well their peer matches ``addr``.
 
-        The configured peer (``peer_hint``, taken from the YAML when the registry is
-        built) is tried before the live ``TARGET_SOCK``, which RELAX_CHECKS rewrites
-        in place whenever a bridge accepts traffic from an unexpected source: ranking
-        the live value first would let a single misattributed control frame move a
-        bridge's target and then keep matching that same wrong address. Matching the
-        live value after it still lets a peer that legitimately moved (dynamic IP,
-        learned from a DMRD, which carries NETWORK_ID) be recognised.
+        The configured peer (``peer_hint``, from the YAML) is tried before the learned
+        one so a wrong match can never entrench itself; the learned one is what lets a
+        peer that really moved still be recognised. It comes from the session store,
+        where only DMRD/DMRE put it — they carry NETWORK_ID, so they cannot be
+        misattributed the way a control frame can.
 
-        Order: configured IP:port, live IP:port, configured IP, live IP (a peer that
-        answers from another local port, e.g. its own fan-in), then registration
-        order.
+        Order: configured IP:port, learned IP:port, configured IP, learned IP (a peer
+        answering from another local port, e.g. its own fan-in), then registration
+        order — where a shared passphrase leaves nothing else to go on.
         """
         items = list(self.bridges.items())
         if addr is None:
