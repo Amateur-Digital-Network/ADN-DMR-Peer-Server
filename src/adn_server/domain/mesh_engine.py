@@ -184,8 +184,16 @@ def reject_v1_protocol(stream_id: bytes, *, policy: BridgePolicy) -> list[Effect
 def accepts_source(
     addr: tuple[str, int] | None, *, policy: BridgePolicy, session: ObpBridgeSession
 ) -> bool:
-    """A frame counts as ours when it comes from the peer, or RELAX_CHECKS is on."""
-    return bool(policy.relax_checks) or addr == session.peer
+    """A frame counts as ours when it comes from the peer.
+
+    RELAX_CHECKS widens that to any address, which is how a peer on a dynamic IP
+    keeps working. It does not widen it when DNS owns the peer: there the name is
+    the identity and only a re-resolution may move it, so a second host holding
+    the same passphrase is not mistaken for the peer.
+    """
+    if addr == session.peer:
+        return True
+    return bool(policy.relax_checks) and not session.dns_anchored
 
 
 def _delivery_effects(

@@ -29,6 +29,7 @@ from typing import Any
 from twisted.internet import reactor
 
 from adn_server.application.proxy.deployment import obp_bridge_legacy_listen_port, obp_proxy_enabled
+from adn_server.domain.mesh_session import mesh_sessions
 from adn_server.infrastructure.proxy.obp_config import obp_proxy_settings
 from adn_server.infrastructure.proxy.obp_fanin import (
     InProcessObpSink,
@@ -50,7 +51,7 @@ def build_obp_bridge_registry(
     primary_transport: Any,
 ) -> ObpBridgeRegistry:
     """Register enabled OPENBRIDGE systems for fan-in demux."""
-    registry = ObpBridgeRegistry()
+    registry = ObpBridgeRegistry(sessions=mesh_sessions(config))
     systems = config.get("SYSTEMS", {})
     if not isinstance(systems, dict):
         return registry
@@ -83,7 +84,6 @@ def build_obp_bridge_registry(
             sink=InProcessObpSink(proto),
             reply_transport=reply,
             legacy_port=legacy_port if legacy_port and legacy_port > 0 else None,
-            sys_cfg=sys_cfg,
             peer_hint=peer_sock_from_config(sys_cfg),
         )
         registry.register(entry)

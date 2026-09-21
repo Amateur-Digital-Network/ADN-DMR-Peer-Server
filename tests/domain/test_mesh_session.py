@@ -51,6 +51,55 @@ def _config(**overrides) -> dict:
     return {"SYSTEMS": {"OBP-FR": sys_cfg}}
 
 
+# --- peer anchored to DNS -----------------------------------------------------
+
+
+def _dns_session() -> ObpBridgeSession:
+    return ObpBridgeSession(
+        system_name="OBP-FR", configured_peer=_CONFIGURED, dns_host="peer.example.net"
+    )
+
+
+def test_a_dns_anchored_peer_ignores_what_the_wire_says() -> None:
+    """The name is the identity: a host that holds the passphrase but is not what
+    the name resolves to cannot take the link over."""
+    session = _dns_session()
+    assert session.dns_anchored
+    assert session.learn_peer(_ELSEWHERE, at=_NOW) is False
+    assert session.peer == _CONFIGURED
+
+
+def test_a_dns_anchored_peer_moves_when_the_name_resolves_elsewhere() -> None:
+    session = _dns_session()
+    assert session.adopt_resolved(_ELSEWHERE, at=_NOW) is True
+    assert session.peer == _ELSEWHERE
+    assert session.dns_checked_at == _NOW
+
+
+def test_resolving_to_the_same_address_is_not_a_move() -> None:
+    session = _dns_session()
+    assert session.adopt_resolved(_CONFIGURED, at=_NOW) is False
+    assert session.peer == _CONFIGURED
+    assert session.dns_checked_at == _NOW
+
+
+def test_a_target_written_as_an_address_is_not_dns_anchored() -> None:
+    """Only a name can be re-resolved; a literal address keeps the old behaviour."""
+    store = MeshSessionStore()
+    session = store.session("OBP-FR", {"_TARGET_IP": _CONFIGURED[0], "TARGET_SOCK": _CONFIGURED})
+    assert session.dns_anchored is False
+    assert session.learn_peer(_ELSEWHERE, at=_NOW) is True
+
+
+def test_a_target_written_as_a_name_is_dns_anchored() -> None:
+    store = MeshSessionStore()
+    session = store.session(
+        "OBP-FR", {"_TARGET_IP": "peer.example.net", "TARGET_SOCK": _CONFIGURED}
+    )
+    assert session.dns_host == "peer.example.net"
+    assert session.peer == _CONFIGURED
+
+
 # --- peer address ------------------------------------------------------------
 
 

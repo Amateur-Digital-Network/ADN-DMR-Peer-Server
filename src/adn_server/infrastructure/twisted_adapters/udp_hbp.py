@@ -155,6 +155,12 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MESH_REGISTRY = MeshCodecRegistry()
 
+# A DNS-anchored OBP peer is re-resolved on this cadence, and on demand when a
+# frame arrives from somewhere else — never more often than the shorter one, so
+# unknown traffic cannot drive a lookup per packet.
+OBP_DNS_REFRESH_S = 300.0
+OBP_DNS_MIN_INTERVAL_S = 15.0
+
 
 def get_user_password(radio_id: int):
     """Legacy get_user_password (hblink.py). Stub: returns None (no individual passwords)."""
@@ -265,6 +271,8 @@ class HBPProtocol(DatagramProtocol):
             self.STATUS: dict[Any, Any] = {}
             self._bcsq_log_once: deque = deque(maxlen=1024)
             self._obp_target_sync_log_once: deque = deque(maxlen=1024)
+            self._obp_foreign_bcka_log_once: deque = deque(maxlen=1024)
+            self._obp_foreign_source_log_once: deque = deque(maxlen=1024)
         else:
             self._laststrid = {1: b"", 2: b""}
             self.STATUS = {1: _make_slot_status(), 2: _make_slot_status()}
@@ -321,6 +329,10 @@ class HBPProtocol(DatagramProtocol):
                 self._bcve_loop = task.LoopingCall(self._obp_send_bcve)
                 _bcve_d = self._bcve_loop.start(60)
                 _bcve_d.addErrback(self._looping_err_handle)
+            if self._session.dns_anchored:
+                self._dns_loop = task.LoopingCall(self._obp_resolve_target)
+                _dns_d = self._dns_loop.start(OBP_DNS_REFRESH_S, now=False)
+                _dns_d.addErrback(self._looping_err_handle)
         elif self._config.get("MODE") == "MASTER":
             ping_time = self._CONFIG.get("GLOBAL", {}).get("PING_TIME", 10)
             self._maintenance_loop = task.LoopingCall(self._master_maintenance_loop)
@@ -2159,6 +2171,77 @@ class HBPProtocol(DatagramProtocol):
             if _stream_id is not None and isinstance(_once, deque):
                 _once.append(_stream_id)
 
+    def _obp_reject_source(self, _opcode: bytes, _sockaddr: tuple[str, int]) -> None:
+        """Refuse a frame from an address DNS does not give for this peer, and ask again.
+
+        A peer really moving is exactly what this looks like, so the refusal
+        schedules a re-resolution: if the name now answers with this address, the
+        next frame is accepted.
+        """
+        self._obp_resolve_target()
+        _once = getattr(self, "_obp_foreign_source_log_once", None)
+        if isinstance(_once, deque) and _sockaddr in _once:
+            return
+        if isinstance(_once, deque):
+            _once.append(_sockaddr)
+        _peer = self._session.peer
+        _why = (
+            f"{self._session.dns_host} resolves to {_peer[0]}:{_peer[1]}"
+            if self._session.dns_anchored
+            else f"this bridge's peer is {_peer[0]}:{_peer[1]}"
+        )
+        logger.info(
+            "(%s) *BridgeControl* %s from %s:%s discarded: %s",
+            self._system,
+            _opcode.decode("ascii", errors="replace"),
+            _sockaddr[0],
+            int(_sockaddr[1]),
+            _why,
+        )
+
+    def _obp_resolve_target(self) -> None:
+        """Ask DNS where this peer is now: non-blocking, and rate limited.
+
+        Never resolve on the datagram thread — an unknown source must not be able
+        to drive a lookup per packet.
+        """
+        _session = self._session
+        if not _session.dns_anchored:
+            return
+        _now = time.time()
+        if _now - _session.dns_checked_at < OBP_DNS_MIN_INTERVAL_S:
+            return
+        _session.dns_checked_at = _now
+        _d = reactor.resolve(_session.dns_host)
+        _d.addCallback(self._obp_target_resolved)
+        _d.addErrback(self._obp_target_resolve_failed)
+
+    def _obp_target_resolved(self, _host: str) -> None:
+        _session = self._session
+        _was = _session.peer
+        if _session.adopt_resolved((_host, int(_session.configured_peer[1])), at=time.time()):
+            logger.info(
+                "(%s) *BridgeControl* OBP peer moved: %s now resolves to %s (was %s:%s)",
+                self._system,
+                _session.dns_host,
+                _host,
+                _was[0],
+                _was[1],
+            )
+            _once = getattr(self, "_obp_foreign_source_log_once", None)
+            if isinstance(_once, deque):
+                _once.clear()
+
+    def _obp_target_resolve_failed(self, _failure: Any) -> None:
+        """Keep the address we have: a name server hiccup must not drop the link."""
+        logger.debug(
+            "(%s) *BridgeControl* could not resolve %s, keeping %s:%s",
+            self._system,
+            self._session.dns_host,
+            self._session.peer[0],
+            self._session.peer[1],
+        )
+
     @property
     def _session(self) -> ObpBridgeSession:
         """Live state of this OpenBridge link (peer, keepalive, quench)."""
@@ -2275,11 +2358,12 @@ class HBPProtocol(DatagramProtocol):
                 self._obp_apply(reject_v1_protocol(_stream_id, policy=_policy))
                 return
             _ingress = self._try_decode_mesh_ingress(_packet)
-            if (
-                _ingress is not None
-                and _ingress.codec == "obp_v1"
-                and accepts_source(_sockaddr, policy=_policy, session=self._session)
+            if _ingress is not None and _ingress.codec == "obp_v1" and not accepts_source(
+                _sockaddr, policy=_policy, session=self._session
             ):
+                self._obp_reject_source(_packet[:4], _sockaddr)
+                return
+            if _ingress is not None and _ingress.codec == "obp_v1":
                 self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id)
                 self._obp_apply(
                     ingest_dmrd_v1(
@@ -2298,7 +2382,7 @@ class HBPProtocol(DatagramProtocol):
                 return
             _policy = self._obp_policy()
             if not accepts_source(_sockaddr, policy=_policy, session=self._session):
-                logger.warning("(%s) OpenBridge DMRE BLAKE2b failed, packet discarded - SRC: %s", self._system, _sockaddr)
+                self._obp_reject_source(_packet[:4], _sockaddr)
                 return
             _trailer = parse_dmre_trailer(_packet)
             _timestamp = _trailer.timestamp if _trailer is not None else b"\x00" * 8
@@ -2316,15 +2400,43 @@ class HBPProtocol(DatagramProtocol):
         elif _packet[:4] == EOBP:
             logger.warning("(%s) *ProtoControl* KF7EEL EOBP protocol not supported", self._system)
         elif self._config.get("ENHANCED_OBP") and _packet[:2] == BC:
+            # Control frames carry no NETWORK_ID, so the source address is the only
+            # thing telling one sender from another on a shared-passphrase mesh.
+            if not accepts_source(_sockaddr, policy=self._obp_policy(), session=self._session):
+                self._obp_reject_source(_packet[:4], _sockaddr)
+                return
             _passphrase = _get_passphrase_bytes(self._config)
             if _packet[:4] == BCKA and len(_packet) >= 24:
                 if verify_bcka(_packet, _passphrase):
                     _session = self._session
-                    _was = _session.peer
                     _now = time.time()
                     _session.note_keepalive(_now)
-                    if _session.learn_peer(_sockaddr, at=_now):
-                        logger.info("(%s) *BridgeControl* Source IP and Port has changed for OBP from %s:%s to %s:%s, updating", self._system, _was[0], _was[1], _sockaddr[0], _sockaddr[1])
+                    # BCKA carries no NETWORK_ID, so with a shared passphrase anyone's
+                    # keepalive verifies here: it may bootstrap a peer we have no address
+                    # for, never move one we already have. DMRD/DMRE identify themselves
+                    # and do that instead (_obp_sync_target_sock_from_peer).
+                    if not _session.peer_known:
+                        if _session.learn_peer(_sockaddr, at=_now):
+                            logger.info(
+                                "(%s) *BridgeControl* OBP peer address learned from keepalive: %s:%s",
+                                self._system,
+                                _sockaddr[0],
+                                _sockaddr[1],
+                            )
+                    elif _sockaddr != _session.peer:
+                        _once = getattr(self, "_obp_foreign_bcka_log_once", None)
+                        if not isinstance(_once, deque) or _sockaddr not in _once:
+                            if isinstance(_once, deque):
+                                _once.append(_sockaddr)
+                            logger.debug(
+                                "(%s) *BridgeControl* BCKA from %s:%s is not this bridge's peer %s:%s "
+                                "(keepalive only; a second instance of the peer, or another bridge sharing the passphrase)",
+                                self._system,
+                                _sockaddr[0],
+                                _sockaddr[1],
+                                _session.peer[0],
+                                _session.peer[1],
+                            )
                 else:
                     logger.info("(%s) *BridgeControl* BCKA invalid KeepAlive, packet discarded", self._system)
             # Source quench — legacy hblink.py OPENBRIDGE ~629-639 (sets CONFIG['_bcsq'][tgid]=stream_id)

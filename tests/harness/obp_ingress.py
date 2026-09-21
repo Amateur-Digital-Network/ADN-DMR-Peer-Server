@@ -122,6 +122,11 @@ def build_config(case: dict[str, Any]) -> dict[str, Any]:
         "_PEER_IDS": {},
         "_LOCAL_SUBSCRIBER_IDS": {},
     }
+    if case.get("no_peer"):  # inbound-only bridge: the operator set no TARGET_IP
+        system["TARGET_IP"] = None
+        system["TARGET_SOCK"] = (None, PEER[1])
+    if case.get("dns_host"):  # TARGET_IP written as a name: DNS owns the address
+        system["_TARGET_IP"] = case["dns_host"]
     if case.get("stun"):
         config["STUN"] = True
     return config
@@ -195,6 +200,7 @@ def observe(case: dict[str, Any], protocol_cls: type = HBPProtocol) -> dict[str,
             (int.from_bytes(tgid, "big"), int.from_bytes(stream, "big"))
         )
         protocol._obp_send_bcve = lambda: None  # type: ignore[assignment]
+        protocol._obp_resolve_target = lambda: None  # type: ignore[assignment]  # no DNS from a recording
         protocol.transport = transport  # type: ignore[assignment]
         protocol.startProtocol()
         transport.sent.clear()
@@ -275,6 +281,19 @@ def _cases() -> list[dict[str, Any]]:
     ):
         for relax in (False, True):
             add(kind=kind, desc=f"from {addr[0]}:{addr[1]} relax={relax}", relax=relax, **{"from": list(addr)})
+    add(kind="bcka", desc="with no TARGET_IP configured", no_peer=True, **{"from": list(PEER)})
+
+    # TARGET_IP written as a name: only what it resolves to is this peer, however
+    # RELAX_CHECKS is set, because a name is an identity and an address is not.
+    for kind in ("v1", "bcka", "bcsq"):
+        for addr, where in ((PEER, "the resolved address"), (("9.9.9.9", 62201), "elsewhere")):
+            add(
+                kind=kind,
+                desc=f"dns-anchored, from {where}",
+                dns_host="peer.example.net",
+                relax=True,
+                **{"from": list(addr)},
+            )
     return cases
 
 
