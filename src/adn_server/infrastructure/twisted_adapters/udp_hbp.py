@@ -2413,7 +2413,10 @@ class HBPProtocol(DatagramProtocol):
                     _session.note_keepalive(_now)
                     # Anyone with the passphrase can send one, so it may bootstrap a peer
                     # we have no address for, never move one we have. DMRD/DMRE do that.
-                    if not _session.peer_known:
+                    if _session.dns_anchored:
+                        # accepts_source vetted the host above, so this only refines the port.
+                        _session.learn_peer(_sockaddr, at=_now)
+                    elif not _session.peer_known:
                         if _session.learn_peer(_sockaddr, at=_now):
                             logger.info(
                                 "(%s) *BridgeControl* OBP peer address learned from keepalive: %s:%s",

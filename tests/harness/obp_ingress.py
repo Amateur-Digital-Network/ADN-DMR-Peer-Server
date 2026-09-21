@@ -286,7 +286,11 @@ def _cases() -> list[dict[str, Any]]:
     # TARGET_IP written as a name: only what it resolves to is this peer, however
     # RELAX_CHECKS is set, because a name is an identity and an address is not.
     for kind in ("v1", "bcka", "bcsq"):
-        for addr, where in ((PEER, "the resolved address"), (("9.9.9.9", 62201), "elsewhere")):
+        for addr, where in (
+            (PEER, "the resolved address"),
+            ((PEER[0], 57933), "the resolved host on another port"),
+            (("9.9.9.9", 62201), "elsewhere"),
+        ):
             add(
                 kind=kind,
                 desc=f"dns-anchored, from {where}",

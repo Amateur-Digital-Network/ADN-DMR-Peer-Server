@@ -66,14 +66,15 @@ def test_ingress_effects_match_the_recording(case: dict, recorded: dict[str, dic
     [c for c in CASES if c["kind"] == "bcka" and not c.get("no_peer")],
     ids=lambda c: c["name"],
 )
-def test_a_keepalive_never_moves_egress_off_the_peer(case: dict) -> None:
+def test_a_keepalive_never_moves_egress_to_another_host(case: dict) -> None:
     """A keepalive carries no NETWORK_ID, so anyone holding the passphrase can send
     one: a second instance of the peer, or another bridge on a shared-passphrase
-    mesh. It must not decide where this bridge transmits. Recorded above as well,
-    but asserted here so regenerating the corpus cannot drop it.
+    mesh. It may refine the port on the host we already talk to, never move the
+    bridge to a different host. Recorded above as well, but asserted here so
+    regenerating the corpus cannot drop it.
     """
     for _size, addr in observe(case)["egress"]:
-        assert tuple(addr) == PEER
+        assert tuple(addr)[0] == PEER[0]
 
 
 def test_a_keepalive_bootstraps_a_bridge_with_no_configured_peer() -> None:

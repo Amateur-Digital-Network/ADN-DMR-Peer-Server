@@ -69,6 +69,33 @@ def test_a_dns_anchored_peer_ignores_what_the_wire_says() -> None:
     assert session.peer == _CONFIGURED
 
 
+def test_a_name_that_never_resolved_anchors_nothing() -> None:
+    """normalize_obp_config leaves TARGET_SOCK as (None, port) when the name does not
+    resolve at startup. Anchoring on that would take the link off the air for good."""
+    session = ObpBridgeSession(
+        system_name="OBP-FR", configured_peer=(None, 62201), dns_host="peer.example.net"
+    )
+    assert session.dns_anchored is False
+    assert session.learn_peer(_ELSEWHERE, at=_NOW) is True
+
+
+def test_a_dns_anchored_peer_takes_a_new_port_on_its_own_host() -> None:
+    """The name pins the host. A peer answers from whatever socket it bound, which
+    NAT may rewrite and which needs not be the port we send to."""
+    session = _dns_session()
+    other_port = (_CONFIGURED[0], 57933)
+    assert session.learn_peer(other_port, at=_NOW) is True
+    assert session.peer == other_port
+
+
+def test_resolving_elsewhere_drops_a_port_learned_on_the_old_host() -> None:
+    session = _dns_session()
+    session.learn_peer((_CONFIGURED[0], 57933), at=_NOW)
+    assert session.adopt_resolved(_ELSEWHERE, at=_NOW) is True
+    assert session.peer == _ELSEWHERE
+    assert session.learned_peer is None
+
+
 def test_a_dns_anchored_peer_moves_when_the_name_resolves_elsewhere() -> None:
     session = _dns_session()
     assert session.adopt_resolved(_ELSEWHERE, at=_NOW) is True
