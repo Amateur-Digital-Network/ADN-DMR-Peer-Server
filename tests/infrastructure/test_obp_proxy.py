@@ -34,6 +34,7 @@ from adn_server.application.proxy.deployment import (
     obp_bridge_legacy_listen_port,
     obp_proxy_bind_legacy_ports,
     obp_proxy_enabled,
+    openbridge_passphrase_collisions,
 )
 from adn_server.domain import bytes_4
 from adn_server.domain.errors import ConfigError
@@ -284,6 +285,40 @@ def test_validate_obp_proxy_duplicate_network_id() -> None:
     with pytest.raises(ConfigError) as exc:
         validate_config(config)
     assert "NETWORK_ID" in str(exc.value)
+
+
+def test_shared_passphrase_between_bridges_is_reported() -> None:
+    """Control frames carry no NETWORK_ID, so a shared passphrase leaves only the
+    source address to tell two bridges apart. str and bytes are the same secret."""
+    config = _obp_config()
+    config["SYSTEMS"]["OBP-EU"] = {
+        **config["SYSTEMS"]["OBP-CL"],
+        "PORT": 62045,
+        "NETWORK_ID": 73045,
+        "PASSPHRASE": b"test-passphrase",
+    }
+    assert openbridge_passphrase_collisions(config) == [["OBP-CL", "OBP-EU"]]
+
+
+def test_distinct_passphrases_are_not_reported() -> None:
+    config = _obp_config()
+    config["SYSTEMS"]["OBP-EU"] = {
+        **config["SYSTEMS"]["OBP-CL"],
+        "PORT": 62045,
+        "NETWORK_ID": 73045,
+        "PASSPHRASE": "another-one",
+    }
+    assert openbridge_passphrase_collisions(config) == []
+
+
+def test_only_enabled_openbridge_systems_count_as_a_collision() -> None:
+    """A disabled bridge, a MASTER and an empty passphrase are not a clash."""
+    config = _obp_config()
+    config["SYSTEMS"]["OBP-OFF"] = {**config["SYSTEMS"]["OBP-CL"], "ENABLED": False, "NETWORK_ID": 73046}
+    config["SYSTEMS"]["HOTSPOT"]["PASSPHRASE"] = "test-passphrase"
+    config["SYSTEMS"]["OBP-BLANK"] = {**config["SYSTEMS"]["OBP-CL"], "NETWORK_ID": 73047, "PASSPHRASE": ""}
+    config["SYSTEMS"]["OBP-BLANK2"] = {**config["SYSTEMS"]["OBP-CL"], "NETWORK_ID": 73048, "PASSPHRASE": ""}
+    assert openbridge_passphrase_collisions(config) == []
 
 
 def test_validate_obp_proxy_migrated_bridge_port_matches_listen() -> None:
