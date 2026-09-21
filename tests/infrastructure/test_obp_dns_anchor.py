@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections import deque
 from types import SimpleNamespace
 
 from twisted.internet import defer
@@ -30,7 +29,7 @@ def _fake_obp(*, dns_host: str | None = _HOST) -> SimpleNamespace:
         _session=ObpBridgeSession(
             system_name="OBP-USA", configured_peer=_CONFIGURED, dns_host=dns_host
         ),
-        _obp_foreign_source_log_once=deque(maxlen=1024),
+        _obp_foreign_source_seen={},
     )
     fake._obp_resolve_target = lambda: _RESOLVE(fake)
     fake._obp_target_resolved = lambda host: _RESOLVED(fake, host)
@@ -91,7 +90,9 @@ def test_a_frame_from_elsewhere_is_refused_and_asks_dns_again(monkeypatch, caplo
     assert "discarded" in caplog.text and _HOST in caplog.text
 
 
-def test_a_refused_source_is_logged_once(monkeypatch, caplog) -> None:
+def test_a_refused_source_is_rate_limited_but_counted_every_time(monkeypatch, caplog) -> None:
+    """A clone pinging every 10s must not flood the log, but every frame it sends
+    still has to reach the tally."""
     resolver = _FakeResolver(_CONFIGURED[0])
     monkeypatch.setattr(udp_hbp, "reactor", resolver)
     fake = _fake_obp()
@@ -99,6 +100,34 @@ def test_a_refused_source_is_logged_once(monkeypatch, caplog) -> None:
         for _ in range(30):
             _REJECT(fake, b"BCKA", _ZOMBIE)
     assert sum("discarded" in line for line in caplog.text.splitlines()) == 1
+    assert fake._session.drops == {"source-not-peer": 30}
+
+
+def test_each_frame_type_from_a_refused_source_is_named(monkeypatch, caplog) -> None:
+    """Keying the cap on the address alone hid every frame type after the first:
+    a BCVE arriving a millisecond behind a BCKA was silently dropped."""
+    resolver = _FakeResolver(_CONFIGURED[0])
+    monkeypatch.setattr(udp_hbp, "reactor", resolver)
+    fake = _fake_obp()
+    with caplog.at_level(logging.INFO, logger="adn_server.infrastructure.twisted_adapters.udp_hbp"):
+        _REJECT(fake, b"BCKA", _ZOMBIE)
+        _REJECT(fake, b"BCVE", _ZOMBIE)
+        _REJECT(fake, b"DMRD", _ZOMBIE)
+    assert "BCKA from" in caplog.text
+    assert "BCVE from" in caplog.text
+    assert "DMRD from" in caplog.text
+
+
+def test_a_refused_source_is_named_again_after_the_interval(monkeypatch, caplog) -> None:
+    resolver = _FakeResolver(_CONFIGURED[0])
+    monkeypatch.setattr(udp_hbp, "reactor", resolver)
+    fake = _fake_obp()
+    with caplog.at_level(logging.INFO, logger="adn_server.infrastructure.twisted_adapters.udp_hbp"):
+        _REJECT(fake, b"BCKA", _ZOMBIE)
+        for key in fake._obp_foreign_source_seen:  # as if the interval had elapsed
+            fake._obp_foreign_source_seen[key] -= udp_hbp.OBP_FOREIGN_LOG_INTERVAL_S + 1
+        _REJECT(fake, b"BCKA", _ZOMBIE)
+    assert sum("discarded" in line for line in caplog.text.splitlines()) == 2
 
 
 def test_a_peer_that_really_moved_is_adopted_on_the_next_resolution(monkeypatch) -> None:
