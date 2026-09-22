@@ -239,7 +239,10 @@ class MeshSessionStore:
         return self._sessions.get(system_name)
 
     def session(self, system_name: str, sys_cfg: dict[str, Any] | None = None) -> ObpBridgeSession:
-        """The session for this system, created from its config on first use."""
+        """The session for this system, created from its config on first use.
+
+        Runs several times per datagram, so ``dns_host`` is left to ``sync``.
+        """
         session = self._sessions.get(system_name)
         if session is None:
             session = ObpBridgeSession(
@@ -250,7 +253,6 @@ class MeshSessionStore:
             self._sessions[system_name] = session
         elif sys_cfg is not None:
             session.configured_peer = _peer_from_config(sys_cfg)
-            session.dns_host = dns_host_from_config(sys_cfg)
         return session
 
     def drop(self, system_name: str) -> None:
@@ -274,8 +276,13 @@ class MeshSessionStore:
             configured = _peer_from_config(sys_cfg)
             session = self._sessions.get(name)
             if session is None:
-                self._sessions[name] = ObpBridgeSession(system_name=name, configured_peer=configured)
+                self._sessions[name] = ObpBridgeSession(
+                    system_name=name,
+                    configured_peer=configured,
+                    dns_host=dns_host_from_config(sys_cfg),
+                )
                 continue
+            session.dns_host = dns_host_from_config(sys_cfg)
             if session.configured_peer != configured:
                 session.configured_peer = configured
                 session.forget_learned_peer()
