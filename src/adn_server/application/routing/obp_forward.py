@@ -56,6 +56,10 @@ from .helpers import group_voice_tg_ingress_collision, obp_is_canonical_ingress,
 
 logger = logging.getLogger(__name__)
 
+# Idle time before another destination may take over a stream_id. The trimmer only
+# drops a row after 180s; well above one voice frame so interleaved streams keep theirs.
+OBP_REUSED_STREAM_IDLE_S = 2.0
+
 
 class ObpForwardMixin:
     """routerOBP group voice, stream tracking, sendDataToOBP."""
@@ -170,6 +174,23 @@ class ObpForwardMixin:
         if status is None:
             return True
 
+        # A peer reusing a stream_id for another destination is starting a new call,
+        # not continuing the one the row describes. to_target already evicts on a
+        # forward leg; without the same here loop control refuses the new call.
+        _prev = status.get(stream_id)
+        if isinstance(_prev, dict) and _prev.get("TGID") != dst_id:
+            _idle = pkt_time - _prev.get("LAST", _prev.get("START", pkt_time))
+            if _idle >= OBP_REUSED_STREAM_IDLE_S:
+                logger.info(
+                    "(%s) stream %s reused for TG %s (was TG %s, idle %.1fs): starting a new call",
+                    system_name,
+                    int_id(stream_id),
+                    int_id(dst_id),
+                    int_id(_prev.get("TGID", b"\x00\x00\x00")),
+                    _idle,
+                )
+                del status[stream_id]
+
         if stream_id not in status:
             if group_voice_tg_ingress_collision(
                 protocols, systems_cfg, dst_id, stream_id, rf_src, pkt_time,
@@ -266,7 +287,6 @@ class ObpForwardMixin:
 
             # Legacy routerOBP ~2409: LoopControl only on 2nd+ packet (else branch).
             hr_times: dict[str, float] = {}
-            _sysslot_last = 0
             for other_name, proto in (protocols or {}).items():
                 omode = systems_cfg.get(other_name, {}).get("MODE")
                 if other_name != system_name and omode != "OPENBRIDGE":
@@ -274,7 +294,6 @@ class ObpForwardMixin:
                     if not ostatus:
                         continue
                     for _sysslot in ostatus:
-                        _sysslot_last = _sysslot if isinstance(_sysslot, int) else _sysslot_last
                         slot_st = ostatus.get(_sysslot)
                         if not isinstance(slot_st, dict):
                             continue
@@ -303,15 +322,16 @@ class ObpForwardMixin:
                         hr_times[other_name] = obp_status[stream_id]["1ST"]
 
             fi = min(hr_times, key=hr_times.get, default=False)
-            hr_times.clear()
             if not fi:
-                logger.warning(
-                    "(%s) OBP *LoopControl* fi is empty for some reason : STREAM ID: %s, TG: %s, TS: %s",
-                    system_name,
-                    int_id(stream_id),
-                    int_id(dst_id),
-                    _sysslot_last,
-                )
+                if not st.get("LOOPLOG"):
+                    logger.warning(
+                        "(%s) OBP *LoopControl* no bridge holds stream %s for TG %s, dropping",
+                        system_name,
+                        int_id(stream_id),
+                        int_id(dst_id),
+                    )
+                    st["LOOPLOG"] = True
+                st["LAST"] = pkt_time
                 return False
             if system_name != fi:
                 if "LOOPLOG" not in st or not st["LOOPLOG"]:
