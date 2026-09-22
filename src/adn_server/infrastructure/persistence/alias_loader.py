@@ -151,8 +151,24 @@ def _atomic_copy(src: Path, dst: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def _file_stamp(file_path: Path) -> tuple[int, int, int] | None:
+    """Identifies a file's contents: try_download replaces, so the inode moves too."""
+    try:
+        stat = file_path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+
+
 class DefaultAliasLoader(AliasLoader):
-    """Load aliases from JSON files and optional downloads. Legacy mk_aliases."""
+    """Load aliases from JSON files and optional downloads. Legacy mk_aliases.
+
+    The reload loop ticks far more often than STALE_DAYS replaces the files, so
+    parsed results are kept against each file's stamp.
+    """
+
+    def __init__(self) -> None:
+        self._parsed: dict[str, tuple[Any, Any]] = {}
 
     def load_aliases(
         self,
@@ -220,8 +236,13 @@ class DefaultAliasLoader(AliasLoader):
         local_subscriber_ids: dict[int, str],
         server_ids: dict[str, str],
         checksums: dict[str, str],
+        profiles: dict[int, dict[str, str]] | None = None,
     ) -> None:
-        """Apply alias reload without wiping in-memory tables on partial download failure."""
+        """Apply alias reload without wiping in-memory tables on partial download failure.
+
+        This runs on the reactor thread, so ``profiles`` lets the caller build the
+        300k of them off it instead.
+        """
         def _keep(key: str, new_val: dict, label: str) -> None:
             if new_val:
                 config[key] = new_val
@@ -238,7 +259,9 @@ class DefaultAliasLoader(AliasLoader):
             sub[900999] = "D-APRS"
             sub[4294967295] = "SC"
             config["_SUB_IDS"] = sub
-            if isinstance(alias_loader, DefaultAliasLoader):
+            if profiles is not None:
+                config["_SUB_PROFILES"] = profiles
+            elif isinstance(alias_loader, DefaultAliasLoader):
                 config["_SUB_PROFILES"] = alias_loader.load_subscriber_profiles(config)
         elif config.get("_SUB_IDS"):
             logger.warning(
@@ -295,6 +318,10 @@ class DefaultAliasLoader(AliasLoader):
         """Legacy mk_aliases peer/subscriber/tgid load with .bak fallback."""
         full = path / file_name
         bak = path / f"{file_name}.bak"
+        stamp = _file_stamp(full)
+        remembered = self._parsed.get(file_name)
+        if stamp is not None and remembered is not None and remembered[0] == stamp:
+            return remembered[1]
         result: dict[int, str] = {}
         loaded_from_primary = False
 
@@ -316,6 +343,7 @@ class DefaultAliasLoader(AliasLoader):
             result = _load_verified(full)
             loaded_from_primary = True
         except Exception as e:
+            self._parsed.pop(file_name, None)
             logger.error(
                 "(ALIAS) ID ALIAS MAPPER: problem loading %s file (%s), falling back to .bak",
                 name,
@@ -348,6 +376,8 @@ class DefaultAliasLoader(AliasLoader):
                     name,
                     g,
                 )
+            if stamp is not None:
+                self._parsed[file_name] = (stamp, result)
         return result
 
     def _load_id_json(self, file_path: Path) -> dict[int, str]:
@@ -431,9 +461,15 @@ class DefaultAliasLoader(AliasLoader):
         path = Path(aliases.get("PATH", "./data/")).resolve()
         sub_file = aliases.get("SUBSCRIBER_FILE", "subscriber_ids.json")
         local_file = aliases.get("LOCAL_SUBSCRIBER_FILE", "subscriber_ids.json")
+        files = [path / sub_file, path / local_file]
+        stamps = [_file_stamp(f) for f in files]
+        remembered = self._parsed.get("_profiles")
+        if remembered is not None and remembered[0] == stamps:
+            return remembered[1]
         profiles: dict[int, dict[str, str]] = {}
-        for file_name in (sub_file, local_file):
-            self._merge_subscriber_profiles(path / file_name, profiles)
+        for file_path in files:
+            self._merge_subscriber_profiles(file_path, profiles)
+        self._parsed["_profiles"] = (stamps, profiles)
         return profiles
 
     def _merge_subscriber_profiles(self, file_path: Path, out: dict[int, dict[str, str]]) -> None:
