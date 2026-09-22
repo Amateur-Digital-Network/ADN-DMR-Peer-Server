@@ -155,6 +155,8 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MESH_REGISTRY = MeshCodecRegistry()
 
+_NO_SERVER_IDS: frozenset[str] = frozenset()
+
 OBP_DNS_REFRESH_S = 300.0
 # Floor for on-demand lookups: unknown traffic must not drive one per packet.
 OBP_DNS_MIN_INTERVAL_S = 15.0
@@ -262,6 +264,8 @@ class HBPProtocol(DatagramProtocol):
         self._mesh_registry = mesh_registry if mesh_registry is not None else _DEFAULT_MESH_REGISTRY
         self._dynamic_tg_uc = dynamic_tg_uc
         self._config = config.get("SYSTEMS", {}).get(system_name, {})
+        self._obp_policy_cache: tuple[Any, BridgePolicy] | None = None
+        self._peer_mesh_config_cache: PeerMeshConfig | None = None
         if self._config.get("MODE") == "OPENBRIDGE":
             self._laststrid = deque([], 20)
             # Legacy parity: routerOBP.__init__ uses a flat dict keyed by stream_id
@@ -349,6 +353,8 @@ class HBPProtocol(DatagramProtocol):
         self._CONFIG = config
         sys_cfg = config.get("SYSTEMS", {}).get(self._system, {})
         self._config = sys_cfg
+        self._obp_policy_cache = None
+        self._peer_mesh_config_cache = None
         if sys_cfg.get("MODE") == "MASTER":
             self._peers = sys_cfg.setdefault("PEERS", {})
             self._refresh_connected_peer_count()
@@ -518,6 +524,14 @@ class HBPProtocol(DatagramProtocol):
             del sub_map[rf_src]
 
     def _peer_mesh_config(self) -> PeerMeshConfig:
+        cached = self._peer_mesh_config_cache
+        if cached is not None:
+            return cached
+        cached = self._build_peer_mesh_config()
+        self._peer_mesh_config_cache = cached
+        return cached
+
+    def _build_peer_mesh_config(self) -> PeerMeshConfig:
         _global = self._CONFIG.get("GLOBAL", {})
         _sid = _global.get("SERVER_ID", b"\x00\x00\x00\x00")
         _server_id = (
@@ -2144,7 +2158,12 @@ class HBPProtocol(DatagramProtocol):
         else:
             logger.debug("(%s) *BridgeControl* not sending BCVE, TARGET not currently known", self._system)
 
-    def _obp_sync_target_sock_from_peer(self, _sockaddr: tuple[str, int], _stream_id: bytes | None = None) -> None:
+    def _obp_sync_target_sock_from_peer(
+        self,
+        _sockaddr: tuple[str, int],
+        _stream_id: bytes | None = None,
+        _session: ObpBridgeSession | None = None,
+    ) -> None:
         """Learn the address RELAX_CHECKS just accepted, so replies go back to it.
 
         The configured peer stays where the operator put it; only the session
@@ -2154,8 +2173,11 @@ class HBPProtocol(DatagramProtocol):
         """
         if self._config.get("MODE") != "OPENBRIDGE" or not self._config.get("RELAX_CHECKS"):
             return
-        _session = self._session
+        if _session is None:
+            _session = self._session
         cur = _session.peer
+        if cur == _sockaddr:
+            return  # already where we send: learn_peer would refuse it anyway
         if not _session.learn_peer(_sockaddr, at=time.time()):
             return
         _once = getattr(self, "_obp_target_sync_log_once", None)
@@ -2266,12 +2288,26 @@ class HBPProtocol(DatagramProtocol):
             ),
             server_id=server_prefix(_global.get("SERVER_ID", 0)),
             validate_server_ids=bool(_global.get("VALIDATE_SERVER_IDS")),
-            known_server_prefixes=self._CONFIG.get("_SERVER_IDS", set()),
+            known_server_prefixes=self._CONFIG.get("_SERVER_IDS", _NO_SERVER_IDS),
             resolve_server_id=self.validate_obp_source_server_id,
         )
 
     def _obp_policy(self) -> BridgePolicy:
-        """This bridge's rules, read once per frame and handed to the engine."""
+        """This bridge's rules, handed to the engine.
+
+        Everything here comes from configuration, so it is built once and kept until
+        a reload swaps the dicts (``apply_system_config``) or an alias refresh swaps
+        ``_SERVER_IDS`` under us, which is the one input that moves on its own.
+        """
+        server_ids = self._CONFIG.get("_SERVER_IDS", _NO_SERVER_IDS)
+        cached = self._obp_policy_cache
+        if cached is not None and cached[0] is server_ids:
+            return cached[1]
+        policy = self._build_obp_policy()
+        self._obp_policy_cache = (server_ids, policy)
+        return policy
+
+    def _build_obp_policy(self) -> BridgePolicy:
         return BridgePolicy(
             system=self._system,
             network_id=self._config.get("NETWORK_ID", b""),
@@ -2282,26 +2318,14 @@ class HBPProtocol(DatagramProtocol):
         )
 
     def _obp_apply(self, effects: list[Effect] | None) -> None:
-        """Carry out what the engine decided, in order."""
+        """Carry out what the engine decided, in order.
+
+        Branches are mutually exclusive, so they run most-frequent-first.
+        """
         if not effects:
             return
         for effect in effects:
-            if isinstance(effect, Reject):
-                self._obp_reject(effect.rejection, effect.dst_id, effect.stream_id)
-                self._session.count_drop(effect.reason)
-            elif isinstance(effect, Log):
-                logger.log(effect.level, effect.message, *effect.args)
-            elif isinstance(effect, NoteStream):
-                self.note_dmrd_stream(effect.peer_id, effect.rf_src, effect.stream_id)
-            elif isinstance(effect, StoreTalkerAlias):
-                self.store_ta_from_voice_burst(
-                    effect.peer_id,
-                    effect.rf_src,
-                    effect.stream_id,
-                    effect.dtype_vseq,
-                    effect.burst,
-                )
-            elif isinstance(effect, Deliver):
+            if isinstance(effect, Deliver):
                 if self._dmrd_received:
                     self._dmrd_received(
                         self._system,
@@ -2322,6 +2346,21 @@ class HBPProtocol(DatagramProtocol):
                         obp_rssi=effect.rssi,
                         obp_source_rptr=effect.source_rptr,
                     )
+            elif isinstance(effect, NoteStream):
+                self.note_dmrd_stream(effect.peer_id, effect.rf_src, effect.stream_id)
+            elif isinstance(effect, StoreTalkerAlias):
+                self.store_ta_from_voice_burst(
+                    effect.peer_id,
+                    effect.rf_src,
+                    effect.stream_id,
+                    effect.dtype_vseq,
+                    effect.burst,
+                )
+            elif isinstance(effect, Log):
+                logger.log(effect.level, effect.message, *effect.args)
+            elif isinstance(effect, Reject):
+                self._obp_reject(effect.rejection, effect.dst_id, effect.stream_id)
+                self._session.count_drop(effect.reason)
             elif isinstance(effect, RequestVersion):
                 self._obp_send_bcve()
 
@@ -2359,19 +2398,20 @@ class HBPProtocol(DatagramProtocol):
                 self._obp_apply(reject_v1_protocol(_stream_id, policy=_policy))
                 return
             _ingress = self._try_decode_mesh_ingress(_packet)
+            _session = self._session
             if _ingress is not None and _ingress.codec == "obp_v1" and not accepts_source(
-                _sockaddr, policy=_policy, session=self._session
+                _sockaddr, policy=_policy, session=_session
             ):
                 self._obp_reject_source(_packet[:4], _sockaddr)
                 return
             if _ingress is not None and _ingress.codec == "obp_v1":
-                self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id)
+                self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id, _session)
                 self._obp_apply(
                     ingest_dmrd_v1(
                         _ingress,
                         _sockaddr,
                         policy=_policy,
-                        session=self._session,
+                        session=_session,
                         now=time.time(),
                     )
                 )
@@ -2382,22 +2422,21 @@ class HBPProtocol(DatagramProtocol):
             if _ingress is None or _ingress.codec != "dmre_v5":
                 return
             _policy = self._obp_policy()
-            if not accepts_source(_sockaddr, policy=_policy, session=self._session):
+            _session = self._session
+            # None means the engine refused the source; it checks, so we do not.
+            _effects = ingest_dmre_v5(
+                _ingress,
+                _sockaddr,
+                policy=_policy,
+                session=_session,
+                timestamp_ns=int.from_bytes(_ingress.timestamp, "big"),
+                now=time.time(),
+            )
+            if _effects is None:
                 self._obp_reject_source(_packet[:4], _sockaddr)
                 return
-            _trailer = parse_dmre_trailer(_packet)
-            _timestamp = _trailer.timestamp if _trailer is not None else b"\x00" * 8
-            self._obp_sync_target_sock_from_peer(_sockaddr, _ingress.voice_frame[16:20])
-            self._obp_apply(
-                ingest_dmre_v5(
-                    _ingress,
-                    _sockaddr,
-                    policy=_policy,
-                    session=self._session,
-                    timestamp_ns=int.from_bytes(_timestamp, "big"),
-                    now=time.time(),
-                )
-            )
+            self._obp_sync_target_sock_from_peer(_sockaddr, _ingress.voice_frame[16:20], _session)
+            self._obp_apply(_effects)
         elif _packet[:4] == EOBP:
             logger.warning("(%s) *ProtoControl* KF7EEL EOBP protocol not supported", self._system)
         elif self._config.get("ENHANCED_OBP") and _packet[:2] == BC:

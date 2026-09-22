@@ -80,6 +80,7 @@ class DmreV5PeerTransport:
             source_server=trailer.source_server,
             source_rptr=trailer.source_rptr,
             embedded_ver=trailer.embedded_version,
+            timestamp=trailer.timestamp,
         )
 
     def encode(self, egress: MeshEgress, config: PeerMeshConfig) -> bytes | None:

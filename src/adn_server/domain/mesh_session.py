@@ -103,8 +103,8 @@ class ObpBridgeSession:
         """
         if not self.dns_host:
             return None
-        host, port = self.resolved_peer or self.configured_peer
-        return (host, port) if host else None
+        anchor = self.resolved_peer or self.configured_peer
+        return anchor if anchor[0] else None
 
     @property
     def dns_anchored(self) -> bool:
