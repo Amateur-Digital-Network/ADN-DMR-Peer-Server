@@ -34,6 +34,7 @@ import shutil
 import ssl
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
@@ -209,20 +210,21 @@ class DefaultAliasLoader(AliasLoader):
         sub_file = aliases.get("SUBSCRIBER_FILE", "subscriber_ids.json")
         tgid_file = aliases.get("TGID_FILE", "talkgroup_ids.json")
         server_file = aliases.get("SERVER_ID_FILE", "server_ids.tsv")
-        peer_ids = self._load_id_dict_with_backup(
-            path, peer_file, checksums.get("peer_ids"), "peer_ids",
+        peer_ids = self._load_with_backup(
+            path, peer_file, checksums.get("peer_ids"), "peer_ids", self._load_id_json,
         )
-        subscriber_ids = self._load_id_dict_with_backup(
-            path, sub_file, checksums.get("subscriber_ids"), "subscriber_ids",
+        subscriber_ids = self._load_with_backup(
+            path, sub_file, checksums.get("subscriber_ids"), "subscriber_ids", self._load_id_json,
         )
-        talkgroup_ids = self._load_id_dict_with_backup(
-            path, tgid_file, checksums.get("talkgroup_ids"), "talkgroup_ids",
+        talkgroup_ids = self._load_with_backup(
+            path, tgid_file, checksums.get("talkgroup_ids"), "talkgroup_ids", self._load_id_json,
         )
         local_subscriber_ids = self._load_id_json(
             path / aliases.get("LOCAL_SUBSCRIBER_FILE", "subscriber_ids.json")
         )
-        server_ids = self._load_server_tsv_with_backup(
-            path, server_file, checksums.get("server_ids"),
+        server_ids = self._load_with_backup(
+            path, server_file, checksums.get("server_ids"), "server_ids",
+            lambda f: self._load_server_tsv(f.parent, f.name),
         )
         return (peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids, server_ids, checksums)
 
@@ -308,24 +310,25 @@ class DefaultAliasLoader(AliasLoader):
             logger.warning("(ALIAS) ID ALIAS MAPPER: %s could not be read: %s", file_name, err)
             return {}
 
-    def _load_id_dict_with_backup(
+    def _load_with_backup(
         self,
         path: Path,
         file_name: str,
         expected_checksum: str | None,
         name: str,
-    ) -> dict[int, str]:
-        """Legacy mk_aliases peer/subscriber/tgid load with .bak fallback."""
+        parse: Callable[[Path], dict],
+    ) -> dict:
+        """Legacy mk_aliases load with .bak fallback, for whatever `parse` reads."""
         full = path / file_name
         bak = path / f"{file_name}.bak"
         stamp = _file_stamp(full)
         remembered = self._parsed.get(file_name)
         if stamp is not None and remembered is not None and remembered[0] == stamp:
             return remembered[1]
-        result: dict[int, str] = {}
+        result: dict = {}
         loaded_from_primary = False
 
-        def _load_verified(target: Path) -> dict[int, str]:
+        def _load_verified(target: Path) -> dict:
             if not target.is_file():
                 # Raise (not return {}) so the caller falls back to .bak below instead of
                 # silently ending up with an empty dictionary when the primary file is
@@ -334,7 +337,7 @@ class DefaultAliasLoader(AliasLoader):
             if expected_checksum:
                 if _blake2bsum(target) != expected_checksum:
                     raise ValueError("bad checksum")
-            loaded = self._load_id_json(target)
+            loaded = parse(target)
             if not loaded:
                 raise ValueError("empty or invalid dictionary data")
             return loaded
@@ -351,7 +354,7 @@ class DefaultAliasLoader(AliasLoader):
             )
             if bak.is_file():
                 try:
-                    result = self._load_id_json(bak)
+                    result = parse(bak)
                 except Exception as f:
                     logger.error(
                         "(ALIAS) ID ALIAS MAPPER: Tried backup %s file, but couldn't load that either: %s",
@@ -403,57 +406,6 @@ class DefaultAliasLoader(AliasLoader):
                             except (ValueError, TypeError):
                                 pass
         return out
-
-    def _load_server_tsv_with_backup(
-        self,
-        path: Path,
-        file_name: str,
-        expected_checksum: str | None,
-    ) -> dict[str, str]:
-        """Legacy mk_aliases server_ids load with .bak fallback."""
-        full = path / file_name
-        bak = path / f"{file_name}.bak"
-        result: dict[str, str] = {}
-        loaded_from_primary = False
-
-        try:
-            # Raise (not just skip) on a missing primary file too, so the except block
-            # below falls back to .bak instead of silently ending up with an empty dict
-            # (e.g. first boot with the download still failing).
-            if not full.is_file():
-                raise FileNotFoundError(f"'{file_name}' file does not exist")
-            if expected_checksum and _blake2bsum(full) != expected_checksum:
-                raise ValueError("bad checksum")
-            result = self._load_server_tsv(path, file_name)
-            if not result:
-                raise ValueError("empty server_ids")
-            loaded_from_primary = True
-        except Exception as e:
-            logger.error(
-                "(ALIAS) ID ALIAS MAPPER: problem loading server_ids file (%s), falling back to .bak",
-                e,
-            )
-            if bak.is_file():
-                try:
-                    result = self._load_server_tsv(path, f"{file_name}.bak")
-                except Exception as f:
-                    logger.error(
-                        "(ALIAS) ID ALIAS MAPPER: Tried backup server_ids file, but couldn't load that either: %s",
-                        f,
-                    )
-        if result:
-            logger.info("(ALIAS) ID ALIAS MAPPER: server_ids dictionary is available")
-        else:
-            logger.warning("(ALIAS) ID ALIAS MAPPER: server_ids dictionary is empty")
-        if loaded_from_primary and full.is_file():
-            try:
-                _atomic_copy(full, bak)
-            except OSError as g:
-                logger.info(
-                    "(ALIAS) ID ALIAS MAPPER: couldn't make backup copy of server_ids file %s",
-                    g,
-                )
-        return result
 
     def load_subscriber_profiles(self, config: dict[str, Any]) -> dict[int, dict[str, str]]:
         """Load {id: {callsign, fname, surname, talker_alias?}} from subscriber JSON files."""
