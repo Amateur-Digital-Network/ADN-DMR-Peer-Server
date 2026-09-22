@@ -277,6 +277,25 @@ def test_sync_registers_enabled_openbridges_only() -> None:
     assert len(store) == 1
 
 
+def test_sync_anchors_a_session_it_creates() -> None:
+    """Missing it here loses DNS anchoring silently: nothing else derives it."""
+    config = _config(_TARGET_IP="peer.example.net")
+    store = MeshSessionStore()
+    store.sync(config)
+    assert store.session("OBP-FR").dns_host == "peer.example.net"
+
+
+def test_sync_anchors_a_session_that_already_existed() -> None:
+    config = _config()
+    store = MeshSessionStore()
+    store.sync(config)
+    assert store.session("OBP-FR").dns_host is None
+
+    config["SYSTEMS"]["OBP-FR"]["_TARGET_IP"] = "peer.example.net"
+    store.sync(config)
+    assert store.session("OBP-FR").dns_host == "peer.example.net"
+
+
 def test_a_reload_that_moves_the_peer_wins_over_what_was_learned() -> None:
     """Editing TARGET_IP in the YAML is the way out of a bad learned address."""
     config = _config()
