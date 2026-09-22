@@ -190,10 +190,11 @@ def accepts_source(
     bound, which NAT may rewrite and which needs not be the port we send to. With
     no name to go by, RELAX_CHECKS decides as it always has.
     """
-    if addr == session.peer:
+    peer = session.peer
+    if addr == peer:
         return True
     if session.dns_anchored:
-        return bool(addr) and addr[0] == session.peer[0]
+        return bool(addr) and addr[0] == peer[0]
     return bool(policy.relax_checks)
 
 
