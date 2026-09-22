@@ -586,11 +586,18 @@ def run_peer_server(
             )
         alias_reload_state["pending"] = True
         logger.debug("(ALIAS) starting alias thread (gen %s)", my_generation)
-        # Downloads run in the thread pool (blocking HTTP would stall hotspot pings);
-        # the config swap is applied back on the reactor thread.
-        d = threads.deferToThread(alias_loader.load_aliases, config)
+        # Downloads and parsing run in the thread pool; only the config swap comes
+        # back to the reactor thread.
+        def _load_off_reactor():
+            loaded = alias_loader.load_aliases(config)
+            if isinstance(alias_loader, DefaultAliasLoader):
+                return loaded, alias_loader.load_subscriber_profiles(config)
+            return loaded, None
 
-        def _apply(loaded):
+        d = threads.deferToThread(_load_off_reactor)
+
+        def _apply(result):
+            loaded, profiles = result
             if my_generation != alias_reload_state["generation"]:
                 logger.info(
                     "(ALIAS) discarding alias download result from a superseded attempt "
@@ -600,7 +607,9 @@ def run_peer_server(
                 )
                 return
             alias_reload_state["pending"] = False
-            DefaultAliasLoader.merge_reload_into_config(config, alias_loader, *loaded)
+            DefaultAliasLoader.merge_reload_into_config(
+                config, alias_loader, *loaded, profiles=profiles
+            )
             _log_alias_health(config, config.get("SYSTEMS", {}), logger)
 
         def _fail(failure):
