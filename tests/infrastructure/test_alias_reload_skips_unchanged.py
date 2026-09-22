@@ -41,7 +41,7 @@ def _write(path: Path, name: str, rid: int, callsign: str) -> None:
 
 
 def _load(loader: DefaultAliasLoader, path: Path, name: str) -> dict:
-    return loader._load_id_dict_with_backup(path, name, None, "subscriber_ids")
+    return loader._load_with_backup(path, name, None, "subscriber_ids", loader._load_id_json)
 
 
 def test_an_unchanged_file_is_not_parsed_again(tmp_path: Path) -> None:
@@ -97,6 +97,24 @@ def test_a_bad_primary_is_retried_rather_than_remembered(tmp_path: Path) -> None
 
     _write(tmp_path, name, 7300392, "CE5ABC")
     assert _load(loader, tmp_path, name) == {7300392: "CE5ABC"}
+
+
+def test_the_server_tsv_is_not_read_again_either(tmp_path: Path) -> None:
+    """Its own near-copy of this loader is how it stayed the one file read every tick."""
+    name = "server_ids.tsv"
+    (tmp_path / name).write_text("OPB Net ID\tCountry\n1234\tChile\n", encoding="utf-8")
+    loader = DefaultAliasLoader()
+
+    def parse(f: Path) -> dict:
+        return loader._load_server_tsv(f.parent, f.name)
+
+    assert loader._load_with_backup(tmp_path, name, None, "server_ids", parse) == {"1234": "Chile"}
+
+    reads = []
+    assert loader._load_with_backup(
+        tmp_path, name, None, "server_ids", lambda f: reads.append(f)
+    ) == {"1234": "Chile"}
+    assert reads == []
 
 
 def test_subscriber_profiles_are_not_rebuilt_for_unchanged_files(tmp_path: Path) -> None:
