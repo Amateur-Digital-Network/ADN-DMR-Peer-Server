@@ -58,7 +58,7 @@ def obp_source_needs_ensure(
     active_tables = set(store.relay_tables_with_active_source(system_name, 1, dst_int))
     pending_keys: list[str] = []
     for key in (relay_table_key, "#" + relay_table_key):
-        if store.legs_in_table(key):
+        if store.has_table(key):
             pending_keys.append(key)
     if not pending_keys:
         return False
@@ -75,7 +75,7 @@ def ensure_obp_source_for_tg_store(
 ) -> None:
     """Ensure OBP has ACTIVE TS1 source row in main and #reflector tables."""
     for key in (relay_table_key, "#" + relay_table_key):
-        if not any(sub.table_key() == key for sub in store.snapshot()):
+        if not store.has_table(key):
             continue
         channel_tgid = dst_int
         patched = False

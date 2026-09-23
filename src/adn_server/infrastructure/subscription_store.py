@@ -42,6 +42,8 @@ class InMemorySubscriptionStore(SubscriptionStore):
 
     def __init__(self) -> None:
         self._items: dict[SubscriptionId, Subscription] = {}
+        # Per system, in the same order as _items (an upsert keeps its place).
+        self._by_system: dict[str, dict[SubscriptionId, Subscription]] = {}
         self._by_table: dict[str, list[Subscription]] = defaultdict(list)
         self._source_tables: dict[_IndexKey, set[str]] = {}
         self._active_target_counts: dict[_IndexKey, int] = {}
@@ -63,6 +65,7 @@ class InMemorySubscriptionStore(SubscriptionStore):
         if old is not None:
             self._unindex(old)
         self._items[subscription.subscription_id] = subscription
+        self._by_system.setdefault(subscription.system.value, {})[subscription.subscription_id] = subscription
         self._index(subscription)
         self._revision += 1
 
@@ -70,12 +73,18 @@ class InMemorySubscriptionStore(SubscriptionStore):
         old = self._items.pop(sub_id, None)
         if old is None:
             return False
+        of_system = self._by_system.get(old.system.value)
+        if of_system is not None:
+            of_system.pop(sub_id, None)
+            if not of_system:
+                del self._by_system[old.system.value]
         self._unindex(old)
         self._revision += 1
         return True
 
     def clear(self) -> None:
         self._items.clear()
+        self._by_system.clear()
         self._by_table.clear()
         self._source_tables.clear()
         self._active_target_counts.clear()
@@ -86,6 +95,7 @@ class InMemorySubscriptionStore(SubscriptionStore):
         self.clear()
         for sub in subscriptions:
             self._items[sub.subscription_id] = sub
+            self._by_system.setdefault(sub.system.value, {})[sub.subscription_id] = sub
             self._index(sub)
         self._revision += 1
 
@@ -96,7 +106,7 @@ class InMemorySubscriptionStore(SubscriptionStore):
         return tuple(sub for sub in self._items.values() if sub.channel == channel)
 
     def list_by_system(self, system: SystemId) -> tuple[Subscription, ...]:
-        return tuple(sub for sub in self._items.values() if sub.system == system)
+        return tuple(self._by_system.get(system.value, {}).values())
 
     def list_active(self) -> tuple[Subscription, ...]:
         return tuple(sub for sub in self._items.values() if sub.is_active())

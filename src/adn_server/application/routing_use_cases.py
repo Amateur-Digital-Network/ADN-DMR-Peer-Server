@@ -585,9 +585,11 @@ class RoutingUseCases(
                                 logger.exception("(to_target) caught exception")
                                 _target_status[stream_id]["LAST"] = pkt_time
                                 return
-                            _target_status[stream_id]["H_LC"] = bptc.encode_header_lc(dst_lc)
-                            _target_status[stream_id]["T_LC"] = bptc.encode_terminator_lc(dst_lc)
-                            _target_status[stream_id]["EMB_LC"] = self._encode_emblc(dst_lc)
+                            (
+                                _target_status[stream_id]["H_LC"],
+                                _target_status[stream_id]["T_LC"],
+                                _target_status[stream_id]["EMB_LC"],
+                            ) = self._encode_lc_set(dst_lc)
                             self._init_talker_alias_embed(
                                 _target_status[stream_id],
                                 system_name,
@@ -798,9 +800,11 @@ class RoutingUseCases(
                             _bridge_tx_leg["TX_STREAM_ID"] = stream_id
                             _bridge_tx_leg["TX_RFS"] = rf_src
                             _bridge_tx_leg["TX_PEER"] = peer_id
-                            _bridge_tx_leg["TX_H_LC"] = bptc.encode_header_lc(dst_lc)
-                            _bridge_tx_leg["TX_T_LC"] = bptc.encode_terminator_lc(dst_lc)
-                            _bridge_tx_leg["TX_EMB_LC"] = self._encode_emblc(dst_lc)
+                            (
+                                _bridge_tx_leg["TX_H_LC"],
+                                _bridge_tx_leg["TX_T_LC"],
+                                _bridge_tx_leg["TX_EMB_LC"],
+                            ) = self._encode_lc_set(dst_lc)
                             if obp_flat_bridge_tx_idle(_ts_st, pkt_time) or _ts_st.get("TX_STREAM_ID") == stream_id:
                                 obp_publish_flat_bridge_tx(_ts_st, _bridge_tx_leg)
                             self._dispatch_talker_alias_on_bridge_open(
@@ -819,9 +823,7 @@ class RoutingUseCases(
                             _ts_st["TX_STREAM_ID"] = stream_id
                             _ts_st["TX_RFS"] = rf_src
                             _ts_st["TX_PEER"] = peer_id
-                            _ts_st["TX_H_LC"] = bptc.encode_header_lc(dst_lc)
-                            _ts_st["TX_T_LC"] = bptc.encode_terminator_lc(dst_lc)
-                            _ts_st["TX_EMB_LC"] = self._encode_emblc(dst_lc)
+                            _ts_st["TX_H_LC"], _ts_st["TX_T_LC"], _ts_st["TX_EMB_LC"] = self._encode_lc_set(dst_lc)
                             self._dispatch_talker_alias_on_bridge_open(
                                 _ts_st,
                                 system_name,

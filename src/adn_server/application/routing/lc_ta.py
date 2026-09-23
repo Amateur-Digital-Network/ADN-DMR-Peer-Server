@@ -49,6 +49,7 @@ from typing import Any
 from bitarray import bitarray
 
 from ...domain import int_id
+from ...domain.dmr import bptc
 from ...domain.dmr.const import LC_OPT_G, LC_OPT_U
 from ...domain.talker_alias import DMRA_BLOCK_COUNT
 from ..talker_alias_use_cases import passthrough_complete, talker_alias_settings
@@ -57,8 +58,42 @@ from .helpers import EMB_LC_SLICE
 logger = logging.getLogger(__name__)
 
 
+# Distinct destination LCs kept encoded; a call start needs one per (TG, source radio).
+_LC_SET_CACHE_MAX = 512
+
+
 class LcTaMixin:
     """Talker Alias DMRA relay and embedded LC overlay on forward legs."""
+
+    def _encode_lc_set(self, dst_lc: bytes) -> tuple[bitarray, bitarray, dict[int, Any]]:
+        """Header LC, terminator LC and embedded LC for one destination LC.
+
+        About 250us of BPTC/RS work, done once per LC instead of once per target
+        leg: every leg opened for the same TG and radio gets the same encoding.
+        The results are shared between legs, and every reader only slices them.
+        """
+        cache: dict[bytes, tuple[bitarray, bitarray, dict[int, Any]]] | None = getattr(
+            self, "_lc_set_cache", None
+        )
+        if cache is None:
+            cache = self._lc_set_cache = {}
+        if not isinstance(dst_lc, bytes):  # unhashable (bytearray): encode, don't keep
+            return (
+                bptc.encode_header_lc(dst_lc),
+                bptc.encode_terminator_lc(dst_lc),
+                self._encode_emblc(dst_lc),
+            )
+        codes = cache.get(dst_lc)
+        if codes is None:
+            codes = (
+                bptc.encode_header_lc(dst_lc),
+                bptc.encode_terminator_lc(dst_lc),
+                self._encode_emblc(dst_lc),
+            )
+            if len(cache) >= _LC_SET_CACHE_MAX:
+                cache.clear()
+            cache[dst_lc] = codes
+        return codes
 
     def _get_stream_dmra_blocks(self, source_system: str, stream_id: bytes) -> dict[int, bytes] | None:
         if not self._get_dmra_blocks:

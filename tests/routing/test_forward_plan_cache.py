@@ -33,7 +33,8 @@ from tests.harness.deterministic import (
 )
 
 from adn_server.application.subscription.routing_table_import import subscriptions_from_routing_table
-from adn_server.domain.subscription import SubscriptionPhase
+from adn_server.domain.dmr import bptc
+from adn_server.domain.subscription import SubscriptionPhase, SystemId
 from adn_server.infrastructure.subscription_store import InMemorySubscriptionStore
 
 TG = 213
@@ -155,3 +156,55 @@ def test_removing_a_missing_subscription_keeps_the_revision() -> None:
     before = store.revision
     assert store.remove(subs[0].subscription_id) is False
     assert store.revision == before
+
+
+def test_list_by_system_keeps_the_order_of_a_full_scan() -> None:
+    table = active_routing_table(TG, (("MASTER-A", 2), ("OBP-0", 1), ("MASTER-B", 2)))
+    table |= active_routing_table(91, (("MASTER-A", 1), ("OBP-0", 1)))
+    table |= active_routing_table(92, (("MASTER-A", 2),))
+    subs = subscriptions_from_routing_table(table)
+    store = InMemorySubscriptionStore()
+
+    def agrees() -> None:
+        for system in ("MASTER-A", "OBP-0", "MASTER-B", "NONE"):
+            sid = SystemId(system)
+            scan = tuple(s for s in store.snapshot() if s.system == sid)
+            assert store.list_by_system(sid) == scan, system
+
+    store.replace_all(subs)
+    agrees()
+    moved = next(s for s in subs if s.system.value == "MASTER-A")
+    moved.state.phase = SubscriptionPhase.IDLE
+    store.upsert(moved)  # an upsert keeps its place
+    agrees()
+    store.remove(moved.subscription_id)
+    agrees()
+    store.upsert(moved)  # back in, now last
+    agrees()
+    for sub in store.list_by_system(SystemId("OBP-0")):
+        store.remove(sub.subscription_id)
+    agrees()
+    store.clear()
+    agrees()
+
+
+def test_legs_of_one_call_share_one_lc_encoding() -> None:
+    sc = _scenario()
+    _call(sc, 0x2002, bursts=1)
+    rows = [sc.protocols[name].STATUS[(0x2002).to_bytes(4, "big")] for name in OBPS]
+    assert rows[0]["H_LC"] is rows[1]["H_LC"]
+    assert rows[0]["EMB_LC"] is rows[1]["EMB_LC"]
+    lc = b"\x00\x00\x20" + TG.to_bytes(3, "big") + PacketSpec(dst_id=TG).rf_src.to_bytes(3, "big")
+    assert rows[0]["H_LC"] == bptc.encode_header_lc(lc)
+    assert rows[0]["T_LC"] == bptc.encode_terminator_lc(lc)
+    assert rows[0]["EMB_LC"] == bptc.encode_emblc(lc)
+
+
+def test_lc_set_of_a_bytearray_is_encoded_without_caching() -> None:
+    sc = _scenario()
+    lc = bytearray(b"\x00\x00\x20" + TG.to_bytes(3, "big") + (2130035).to_bytes(3, "big"))
+    header, terminator, emb = sc.routing._encode_lc_set(lc)
+    assert header == bptc.encode_header_lc(bytes(lc))
+    assert terminator == bptc.encode_terminator_lc(bytes(lc))
+    assert emb == bptc.encode_emblc(bytes(lc))
+    assert not getattr(sc.routing, "_lc_set_cache", {})

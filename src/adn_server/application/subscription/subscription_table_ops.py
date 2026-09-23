@@ -54,13 +54,12 @@ def _effective_tmout_minutes(tgid_int: int, tmout: float) -> float:
 
 
 def _table_has_legs(store: SubscriptionStore, table_key: str) -> bool:
-    return any(sub.table_key() == table_key for sub in store.snapshot())
+    return store.has_table(table_key)
 
 
 def _remove_table(store: SubscriptionStore, table_key: str) -> None:
-    for sub in list(store.snapshot()):
-        if sub.table_key() == table_key:
-            store.remove(sub.subscription_id)
+    for sub in store.legs_in_table(table_key):
+        store.remove(sub.subscription_id)
 
 
 def _find_leg(

@@ -52,6 +52,7 @@ from typing import Any
 from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, int_id
 from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
+from ..subscription.obp_source_ops import ensure_obp_source_for_tg_store, obp_source_needs_ensure
 from ..subscription.subscription_queries import store_has_table
 from .helpers import group_voice_tg_ingress_collision, obp_is_canonical_ingress, unit_data_reportable
 
@@ -86,11 +87,6 @@ class ObpForwardMixin:
             return
         if not (79 <= dst_int < 9990 or dst_int > 9999):
             return
-        from ..subscription.obp_source_ops import (
-            ensure_obp_source_for_tg_store,
-            obp_source_needs_ensure,
-        )
-
         store = self._subscription_store
         if not obp_source_needs_ensure(store, system_name, relay_table_key, dst_int):
             return
