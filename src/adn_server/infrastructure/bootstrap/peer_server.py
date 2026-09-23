@@ -79,7 +79,7 @@ from adn_server.infrastructure.config_normalizer import (
 )
 from adn_server.infrastructure.config_reload import BindSpec, reload_server_config
 from adn_server.infrastructure.logging_config import reopen_file_handlers
-from adn_server.infrastructure.persistence import PickleSubMapStore
+from adn_server.infrastructure.persistence import PickleSubMapStore, SubMapSaver
 from adn_server.infrastructure.persistence.alias_loader import DefaultAliasLoader
 from adn_server.infrastructure.persistence.database_config import database_settings
 from adn_server.infrastructure.persistence.dynamic_tg_repository import MysqlDynamicTgRepository
@@ -295,6 +295,7 @@ def run_peer_server(
     sub_map_store = PickleSubMapStore()
     sub_map = sub_map_store.load(sub_map_path)
     config["_SUB_MAP"] = sub_map
+    sub_map_saver = SubMapSaver(sub_map_store, sub_map_path, sub_map)
 
     # Generator: expand MASTER systems with GENERATOR > 1 into SYSTEM-0, SYSTEM-1, ... (legacy)
     _expand_generator(config, logger)
@@ -624,7 +625,9 @@ def run_peer_server(
 
     task.LoopingCall(alias_reload_loop).start(alias_poll_interval).addErrback(_looping_errback, logger)
 
-    # SubMapTrimmer (3600s) + save
+    # SubMapTrimmer + save. Every 300s, but it writes only when a route changed: a
+    # restart used to lose up to an hour of routes (Docker rarely delivers the
+    # signal that triggers the shutdown save), leaving private calls with no target.
     def sub_map_trimmer_loop():
         logger.debug("(SUBSCRIBER) Subscriber Map trimmer loop started")
         now = time.time()
@@ -633,12 +636,12 @@ def run_peer_server(
             sub_map.pop(k, None)
         if aliases_cfg.get("SUB_MAP_FILE"):
             try:
-                sub_map_store.save(sub_map_path, sub_map)
-                logger.info("(SUBSCRIBER) Writing SUB_MAP to disk")
+                if sub_map_saver.save_if_changed():
+                    logger.info("(SUBSCRIBER) Writing SUB_MAP to disk")
             except Exception as e:
                 logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
 
-    task.LoopingCall(sub_map_trimmer_loop).start(3600).addErrback(_looping_errback, logger)
+    task.LoopingCall(sub_map_trimmer_loop).start(300).addErrback(_looping_errback, logger)
 
     # Kill switch + shutdown (legacy kill_server every 5s; SIGTERM/SIGINT trigger _KILL_SERVER)
     config.setdefault("GLOBAL", {})["_KILL_SERVER"] = False
@@ -653,7 +656,7 @@ def run_peer_server(
                 if reactor.running:
                     reactor.stop()
                 if aliases_cfg.get("SUB_MAP_FILE"):
-                    sub_map_store.save(sub_map_path, sub_map)
+                    sub_map_saver.save()
                 try:
                     keys_store.save(keys_path, keys)
                     logger.info("(KEYS) saved system keys to keystore")
@@ -668,7 +671,7 @@ def run_peer_server(
         """On reactor shutdown: save SUB_MAP and keys."""
         if aliases_cfg.get("SUB_MAP_FILE"):
             try:
-                sub_map_store.save(sub_map_path, config["_SUB_MAP"])
+                sub_map_saver.save()
                 logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (shutdown)")
             except Exception as e:
                 logger.warning("(SUBSCRIBER) Cannot write SUB_MAP on shutdown: %s", e)
@@ -826,7 +829,7 @@ def run_peer_server(
         logger.info("(CONFIG-RELOAD) SIGHUP received, scheduling reload")
         if aliases_cfg.get("SUB_MAP_FILE"):
             try:
-                sub_map_store.save(sub_map_path, sub_map)
+                sub_map_saver.save()
                 logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (SIGHUP)")
             except Exception as e:
                 logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)

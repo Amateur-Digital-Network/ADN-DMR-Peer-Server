@@ -22,6 +22,6 @@
 ###############################################################################
 
 from .keys_store import JsonKeysStore
-from .sub_map_store import PickleSubMapStore
+from .sub_map_store import PickleSubMapStore, SubMapSaver
 
-__all__ = ["PickleSubMapStore", "JsonKeysStore"]
+__all__ = ["PickleSubMapStore", "SubMapSaver", "JsonKeysStore"]

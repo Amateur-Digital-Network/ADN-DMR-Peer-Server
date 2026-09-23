@@ -25,7 +25,9 @@
 
 from __future__ import annotations
 
+import os
 import pickle
+from collections.abc import Hashable
 from pathlib import Path
 
 from ...application.ports import SubMapStore
@@ -49,5 +51,43 @@ class PickleSubMapStore(SubMapStore):
         """Save SUB_MAP to pickle file."""
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        with open(p, "wb") as f:
+        # Write aside and rename: a crash mid-dump must not leave a truncated
+        # file, which load() would turn into an empty map.
+        tmp = p.with_name(p.name + ".tmp")
+        with open(tmp, "wb") as f:
             pickle.dump(sub_map, f)
+        os.replace(tmp, p)
+
+
+# SUB_MAP is rewritten on every frame, but only the route of an entry (system,
+# slot, peer) matters after a restart. The timestamp only feeds the 24h trim, so
+# it counts as changed once per hour, as often as the old hourly save wrote it.
+_TIME_BUCKET_S = 3600
+
+
+def _route_snapshot(sub_map: dict) -> dict[bytes, Hashable]:
+    return {k: (v[0], v[1], v[3] if len(v) > 3 else None, int(v[2] // _TIME_BUCKET_S)) for k, v in sub_map.items()}
+
+
+class SubMapSaver:
+    """Write SUB_MAP to disk when its routes changed since the last write."""
+
+    def __init__(self, store: SubMapStore, path: str, sub_map: dict):
+        self._store = store
+        self._path = path
+        self._sub_map = sub_map
+        self._saved = _route_snapshot(sub_map)
+
+    def save(self) -> None:
+        """Write unconditionally (shutdown, SIGHUP)."""
+        self._store.save(self._path, self._sub_map)
+        self._saved = _route_snapshot(self._sub_map)
+
+    def save_if_changed(self) -> bool:
+        """Write only if a route changed; True when it wrote."""
+        snapshot = _route_snapshot(self._sub_map)
+        if snapshot == self._saved:
+            return False
+        self._store.save(self._path, self._sub_map)
+        self._saved = snapshot
+        return True
