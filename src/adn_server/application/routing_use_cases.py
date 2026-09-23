@@ -64,7 +64,6 @@ from .routing.helpers import (
     obp_publish_flat_bridge_tx,
     obp_status_plugin_voice,
     obp_sync_flat_bridge_tx_times,
-    obp_target_bcsq_quenches_stream,
     resolve_voice_peer_id,
     slot_has_active_voice,
     unit_data_hbp_target_idle,
@@ -78,6 +77,7 @@ from .routing.subscription_table import SubscriptionTableMixin
 from .routing.timers import RoutingTimerMixin
 from .routing.voice_subscription import VoiceSubscriptionMixin
 from .server_voice import all_server_voice_ids
+from .subscription.subscription_queries import store_has_table
 from .talker_alias_use_cases import TalkerAliasUseCases
 
 logger = logging.getLogger(__name__)
@@ -259,8 +259,6 @@ class RoutingUseCases(
             # Arm ON in-band rules on VHEAD (echo 9990 and UA bridges); VTERM handled in udp_hbp too.
             if frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VHEAD:
                 self.apply_in_band_signalling(system_name, slot, dst_id, pkt_time)
-        from .subscription.subscription_queries import store_has_table
-
         relay_table_key = str(int_id(dst_id))
         dst_int = int_id(dst_id)
         # Legacy bridge_master to_target: OpenBridge clears TS bit — "all OpenBridge streams are
@@ -494,40 +492,16 @@ class RoutingUseCases(
             source_lc = b"\x00\x00\x20" + dst_id_b + rf_src
         # Legacy bridge_master routerOBP: _sysIgnore accumulates across each to_target(BRIDGES[_bridge])
         # pass; dedupe (SYSTEM, TS) for OpenBridge targets so the same leg is not sent twice per packet.
-        # SubscriptionRouter.resolve() already applies OBP dedup on OpenBridge targets.
-        forward_tables, forward_legs = self._voice_forward_plan(
+        # SubscriptionRouter.resolve() already applies OBP dedup on OpenBridge targets, and the plan
+        # collapses same-(target, translated TGID) MASTER/PEER legs (see _group_voice_forward_plan).
+        _plan = self._group_voice_forward_plan(
             system_name=system_name,
-            peer_id=peer_id,
-            rf_src=rf_src,
-            dst_id=dst_id,
             slot=slot,
             call_type=call_type,
-            stream_id=stream_id,
             source_is_obp=source_is_obp,
             bridge_match_slot=bridge_match_slot,
             dst_int=dst_int,
         )
-        # A BRIDGES scan (legacy parity, kept in SubscriptionRouter.resolve()) can list the
-        # same MASTER/PEER target on both TS1 and TS2 (e.g. an inject-only proxy whose
-        # connected hotspots collectively use both slots for one TG). Legacy's dumb
-        # send_peers() broadcast made that harmless — each hotspot's own radio dropped the
-        # slot it didn't want. This server's send_peers() instead resolves each peer's
-        # actual listen slot from its OPTIONS (iter_downlink_voice_slots) regardless of the
-        # wire slot, so a second identical leg to the same target delivers the same audio
-        # twice — doubling the downlink rate and making unpaced bridges (e.g. ysf2dmr) sound
-        # slow. OpenBridge targets keep distinct per-slot legs (real separate links); collapse
-        # only same-(target, translated TGID) duplicates for MASTER/PEER targets.
-        if forward_legs:
-            _seen_hbp_leg: set[tuple[str, int]] = set()
-            _deduped_legs = []
-            for _leg in forward_legs:
-                if systems_cfg.get(_leg.target_system, {}).get("MODE") != "OPENBRIDGE":
-                    _hbp_key = (_leg.target_system, int(_leg.target_tgid))
-                    if _hbp_key in _seen_hbp_leg:
-                        continue
-                    _seen_hbp_leg.add(_hbp_key)
-                _deduped_legs.append(_leg)
-            forward_legs = tuple(_deduped_legs)
         _tx_report_peer = int_id(peer_id)
         if not source_is_obp and not synthetic_announcement:
             _tx_report_peer = int_id(
@@ -543,18 +517,7 @@ class RoutingUseCases(
             _src_slot_st = src_proto.STATUS.get(slot, {})
             if isinstance(_src_slot_st, dict) and _src_slot_st.get("_suppress_uplink"):
                 _suppress_uplink = True
-        _leg_iter: list[tuple[str, dict[str, Any]]] = [
-            (
-                forward_tables[0] if forward_tables else str(dst_int),
-                {
-                    "SYSTEM": leg.target_system,
-                    "TS": int(leg.slot),
-                    "TGID": bytes_3(int(leg.target_tgid)),
-                    "ACTIVE": True,
-                },
-            )
-            for leg in forward_legs
-        ]
+        _leg_iter = _plan.entries
 
         for _relay_table_key, entry in _leg_iter:
                 if _suppress_uplink:
@@ -575,10 +538,10 @@ class RoutingUseCases(
                     if isinstance(target_tgid, int):
                         target_tgid = bytes_3(target_tgid)
                     # If target has quenched us, don't send (~1856-1859).
-                    if obp_target_bcsq_quenches_stream(self._config, entry["SYSTEM"], dst_id_b, stream_id):
+                    _target_session = self._obp_session(entry["SYSTEM"])
+                    if _target_session.quenches(dst_id_b, stream_id):
                         continue
                     # If target has missed keepalives (ENHANCED_OBP), don't send (~1861-1863)
-                    _target_session = self._obp_session(entry["SYSTEM"])
                     if _target_system.get("ENHANCED_OBP") and not _target_session.keepalive_ok(pkt_time):
                         continue
                     # Talkgroup ACL (global + per-system TG1) (~1865-1873)

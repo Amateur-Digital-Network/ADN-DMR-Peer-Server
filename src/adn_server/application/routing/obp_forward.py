@@ -52,6 +52,7 @@ from typing import Any
 from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, int_id
 from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
+from ..subscription.subscription_queries import store_has_table
 from .helpers import group_voice_tg_ingress_collision, obp_is_canonical_ingress, unit_data_reportable
 
 logger = logging.getLogger(__name__)
@@ -456,8 +457,6 @@ class ObpForwardMixin:
         if self._config.get("GLOBAL", {}).get("GEN_STAT_BRIDGES"):
             _di = int_id(dst_id)
             _bk = str(_di)
-            from ..subscription.subscription_queries import store_has_table
-
             if _di >= 5 and _di != 9 and not store_has_table(self._subscription_store, _bk):
                 logger.debug("(%s) Bridge for STAT TG %s does not exist. Creating", system_name, _di)
                 self.ensure_stat_relay(dst_id)

@@ -31,7 +31,7 @@ def store_has_table(store: SubscriptionStore, table_key: str) -> bool:
     Indexed: this runs per datagram, and the scan it replaces was building a tuple
     of every subscription to answer a yes/no question.
     """
-    return bool(store.legs_in_table(table_key))
+    return store.has_table(table_key)
 
 
 def system_has_active_leg_in_store(

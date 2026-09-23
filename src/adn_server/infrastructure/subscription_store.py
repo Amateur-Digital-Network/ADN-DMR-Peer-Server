@@ -48,6 +48,12 @@ class InMemorySubscriptionStore(SubscriptionStore):
         # What each leg was indexed under. Callers change a leg in place and then
         # upsert it, so by the time it is unindexed it may no longer say where it is.
         self._indexed: dict[SubscriptionId, tuple[str, _IndexKey | None]] = {}
+        self._revision = 0
+
+    @property
+    def revision(self) -> int:
+        """Bumped on every write, so readers can keep what they derived until it moves."""
+        return self._revision
 
     def get(self, sub_id: SubscriptionId) -> Subscription | None:
         return self._items.get(sub_id)
@@ -58,12 +64,14 @@ class InMemorySubscriptionStore(SubscriptionStore):
             self._unindex(old)
         self._items[subscription.subscription_id] = subscription
         self._index(subscription)
+        self._revision += 1
 
     def remove(self, sub_id: SubscriptionId) -> bool:
         old = self._items.pop(sub_id, None)
         if old is None:
             return False
         self._unindex(old)
+        self._revision += 1
         return True
 
     def clear(self) -> None:
@@ -72,12 +80,14 @@ class InMemorySubscriptionStore(SubscriptionStore):
         self._source_tables.clear()
         self._active_target_counts.clear()
         self._indexed.clear()
+        self._revision += 1
 
     def replace_all(self, subscriptions: Sequence[Subscription]) -> None:
         self.clear()
         for sub in subscriptions:
             self._items[sub.subscription_id] = sub
             self._index(sub)
+        self._revision += 1
 
     def snapshot(self) -> tuple[Subscription, ...]:
         return tuple(self._items.values())
@@ -105,6 +115,10 @@ class InMemorySubscriptionStore(SubscriptionStore):
         if not keys:
             return ()
         return tuple(sorted(keys))
+
+    def has_table(self, table_key: str) -> bool:
+        """O(1): the table index instead of a scan of every subscription."""
+        return bool(self._by_table.get(table_key))
 
     def legs_in_table(self, table_key: str) -> tuple[Subscription, ...]:
         """All legs for a relay table key (indexed)."""
