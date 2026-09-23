@@ -52,6 +52,7 @@ from ...application.routing.downlink import (
 from ...application.routing.helpers import (
     clear_peer_rx_status_slots,
     clear_peer_ua_sessions,
+    derive_peer_rf_mode,
     hbp_master_ingress_repeat_allowed,
     is_on_demand_service_dst,
     is_server_originated_voice,
@@ -1732,6 +1733,11 @@ class HBPProtocol(DatagramProtocol):
                     _this_peer["URL"] = _data[98:222]
                     _this_peer["SOFTWARE_ID"] = _data[222:262]
                     _this_peer["PACKAGE_ID"] = _data[262:302]
+                    # RPTC carries the only inputs simplex/duplex depends on (SLOTS and
+                    # the two frequencies), so classify here instead of on every frame:
+                    # peer_rf_mode() reads this and the downlink path asks it three
+                    # times per voice frame.
+                    _this_peer["RF_MODE"] = derive_peer_rf_mode(_this_peer)
                     _sent_call = _rptc_field_str(_this_peer["CALLSIGN"])
                     if ("ALLOW_UNREG_ID" in self._config and not self._config["ALLOW_UNREG_ID"]) and _sent_call != self.validate_id(_peer_id):
                         self._remove_peer(_peer_id)
