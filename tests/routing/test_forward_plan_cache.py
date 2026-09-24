@@ -207,4 +207,15 @@ def test_lc_set_of_a_bytearray_is_encoded_without_caching() -> None:
     assert header == bptc.encode_header_lc(bytes(lc))
     assert terminator == bptc.encode_terminator_lc(bytes(lc))
     assert emb == bptc.encode_emblc(bytes(lc))
-    assert not getattr(sc.routing, "_lc_set_cache", {})
+    assert not sc.routing._lc_set_cache
+
+
+def test_full_lc_set_cache_drops_only_its_oldest_entry(monkeypatch) -> None:
+    from adn_server.application.routing import lc_ta
+
+    monkeypatch.setattr(lc_ta, "_LC_SET_CACHE_MAX", 3)
+    sc = _scenario()
+    lcs = [b"\x00\x00\x20" + TG.to_bytes(3, "big") + (2130000 + i).to_bytes(3, "big") for i in range(4)]
+    for lc in lcs:
+        sc.routing._encode_lc_set(lc)
+    assert list(sc.routing._lc_set_cache) == lcs[1:]

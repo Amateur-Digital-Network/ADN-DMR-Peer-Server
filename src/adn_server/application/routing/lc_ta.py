@@ -65,6 +65,8 @@ _LC_SET_CACHE_MAX = 512
 class LcTaMixin:
     """Talker Alias DMRA relay and embedded LC overlay on forward legs."""
 
+    _lc_set_cache: dict[bytes, tuple[bitarray, bitarray, dict[int, Any]]]
+
     def _encode_lc_set(self, dst_lc: bytes) -> tuple[bitarray, bitarray, dict[int, Any]]:
         """Header LC, terminator LC and embedded LC for one destination LC.
 
@@ -72,11 +74,7 @@ class LcTaMixin:
         leg: every leg opened for the same TG and radio gets the same encoding.
         The results are shared between legs, and every reader only slices them.
         """
-        cache: dict[bytes, tuple[bitarray, bitarray, dict[int, Any]]] | None = getattr(
-            self, "_lc_set_cache", None
-        )
-        if cache is None:
-            cache = self._lc_set_cache = {}
+        cache = self._lc_set_cache
         if not isinstance(dst_lc, bytes):  # unhashable (bytearray): encode, don't keep
             return (
                 bptc.encode_header_lc(dst_lc),
@@ -91,7 +89,7 @@ class LcTaMixin:
                 self._encode_emblc(dst_lc),
             )
             if len(cache) >= _LC_SET_CACHE_MAX:
-                cache.clear()
+                del cache[next(iter(cache))]  # oldest first, not the whole cache
             cache[dst_lc] = codes
         return codes
 

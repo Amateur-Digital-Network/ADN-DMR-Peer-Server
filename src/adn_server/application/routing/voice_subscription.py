@@ -46,7 +46,7 @@ from __future__ import annotations
 import logging
 from typing import Any, NamedTuple
 
-from ...domain.value_objects import bytes_3
+from ...domain.value_objects import TgId, bytes_3
 from ...domain.voice_routing import ForwardLeg, VoiceIngress
 from ..ports import SubscriptionStore
 from ..subscription.ingress import build_voice_ingress
@@ -71,9 +71,28 @@ class ForwardPlan(NamedTuple):
 class _CachedPlan(NamedTuple):
     revision: int
     # Every SYSTEMS block the plan read, as the object it read: a reload
-    # replaces the block, which is what makes the plan stale.
+    # replaces the block, which is what makes the plan stale. Identity only
+    # catches reloads, though: blocks are also changed in place at runtime (the
+    # static TGs, for one). That is safe because the plan reads nothing from a
+    # block but MODE, which only a reload changes. A plan that reads any other
+    # field must also be keyed on it, or it will be silently stale.
     blocks: tuple[tuple[str, Any], ...]
     plan: ForwardPlan
+
+
+def _route_ingress(system_name: str, slot: int, dst_int: int, call_type: str, mode: str) -> VoiceIngress:
+    """An ingress carrying only what ``resolve()`` routes on: no peer, radio or stream.
+
+    Leaving those out is what lets one plan serve every frame of a call; a router
+    that starts reading them has to be added to the plan cache key first.
+    """
+    return VoiceIngress(
+        source_system=system_name,
+        slot=1 if int(slot) == 1 else 2,  # type: ignore[arg-type]
+        dst_tgid=TgId(dst_int),
+        source_is_obp=mode == "OPENBRIDGE",
+        call_type=call_type,
+    )
 
 
 class VoiceSubscriptionMixin:
@@ -81,6 +100,7 @@ class VoiceSubscriptionMixin:
 
     _subscription_store: SubscriptionStore
     _subscription_router: SubscriptionRouter | None
+    _forward_plan_cache: dict[tuple, _CachedPlan]
 
     def _subscription_router_instance(self) -> SubscriptionRouter:
         router = getattr(self, "_subscription_router", None)
@@ -129,6 +149,8 @@ class VoiceSubscriptionMixin:
         and on nothing in the frame beyond the key, so each frame of a call reuses
         the plan of the first until the store is written or a block is reloaded.
         Per-frame checks (ENABLED, quench, keepalive, contention) stay in the loop.
+
+        Invariant: from the SYSTEMS blocks it reads only MODE (see ``_CachedPlan``).
         """
         systems = self._config.get("SYSTEMS", {})
         revision = getattr(self._subscription_store, "revision", None)
@@ -138,9 +160,7 @@ class VoiceSubscriptionMixin:
         # VoiceIngress.bridge_match_slot, which is what resolve() matches on.
         match_slot = 1 if mode == "OPENBRIDGE" else (1 if int(slot) == 1 else 2)
         key = (system_name, bridge_match_slot, match_slot, dst_int, mode == "OPENBRIDGE", routable)
-        cache: dict[tuple, _CachedPlan] | None = getattr(self, "_forward_plan_cache", None)
-        if cache is None:
-            cache = self._forward_plan_cache = {}
+        cache = self._forward_plan_cache
         hit = cache.get(key) if revision is not None else None
         if (
             hit is not None
@@ -149,18 +169,9 @@ class VoiceSubscriptionMixin:
         ):
             return hit.plan
 
-        tables, legs = self._voice_forward_plan(
-            system_name=system_name,
-            peer_id=b"",
-            rf_src=b"",
-            dst_id=dst_int.to_bytes(3, "big"),
-            slot=slot,
-            call_type=call_type,
-            stream_id=b"",
-            source_is_obp=source_is_obp,
-            bridge_match_slot=bridge_match_slot,
-            dst_int=dst_int,
-        )
+        router = self._subscription_router_instance()
+        tables = router.relay_tables_with_active_source(system_name, bridge_match_slot, dst_int)
+        legs = router.resolve(_route_ingress(system_name, slot, dst_int, call_type, mode)) if routable else ()
         # One leg per (target, translated TGID) on MASTER/PEER targets: their
         # send_peers() picks each peer's slot itself, so a second leg is the same
         # audio twice. OpenBridge targets keep per-slot legs (separate links).
@@ -190,7 +201,7 @@ class VoiceSubscriptionMixin:
         if revision is not None:
             names = {system_name, *(leg.target_system for leg in legs)}
             if len(cache) >= _FORWARD_PLAN_CACHE_MAX:
-                cache.clear()
+                del cache[next(iter(cache))]  # oldest first, not the whole cache
             cache[key] = _CachedPlan(revision, tuple((n, systems.get(n)) for n in names), plan)
         return plan
 

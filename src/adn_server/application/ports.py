@@ -298,9 +298,10 @@ class SubscriptionStore(ABC):
     def legs_in_table(self, table_key: str) -> tuple["Subscription", ...]:
         ...
 
+    @abstractmethod
     def has_table(self, table_key: str) -> bool:
-        """True when at least one leg belongs to ``table_key``. Stores with an index override this."""
-        return any(sub.table_key() == table_key for sub in self.snapshot())
+        """True when at least one leg belongs to ``table_key``; runs per datagram."""
+        ...
 
     @abstractmethod
     def has_active_target_leg(self, system: str, slot: int, tgid: int) -> bool:

@@ -124,6 +124,8 @@ class RoutingUseCases(
         self._config = config
         self._subscription_store = subscription_store
         self._subscription_router = None
+        self._forward_plan_cache = {}  # see VoiceSubscriptionMixin._group_voice_forward_plan
+        self._lc_set_cache = {}  # see LcTaMixin._encode_lc_set
         self._routing_table_legacy_view = None
         self._send_to_system = send_to_system  # (system_name, packet, **kwargs) -> None
         self._get_protocols = get_protocols  # () -> dict[str, protocol]
