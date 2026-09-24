@@ -33,3 +33,5 @@ class ServerContext:
     defer_to_thread: Callable[..., Any]
     call_from_reactor: Callable[..., Any]
     call_later: Callable[..., Any]
+    # Present only for a plugin listed in PLUGINS.send (see domain/send.py).
+    send_dmrd: Callable[[bytes], bool] | None = None

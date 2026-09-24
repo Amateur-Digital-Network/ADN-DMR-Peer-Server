@@ -42,6 +42,7 @@ from adn_server.application.plugins.application.bus import PluginBus
 from adn_server.application.plugins.application.context import ServerContext
 from adn_server.application.plugins.application.data_bridge import DataPluginBridge
 from adn_server.application.plugins.application.manager import PluginManager
+from adn_server.application.plugins.application.sender import PluginDmrdSender
 from adn_server.application.plugins.application.voice_bridge import VoicePluginBridge
 from adn_server.application.proxy.deployment import (
     is_obp_proxy_managed,
@@ -447,7 +448,28 @@ def run_peer_server(
         call_from_reactor=reactor.callFromThread,
         call_later=reactor.callLater,
     )
-    plugin_manager = PluginManager(plugin_bus, server_ctx, project_root)
+    def _deliver_plugin_dmrd(pkt: bytes, plugin: str) -> None:
+        # Reactor thread (PluginDmrdSender schedules it there). Same ingress MASTER as announcements.
+        from adn_server.application.routing.announcement_ptt_inject import (
+            announcement_ptt_system,
+            inject_plugin_dmrd,
+        )
+
+        master = announcement_ptt_system(config)
+        if not master:
+            logger.warning("(PLUGIN) %s: no MASTER to send from, frame dropped", plugin)
+            return
+        server_id = config.get("GLOBAL", {}).get("SERVER_ID", b"\x00\x00\x00\x00")
+        if not isinstance(server_id, bytes):
+            server_id = bytes_4(int(server_id or 0) & 0xFFFFFFFF)
+        inject_plugin_dmrd(routing_use_cases, master, pkt, pkt_time=time.time(), server_id=server_id, plugin=plugin)
+
+    plugin_manager = PluginManager(
+        plugin_bus,
+        server_ctx,
+        project_root,
+        sender_factory=lambda name: PluginDmrdSender(name, config, _deliver_plugin_dmrd, reactor.callFromThread),
+    )
     voice_plugin_bridge = VoicePluginBridge(plugin_bus, config, get_dmra_blocks=get_dmra_blocks)
     data_plugin_bridge = DataPluginBridge(plugin_bus, config)
 

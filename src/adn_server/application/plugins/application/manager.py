@@ -23,12 +23,14 @@
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ..application.bus import PluginBus
 from ..application.context import ServerContext
 from ..domain.protocol import ServerPlugin
+from ..domain.send import send_permission
 from ..infrastructure.loader import (
     load_plugin_from_entry,
     plugin_config_for_load,
@@ -45,9 +47,11 @@ class PluginManager:
         bus: PluginBus,
         ctx: ServerContext,
         project_root: str | Path,
+        sender_factory: Callable[[str], Callable[[bytes], bool]] | None = None,
     ) -> None:
         self._bus = bus
         self._ctx = ctx
+        self._sender_factory = sender_factory
         self._project_root = Path(project_root)
         self._loaded: dict[str, ServerPlugin] = {}
         self._configs: dict[str, dict[str, Any]] = {}
@@ -79,7 +83,7 @@ class PluginManager:
                 cfg = plugin_config_for_load(entry.config)
                 if overrides.get(entry.name):
                     cfg = {**cfg, **overrides[entry.name]}
-                plugin.on_load(self._bus, cfg, self._ctx)
+                plugin.on_load(self._bus, cfg, self._ctx_for(entry.name, server_config))
                 self._loaded[entry.name] = plugin
                 self._configs[entry.name] = dict(entry.config)
                 loaded.append(plugin)
@@ -106,7 +110,7 @@ class PluginManager:
                     cfg = plugin_config_for_load(entry.config)
                     if overrides.get(entry.name):
                         cfg = {**cfg, **overrides[entry.name]}
-                    plugin.on_load(self._bus, cfg, self._ctx)
+                    plugin.on_load(self._bus, cfg, self._ctx_for(entry.name, server_config))
                     self._loaded[entry.name] = plugin
                     self._configs[entry.name] = dict(entry.config)
                     self._bus.register_plugin(plugin)
@@ -125,6 +129,17 @@ class PluginManager:
                 except Exception:
                     logger.exception("(PLUGIN-MANAGER) reload failed for %s", entry.name)
                 self._configs[entry.name] = dict(new_cfg)
+
+    def _ctx_for(self, name: str, server_config: dict[str, Any]) -> ServerContext:
+        """The shared context, plus ``send_dmrd`` for a plugin granted it in PLUGINS.send.
+
+        The sender re-reads the permission on every frame, so revoking it on SIGHUP
+        is immediate; granting it to an already loaded plugin needs that plugin reloaded.
+        """
+        if self._sender_factory is None or send_permission(server_config, name) is None:
+            return self._ctx
+        logger.info("(PLUGIN-MANAGER) %s may send unit data (PLUGINS.send)", name)
+        return replace(self._ctx, send_dmrd=self._sender_factory(name))
 
     def shutdown_all(self) -> None:
         for name in list(self._loaded):

@@ -49,6 +49,7 @@ from ..domain import (
 )
 from ..domain.dmr import bptc
 from ..domain.mesh_session import ObpBridgeSession, obp_session
+from .plugins.domain.send import is_plugin_sendable
 from .ports import AclRouter, DmrEmbeddedLcEncoder, SubscriptionStore, TalkerAliasEmblcEncoder
 from .reporting_use_cases import ReportingUseCases
 from .routing.hbp_forward import HbpForwardMixin
@@ -202,6 +203,7 @@ class RoutingUseCases(
         obp_rssi: bytes = b"\x00",
         obp_source_rptr: bytes = b"\x00\x00\x00\x00",
         synthetic_announcement: bool = False,
+        plugin_origin: str | None = None,
     ) -> bool:
         """Called by UDP when DMRD is received. Forward to other systems in same bridge (to_target).
 
@@ -218,6 +220,12 @@ class RoutingUseCases(
         fuzzy fallback must be skipped: matching the announcement's spoofed rf_src
         against a real connected peer's ID would misattribute the call (TX state,
         dynamic TG) to that peer.
+
+        ``plugin_origin`` names the plugin that sent the frame through
+        ``ServerContext.send_dmrd``. Such frames are unit data only, are delivered by
+        the unit data path alone (SUB_MAP / hotspot ID, never the private call path,
+        so SUB_MAP never learns their source), stay on this server (no OpenBridge or
+        DATA-GATEWAY fan-out), and reach plugins as synthetic events.
         """
         if not self._send_to_system:
             return
@@ -231,6 +239,9 @@ class RoutingUseCases(
         # Legacy bridge_master 3080–3085: private call to ID 4000 only disconnects dynamics; do not route as PC.
         if call_type == "unit" and int_id(dst_id) == 4000:
             return
+        if plugin_origin is not None and not is_plugin_sendable(call_type, frame_type, dtype_vseq):
+            logger.warning("(PLUGIN) %s: only unit data may be sent, dropped", plugin_origin)
+            return False
         if call_type == "unit":
             _int_dst = int_id(dst_id)
             if dtype_vseq in (6, 7, 8) or (dtype_vseq == 3 and not self._is_stream_known(system_name, stream_id, slot)):
@@ -240,11 +251,14 @@ class RoutingUseCases(
                     obp_use_parsed=obp_use_parsed, obp_hops=obp_hops,
                     obp_source_server=obp_source_server,
                     obp_ber=obp_ber, obp_rssi=obp_rssi, obp_source_rptr=obp_source_rptr,
+                    plugin_origin=plugin_origin,
                 )
             # Legacy routerHBP ~3252-3254: 7-digit routing runs after unit data, not
             # instead of it. D-APRS ARS/LRRP downlink (dst 7300392) uses pvt_call_received
             # when SUB_MAP sendDataToHBP is blocked by the strict idle check.
-            if len(str(_int_dst)) == 7:
+            # Not for plugin frames: that path learns SUB_MAP from the source and keeps
+            # per-slot call state on the ingress MASTER, which a plugin is not a radio of.
+            if len(str(_int_dst)) == 7 and plugin_origin is None:
                 self._pvt_call_received(
                     system_name, peer_id, rf_src, dst_id, seq, slot,
                     frame_type, dtype_vseq, stream_id, data,
@@ -1075,6 +1089,7 @@ class RoutingUseCases(
         obp_ber: bytes = b"\x00",
         obp_rssi: bytes = b"\x00",
         obp_source_rptr: bytes = b"\x00\x00\x00\x00",
+        plugin_origin: str | None = None,
     ) -> None:
         """Legacy routerOBP/routerHBP unit data branch: DATA-GATEWAY + OBP fan-out + SUB_MAP/hotspot."""
         pkt_time = time.time()
@@ -1199,8 +1214,8 @@ class RoutingUseCases(
                 )
             )
 
-        # DATA-GATEWAY forwarding (legacy ~2281-2284 / ~3083-3087)
-        if global_cfg.get("DATA_GATEWAY"):
+        # DATA-GATEWAY forwarding (legacy ~2281-2284 / ~3083-3087). Plugin frames stay local.
+        if global_cfg.get("DATA_GATEWAY") and plugin_origin is None:
             dg_cfg = systems_cfg.get("DATA-GATEWAY", {})
             if dg_cfg.get("MODE") == "OPENBRIDGE" and dg_cfg.get("ENABLED"):
                 logger.debug("(%s) DATA packet sent to DATA-GATEWAY", system_name)
@@ -1226,7 +1241,7 @@ class RoutingUseCases(
             and pkt_time - _local_sub[2] < UNIT_DATA_LOCAL_SUB_MAX_AGE
         )
         for sys_name, sys_cfg in systems_cfg.items():
-            if _dst_is_fresh_local_sub:
+            if _dst_is_fresh_local_sub or plugin_origin is not None:
                 break
             if sys_name == system_name:
                 continue
@@ -1331,6 +1346,7 @@ class RoutingUseCases(
                 obp_rssi=_rssi,
                 obp_source_rptr=_source_rptr,
                 forwarded=_forwarded,
+                synthetic=plugin_origin is not None,
             )
 
     def _pvt_call_received(

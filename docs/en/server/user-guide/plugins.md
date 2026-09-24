@@ -45,6 +45,7 @@ PLUGINS:
 | `directory` | Absolute path or relative to project root |
 | `master_kill` | Emergency disable — no plugins loaded |
 | `overrides` | Per-plugin config patches without editing `plugins/<name>/config.yaml` |
+| `send` | Per-plugin permission to send unit data — see [Sending unit data](#sending-unit-data-opt-in) |
 
 On **SIGHUP**, `PluginManager.rescan()` loads new plugins, unloads removed ones, and calls `on_reload()` when `config.yaml` changed.
 
@@ -93,8 +94,40 @@ Passed to `on_load` as `server_ctx` (`application/plugins/application/context.py
 | `defer_to_thread(fn, *args)` | Run blocking I/O off the reactor |
 | `call_from_reactor(fn, *args)` | Schedule callback on reactor thread |
 | `call_later(delay_s, fn, *args)` | Reactor timer |
+| `send_dmrd(pkt) -> bool` | Send one DMRD frame — **only** for a plugin granted it in `PLUGINS.send`, otherwise `None` ([Sending](#sending-unit-data-opt-in)) |
 
 **Pattern:** do only dispatch in `on_event`; call `defer_to_thread` for file writes, HTTP, heavy CPU.
+
+---
+
+## Sending unit data (opt-in)
+
+A plugin can send **unit data** (data header, rate 1/2 and 3/4 blocks, CSBK: ARS, LRRP, SMS…) with `server_ctx.send_dmrd(pkt)`, one complete HBP `DMRD` frame per call. Enabling a plugin never lets it transmit: the sysop grants it per plugin in `adn-server.yaml`:
+
+```yaml
+PLUGINS:
+  send:
+    d-aprs:
+      allowed_src_ids: [900999]   # rf_src the plugin may send as; required
+      max_frames_per_s: 40        # per-plugin token bucket (default 40)
+```
+
+- `send_dmrd` is `None` unless the plugin has an entry with at least one source ID.
+- Each frame is checked against the **current** config: removing the entry (SIGHUP) or `master_kill` stops sending at once. Granting it to a plugin already loaded needs that plugin reloaded.
+- Rejected frames (not unit data, source not allowed, over the rate) return `False` and are logged and counted; the first frame of each stream is logged at INFO.
+- Safe from any thread: frames are handed to the reactor.
+
+How the server treats them:
+
+| | |
+|---|---|
+| Ingress | The same MASTER as scheduled announcements, with the SERVER_ID as peer |
+| Delivery | Unit data path only: `SUB_MAP` / hotspot peer ID, to the exact hotspot of the destination — also on the ingress MASTER itself |
+| `SUB_MAP` | Never learns the plugin's source ID (so replies to it are not spread over the MASTER's hotspots) |
+| OpenBridge / `DATA-GATEWAY` | No fan-out: plugin frames stay on this server |
+| Events | Reach plugins with `is_synthetic=True`, so a plugin can ignore its own frames |
+
+Pacing (about 60 ms per burst) is the plugin's job, e.g. with `call_later`.
 
 ---
 

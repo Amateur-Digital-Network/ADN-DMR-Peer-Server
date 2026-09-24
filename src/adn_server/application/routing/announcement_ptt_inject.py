@@ -45,6 +45,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..plugins.domain.send import parse_dmrd_header
 from ..proxy.deployment import proxy_target_system
 from .helpers import parse_dmrd_burst_fields
 
@@ -97,4 +98,37 @@ def inject_announcement_ptt(
         pkt,
         ingress_pkt_time=pkt_time,
         synthetic_announcement=True,
+    )
+
+
+def inject_plugin_dmrd(
+    routing: Any,
+    master_system: str,
+    pkt: bytes,
+    *,
+    pkt_time: float,
+    server_id: bytes,
+    plugin: str,
+) -> bool | None:
+    """Feed one plugin frame through ``dmrd_received`` on the same MASTER as announcements.
+
+    The peer field is always the SERVER_ID: a plugin never speaks as a connected peer.
+    """
+    header = parse_dmrd_header(pkt)
+    if header is None:
+        return False
+    return routing.dmrd_received(
+        master_system,
+        server_id,
+        header.rf_src,
+        header.dst_id,
+        header.seq,
+        header.slot,
+        header.call_type,
+        header.frame_type,
+        header.dtype_vseq,
+        header.stream_id,
+        pkt,
+        ingress_pkt_time=pkt_time,
+        plugin_origin=plugin,
     )
