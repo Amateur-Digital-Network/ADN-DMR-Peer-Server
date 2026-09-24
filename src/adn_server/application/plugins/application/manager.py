@@ -136,10 +136,18 @@ class PluginManager:
         The sender re-reads the permission on every frame, so revoking it on SIGHUP
         is immediate; granting it to an already loaded plugin needs that plugin reloaded.
         """
-        if self._sender_factory is None or send_permission(server_config, name) is None:
+        permission = send_permission(server_config, name) if self._sender_factory is not None else None
+        if permission is None:
             return self._ctx
+        sender = self._sender_factory(name)
+        if permission.group_voice_tgs:
+            logger.info(
+                "(PLUGIN-MANAGER) %s may send unit data and group voice on TG %s (PLUGINS.send)",
+                name, sorted(permission.group_voice_tgs),
+            )
+            return replace(self._ctx, send_dmrd=sender, voice_slot_for_tg=getattr(sender, "voice_slot_for_tg", None))
         logger.info("(PLUGIN-MANAGER) %s may send unit data (PLUGINS.send)", name)
-        return replace(self._ctx, send_dmrd=self._sender_factory(name))
+        return replace(self._ctx, send_dmrd=sender)
 
     def shutdown_all(self) -> None:
         for name in list(self._loaded):

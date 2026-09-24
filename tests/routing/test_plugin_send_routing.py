@@ -187,3 +187,51 @@ def test_a_second_plugin_stream_cannot_talk_over_the_first() -> None:
     sc, ingress, _ = _voice_scenario()
     _play(sc, ingress, _beacon(stream=1)[:2])
     assert _play(sc, ingress, _beacon(stream=2)[:1]) == [False]
+
+
+def test_voice_slot_prefers_the_slot_where_the_tg_is_bridged_on_the_master() -> None:
+    config = minimal_config(("SYSTEM", "SYSTEM-B"))
+    config["SYSTEMS"]["SYSTEM"]["PEERS"] = {b"\x00\x00\x03\xe9": {"CALLSIGN": "HOTSPOT"}}
+    table = active_routing_table(TG, (("SYSTEM", 1), ("SYSTEM-B", 2)), timeout_minutes=10**6)
+    sc = DeterministicScenario(config=config, routing_table=table)
+    sc.routing.apply_startup_subscriptions()
+    for ts in (1, 2):
+        sc.protocols["SYSTEM"].STATUS[ts] = idle_hbp_slot() | {"RX_TYPE": HBPF_SLT_VTERM}
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None, clock=sc.clock.time)
+    assert ingress.voice_slot_for_tg(TG) == 1  # TG 213 lives on TS1 of this MASTER
+    assert ingress.voice_slot_for_tg(9999) == 2  # nowhere yet: TS2 first
+
+
+def test_voice_slot_is_none_while_every_slot_is_busy() -> None:
+    sc, ingress, _ = _voice_scenario()
+    for ts in (1, 2):
+        sc.protocols["SYSTEM"].STATUS[ts] = {
+            "RX_TYPE": HBPF_SLT_VHEAD, "RX_TIME": sc.clock.time(), "TX_TYPE": HBPF_SLT_VTERM,
+            "RX_STREAM_ID": b"\x05\x05\x05\x05",
+        }
+    assert ingress.voice_slot_for_tg(TG) is None
+
+
+def test_the_monitor_sees_the_beacon_on_the_master_it_plays_on() -> None:
+    sc, _, _ = _voice_scenario()
+    events: list[str] = []
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None,
+                            clock=sc.clock.time, send_routing_event=events.append)
+    _play(sc, ingress, _beacon(stream=0x0C0C0C0C))
+    starts = [e for e in events if e.startswith("GROUP VOICE,START,TX,SYSTEM,")]
+    ends = [e for e in events if e.startswith("GROUP VOICE,END,TX,SYSTEM,")]
+    assert len(starts) == 1 and len(ends) == 1
+    assert starts[0].split(",")[4:9] == [str(0x0C0C0C0C), str(BEACON_ID), str(BEACON_ID), "2", str(TG)]
+
+
+def test_a_beacon_cut_by_a_radio_still_ends_on_the_monitor() -> None:
+    sc, _, _ = _voice_scenario()
+    events: list[str] = []
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None,
+                            clock=sc.clock.time, send_routing_event=events.append)
+    frames = _beacon()
+    _play(sc, ingress, frames[:3])
+    sc.protocols["SYSTEM"].STATUS[2].update(RX_TYPE=HBPF_SLT_VHEAD, RX_TIME=sc.clock.time() + 0.06, RX_STREAM_ID=b"\x09" * 4)
+    assert _play(sc, ingress, frames[3:4]) == [False]
+    assert sum(e.startswith("GROUP VOICE,END,TX,SYSTEM,") for e in events) == 1
+    assert sc.protocols["SYSTEM"].STATUS[2]["TX_TYPE"] == HBPF_SLT_VTERM

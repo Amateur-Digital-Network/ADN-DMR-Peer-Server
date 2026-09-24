@@ -250,3 +250,12 @@ def test_a_rate_that_is_not_a_positive_number_grants_nothing(rate) -> None:
     from adn_server.application.plugins.domain.send import send_permission
 
     assert send_permission(_config(max_frames_per_s=rate), "d-aprs") is None
+
+
+def test_voice_slot_query_only_for_granted_talkgroups() -> None:
+    sender = PluginDmrdSender(
+        "d-aprs", _config(group_voice_tgs=[213]), lambda *a: True, call_from_reactor=lambda *a: None,
+        slot_for_tg=lambda tg: 2,
+    )
+    assert sender.voice_slot_for_tg(213) == 2
+    assert sender.voice_slot_for_tg(214) is None

@@ -455,14 +455,17 @@ def run_peer_server(
         if callable(send_system):
             send_system(pkt)
 
-    plugin_ingress = PluginIngress(None, config, lambda: protocols, _send_local)  # routing set below
+    plugin_ingress = PluginIngress(  # routing set below
+        None, config, lambda: protocols, _send_local, send_routing_event=reporting_use_cases.send_routing_event,
+    )
 
     plugin_manager = PluginManager(
         plugin_bus,
         server_ctx,
         project_root,
         sender_factory=lambda name: PluginDmrdSender(
-            name, config, plugin_ingress.deliver, reactor.callFromThread, in_reactor_thread=isInIOThread,
+            name, config, plugin_ingress.deliver, reactor.callFromThread,
+            in_reactor_thread=isInIOThread, slot_for_tg=plugin_ingress.voice_slot_for_tg,
         ),
     )
     voice_plugin_bridge = VoicePluginBridge(plugin_bus, config, get_dmra_blocks=get_dmra_blocks)
