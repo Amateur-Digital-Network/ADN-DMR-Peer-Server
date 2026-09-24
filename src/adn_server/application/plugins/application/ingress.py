@@ -34,6 +34,8 @@ from ..domain.send import GROUP_VOICE, UNIT_DATA, parse_dmrd_header, plugin_fram
 
 logger = logging.getLogger(__name__)
 
+_SILENT_STREAM_S = 1.0
+
 
 class PluginIngress:
     """Routes plugin frames on the reactor thread and reports whether each was accepted.
@@ -62,8 +64,8 @@ class PluginIngress:
         self._send_local = send_local
         self._clock = clock
         self._send_routing_event = send_routing_event
-        # Plugin voice streams on air: stream_id -> (master, slot, tg, rf_src, start).
-        self._on_air: dict[bytes, tuple[str, int, int, int, float]] = {}
+        # Plugin voice streams on air: stream_id -> [master, slot, tg, rf_src, start, last frame].
+        self._on_air: dict[bytes, list[Any]] = {}
 
     def set_routing(self, routing: Any) -> None:
         """Bootstrap builds the plugin manager before routing; routing is set before any load."""
@@ -81,9 +83,10 @@ class PluginIngress:
         sys_cfg = self._config.get("SYSTEMS", {}).get(master or "", {})
         if not status or sys_cfg.get("MODE") != "MASTER":
             return None
+        now = self._clock()
+        self._end_silent_streams(now)
         dynamic = master_dynamic_tg_slots(sys_cfg, int(tg))
         bridged = self._active_bridge_slots(int(tg), master)
-        now = self._clock()
         for ts in dict.fromkeys([*sorted(dynamic, reverse=True), *sorted(bridged, reverse=True), 2, 1]):
             slot = status.get(ts)
             if slot and not self._slot_busy(slot, ts in dynamic or ts in bridged, now):
@@ -118,6 +121,7 @@ class PluginIngress:
             return False
         server_id = self._server_id()
         now = self._clock()
+        self._end_silent_streams(now)
         if kind == UNIT_DATA:
             return self._route(master, pkt, now, server_id, plugin) is not False
         return self._group_voice(master, header, pkt[:11] + server_id + pkt[15:], now, server_id, plugin)
@@ -142,23 +146,32 @@ class PluginIngress:
         self._send_local(master, pkt)
         if header.stream_id not in self._on_air:
             self._on_air_start(master, header, now)
+        self._on_air[header.stream_id][5] = now
         if is_term:
             self._off_air(header.stream_id, now)
         return True
 
     def _on_air_start(self, master: str, header: Any, now: float) -> None:
         """Monitor TX on the MASTER itself: its hotspots hear the stream, which no bridge leg reports."""
-        if len(self._on_air) >= 64:  # plugins that never sent a terminator
-            for stream_id in list(self._on_air)[:32]:
-                self._off_air(stream_id, now)
         tg, rf_src = int_id(header.dst_id), int_id(header.rf_src)
-        self._on_air[header.stream_id] = (master, header.slot, tg, rf_src, now)
+        self._on_air[header.stream_id] = [master, header.slot, tg, rf_src, now, now]
         self._report("START", master, header.stream_id, header.slot, tg, rf_src)
+
+    def _end_silent_streams(self, now: float) -> None:
+        """A plugin stream that stopped without a terminator (the plugin gave up, a frame
+        was refused before routing) is over once it has been silent for a second."""
+        for stream_id, entry in list(self._on_air.items()):
+            if now - entry[5] > _SILENT_STREAM_S:
+                proto = self._get_protocols().get(entry[0])
+                slot = getattr(proto, "STATUS", {}).get(entry[1]) if proto is not None else None
+                if slot is not None:
+                    self._release(slot, stream_id)
+                self._off_air(stream_id, entry[5])
 
     def _off_air(self, stream_id: bytes, now: float) -> None:
         entry = self._on_air.pop(stream_id, None)
         if entry is not None:
-            master, slot, tg, rf_src, start = entry
+            master, slot, tg, rf_src, start, _last = entry
             self._report("END", master, stream_id, slot, tg, rf_src, now - start)
 
     def _report(

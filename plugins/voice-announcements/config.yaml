@@ -1,0 +1,7 @@
+# Scheduled announcements, TTS and voice beacons (moved out of the core).
+# The items themselves stay where they were: VOICE.ANNOUNCEMENTS and
+# VOICE.TTS_ANNOUNCEMENTS in adn-voice.yaml (re-read every 15 s).
+enabled: true
+
+# How often to follow changes in adn-voice.yaml, in seconds.
+reconcile_s: 15

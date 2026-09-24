@@ -259,3 +259,12 @@ def test_voice_slot_query_only_for_granted_talkgroups() -> None:
     )
     assert sender.voice_slot_for_tg(213) == 2
     assert sender.voice_slot_for_tg(214) is None
+
+
+def test_the_default_rate_leaves_room_for_one_voice_stream_per_talkgroup() -> None:
+    from adn_server.application.plugins.domain.send import send_permission
+
+    cfg = {"PLUGINS": {"send": {"beacon": {"allowed_src_ids": [1], "group_voice_tgs": [213, 214, 9]}}}}
+    assert send_permission(cfg, "beacon").max_frames_per_s == 40 + 3 * 18
+    cfg["PLUGINS"]["send"]["beacon"]["max_frames_per_s"] = 25
+    assert send_permission(cfg, "beacon").max_frames_per_s == 25

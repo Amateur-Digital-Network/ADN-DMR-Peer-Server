@@ -34,6 +34,8 @@ PLUGIN_SENDABLE_DTYPES = frozenset({3, 6, 7, 8})
 UNIT_DATA = "unit_data"
 GROUP_VOICE = "group_voice"
 DEFAULT_MAX_FRAMES_PER_S = 40.0
+# A voice stream is one frame every 60 ms (~17/s), at most one per talkgroup at a time.
+VOICE_FRAMES_PER_S_PER_TG = 18.0
 
 
 class DmrdHeader(NamedTuple):
@@ -106,8 +108,9 @@ def send_permission(server_config: dict[str, Any], plugin: str) -> SendPermissio
         return None
     try:
         ids = frozenset(int(i) for i in entry.get("allowed_src_ids") or ())
-        rate = float(entry.get("max_frames_per_s", DEFAULT_MAX_FRAMES_PER_S))
         tgs = frozenset(int(t) for t in entry.get("group_voice_tgs") or ())
+        default_rate = DEFAULT_MAX_FRAMES_PER_S + VOICE_FRAMES_PER_S_PER_TG * len(tgs)
+        rate = float(entry.get("max_frames_per_s", default_rate))
     except (TypeError, ValueError):
         return None
     if not ids or not math.isfinite(rate) or rate <= 0:

@@ -235,3 +235,15 @@ def test_a_beacon_cut_by_a_radio_still_ends_on_the_monitor() -> None:
     assert _play(sc, ingress, frames[3:4]) == [False]
     assert sum(e.startswith("GROUP VOICE,END,TX,SYSTEM,") for e in events) == 1
     assert sc.protocols["SYSTEM"].STATUS[2]["TX_TYPE"] == HBPF_SLT_VTERM
+
+
+def test_a_stream_the_plugin_abandons_ends_after_a_silent_second() -> None:
+    sc, _, _ = _voice_scenario()
+    events: list[str] = []
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None,
+                            clock=sc.clock.time, send_routing_event=events.append)
+    _play(sc, ingress, _beacon(stream=1)[:3])  # no terminator
+    sc.clock.advance(1.5)
+    assert ingress.voice_slot_for_tg(TG) == 2  # the next query sweeps it
+    assert sum(e.startswith("GROUP VOICE,END,TX,SYSTEM,") for e in events) == 1
+    assert sc.protocols["SYSTEM"].STATUS[2]["TX_TYPE"] == HBPF_SLT_VTERM

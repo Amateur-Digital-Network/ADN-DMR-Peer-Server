@@ -36,7 +36,7 @@ json/*
 # Internal
 docs-priv/
 
-# Runtime drop-in plugins (see plugins/README.md); example skeleton is versioned
+# Runtime drop-in plugins (see plugins/README.md); example skeleton and official plugins are versioned
 plugins/*
 !plugins/README.md
 !plugins/.gitkeep
@@ -44,6 +44,9 @@ plugins/*
 !plugins/example/**
 plugins/example/example-events/
 plugins/example/**/__pycache__/
+!plugins/voice-announcements/
+!plugins/voice-announcements/**
+plugins/voice-announcements/**/__pycache__/
 
 # Runtime TTS on-demand cache (generated at runtime)
 Audio/es_ES/ondemand/
