@@ -36,7 +36,6 @@ from bitarray import bitarray
 
 from ...application.ports import VoiceProvider
 from .pkt_gen import pkt_gen as _pkt_gen
-from .tts_engine import ensure_tts_ambe as _tts_ensure_tts_ambe
 from .voice_map import VOICE_MAP
 
 logger = logging.getLogger(__name__)
@@ -179,10 +178,6 @@ class DefaultVoiceProvider(VoiceProvider):
         """Generate HBP voice packets for phrase. Legacy mk_voice.pkt_gen."""
         return _pkt_gen(rf_src, dst_id, peer, slot, phrase)
 
-    def ensure_tts_ambe(self, config: dict[str, Any], item: dict[str, Any], audio_path: str) -> str | None:
-        """Delegate to tts_engine.ensure_tts_ambe (full TTS pipeline)."""
-        return _tts_ensure_tts_ambe(config, item, audio_path)
-
 
 class StubVoiceProvider(VoiceProvider):
     """Stub: get_ambe_words returns empty; pkt_gen returns empty iterator; read_single_file returns []."""
@@ -194,9 +189,6 @@ class StubVoiceProvider(VoiceProvider):
         self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any]
     ) -> Iterator[bytes]:
         return iter([])
-
-    def ensure_tts_ambe(self, config: dict[str, Any], item: dict[str, Any], audio_path: str) -> str | None:
-        return None
 
     def read_single_file(self, audio_path: str, lang: str, file_number: str) -> list:
         return []

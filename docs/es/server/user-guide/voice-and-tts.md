@@ -1,5 +1,7 @@
 # Voz, anuncios y TTS
 
+> **Los anuncios programados y el TTS son un plugin** — `plugins/voice-announcements/`, activado por defecto. La configuración no cambia (este fichero); el plugin la sigue cada 15 s y el servidor le autoriza exactamente los TGs e IDs DMR que usan sus ítems (se puede ajustar con `PLUGINS.send.voice-announcements`, ver [Plugins](plugins.md#envío-de-datos-y-voz-de-grupo-opcional)). El ident de voz, los 999x a demanda y el aviso de desconexión siguen en el núcleo.
+
 ## Ficheros de configuración
 
 - **`adn-voice.yaml`** (opcional, no versionada) — fusionada en `config["VOICE"]`.
@@ -63,7 +65,7 @@ Configura **`TTS_VOCODER_CMD`** o **`TTS_AMBESERVER_HOST`** / **`TTS_AMBESERVER_
 
 Al programar anuncios, el servidor puede **esperar** si los slots objetivo están ocupados, **descartar** objetivos si aparece un QSO en vivo a mitad, y solo marcar estado de anuncio **horario** tras una lista de objetivos con éxito — evita pisar tráfico en vivo.
 
-Los anuncios programados y TTS inyectan cada trama como **PTT sintético de hotspot** en `PROXY.TARGET_SYSTEM` (el mismo MASTER que usa el proxy integrado). El enrutamiento reparte a hotspots puenteados y piernas OPENBRIDGE; los peers locales en ese MASTER siguen recibiendo tramas vía `send_system`.
+El plugin envía cada trama con `send_dmrd`, y el núcleo la inyecta como **PTT sintético de hotspot** en `PROXY.TARGET_SYSTEM` (el mismo MASTER que usa el proxy integrado). El enrutamiento reparte a hotspots puenteados y piernas OPENBRIDGE; los peers locales en ese MASTER siguen recibiendo tramas vía `send_system`. Mientras suena, la emisión ocupa ese slot del MASTER; una radio que lo toma la corta.
 
 ## Cola de emisión
 

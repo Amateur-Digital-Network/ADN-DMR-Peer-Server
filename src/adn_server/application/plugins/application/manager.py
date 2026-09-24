@@ -140,14 +140,12 @@ class PluginManager:
         if permission is None:
             return self._ctx
         sender = self._sender_factory(name)
-        if permission.group_voice_tgs:
-            logger.info(
-                "(PLUGIN-MANAGER) %s may send unit data and group voice on TG %s (PLUGINS.send)",
-                name, sorted(permission.group_voice_tgs),
-            )
-            return replace(self._ctx, send_dmrd=sender, voice_slot_for_tg=getattr(sender, "voice_slot_for_tg", None))
-        logger.info("(PLUGIN-MANAGER) %s may send unit data (PLUGINS.send)", name)
-        return replace(self._ctx, send_dmrd=sender)
+        logger.info(
+            "(PLUGIN-MANAGER) %s may send unit data%s (PLUGINS.send)",
+            name, f" and group voice on TG {sorted(permission.group_voice_tgs)}" if permission.group_voice_tgs else "",
+        )
+        # voice_slot_for_tg checks the talkgroup grant live, like send_dmrd.
+        return replace(self._ctx, send_dmrd=sender, voice_slot_for_tg=getattr(sender, "voice_slot_for_tg", None))
 
     def shutdown_all(self) -> None:
         for name in list(self._loaded):

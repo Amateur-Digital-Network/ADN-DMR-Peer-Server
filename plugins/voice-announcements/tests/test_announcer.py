@@ -190,7 +190,7 @@ def test_tts_is_encoded_in_a_thread_then_played(reactor) -> None:
     calls: list = []
     real = ctx.defer_to_thread
     ctx.defer_to_thread = lambda fn, *a: calls.append(fn.__name__) or real(fn, *a)
-    Announcer(ctx, Voice()).reconcile()
+    Announcer(ctx, Voice(), tts=Voice().ensure_tts_ambe).reconcile()
     reactor.advance(61)
     assert calls == ["ensure_tts_ambe"] and len(sent) == Voice.frames
 
@@ -224,3 +224,35 @@ def test_without_a_send_grant_the_plugin_does_nothing(reactor) -> None:
     plugin = VoiceAnnouncementsPlugin()
     plugin.on_load(None, {}, ctx)
     assert plugin._announcer is None
+
+
+@pytest.mark.parametrize("result", [None, RuntimeError("gTTS down")])
+def test_a_failed_tts_conversion_frees_the_item(reactor, result) -> None:
+    ctx, sent = _ctx(reactor, {"TTS_ANNOUNCEMENTS": [_ann("texto1")]})
+    ctx.defer_to_thread = lambda fn, *a: Deferred(result)
+    a = Announcer(ctx, Voice(), tts=lambda *a: None)
+    a.reconcile()
+    reactor.advance(61)
+    assert sent == [] and not a._running
+
+
+def test_an_item_without_dmr_id_speaks_as_the_server_voice_id(reactor) -> None:
+    from adn_server.application.server_voice import server_voice_dmr_id
+
+    ctx, sent = _ctx(reactor, {"ANNOUNCEMENTS": [_ann()]})
+    Announcer(ctx, Voice()).reconcile()
+    reactor.advance(61)
+    assert int.from_bytes(sent[0][5:8], "big") == server_voice_dmr_id(ctx.config)
+
+
+def test_the_server_grants_the_plugin_what_voice_configures() -> None:
+    from adn_server.application.plugins.domain.send import send_permission
+
+    config = {"VOICE": {"ANNOUNCEMENTS": [_ann(tg=213, DMR_ID=2130035)], "TTS_ANNOUNCEMENTS": [_ann(tg=9, ENABLED=False)]}}
+    permission = send_permission(config, "voice-announcements")
+    assert permission.group_voice_tgs == {213, 9}  # disabled items too: enabling needs no restart
+    assert 2130035 in permission.allowed_src_ids
+    config["PLUGINS"] = {"send": {"voice-announcements": {"allowed_src_ids": [1], "group_voice_tgs": [9]}}}
+    assert send_permission(config, "voice-announcements").group_voice_tgs == {9}  # an explicit entry wins
+    config["PLUGINS"] = {"master_kill": True}
+    assert send_permission(config, "voice-announcements") is None

@@ -38,6 +38,7 @@ from adn_server.domain import bytes_3, bytes_4
 
 from ..domain.schedule import FILE, Item, enabled_items, hourly_due
 from ..domain.tg_queue import TalkgroupQueue
+from ..infrastructure.tts_engine import ensure_tts_ambe
 
 logger = logging.getLogger(__name__)
 
@@ -50,9 +51,16 @@ MAX_RETRIES = 60
 
 
 class Announcer:
-    def __init__(self, ctx: Any, voice: Any, now: Callable[[], datetime] = datetime.now) -> None:
+    def __init__(
+        self,
+        ctx: Any,
+        voice: Any,
+        tts: Callable[[dict[str, Any], dict[str, Any], str], str | None] | None = None,
+        now: Callable[[], datetime] = datetime.now,
+    ) -> None:
         self._ctx = ctx
         self._voice = voice
+        self._tts = tts if tts is not None else ensure_tts_ambe
         self._now = now
         self._items: dict[tuple[str, int], Item] = {}
         self._timers: dict[tuple[str, int], Any] = {}
@@ -121,7 +129,7 @@ class Announcer:
             self._load(item)
             return
         logger.info("(%s) Starting TTS conversion in background thread for %s", item.label, item.file)
-        d = self._ctx.defer_to_thread(self._voice.ensure_tts_ambe, self._ctx.config, item.raw, self._audio_path())
+        d = self._ctx.defer_to_thread(self._tts, self._ctx.config, item.raw, self._audio_path())
         d.addCallback(self._tts_ready, item)
         d.addErrback(self._tts_failed, item)
 
