@@ -32,6 +32,7 @@ from datetime import datetime
 from typing import Any, Callable
 
 from ..domain import HBPF_SLT_VHEAD, HBPF_SLT_VTERM, bytes_3, bytes_4, int_id
+from ..domain.hbp_protocol import STREAM_TO
 from .ports import VoiceProvider
 from .server_voice import (
     announcement_item_source_bytes,
@@ -44,6 +45,20 @@ _FRAME_INTERVAL = 0.058
 _ANNOUNCEMENT_EXCLUDED = ("ECHO", "D-APRS")
 _BROADCAST_GAP = 1.5
 
+
+
+def _slot_taken_by_other_stream(slot: dict[str, Any], stream_id: bytes, now: float) -> bool:
+    """A radio is talking on the slot, or another stream is being sent to it."""
+    rx_type = slot.get("RX_TYPE")
+    if rx_type is not None and rx_type != HBPF_SLT_VTERM and now - float(slot.get("RX_TIME", 0) or 0) < STREAM_TO:
+        return True
+    tx_type = slot.get("TX_TYPE")
+    return (
+        tx_type is not None
+        and tx_type != HBPF_SLT_VTERM
+        and slot.get("TX_STREAM_ID") != stream_id
+        and now - float(slot.get("TX_TIME", 0) or 0) < STREAM_TO
+    )
 
 class VoiceUseCases:
     """Use cases for voice announcements and TTS."""
@@ -889,6 +904,62 @@ class VoiceUseCases:
         """Read one AMBE file (e.g. ondemand/{file_number}.ambe). Legacy readSingleFile."""
         return self._voice.read_single_file(audio_path, lang, file_number)
 
+    def play_on_slot(
+        self, protocol: Any, system: str, speech: Any, source_id: bytes, dst_id: bytes
+    ) -> int:
+        """Play a prompt on TS2 of an HBP system from a worker thread; frames sent.
+
+        The thread only paces the frames: each one is sent on the reactor, which
+        holds the slot while the prompt plays the way scheduled broadcasts do
+        (TX_TYPE=VHEAD), so routed group voice finds it busy instead of going out
+        as a second stream on the same slot. A radio keying up, or a call already
+        on the slot, stops the prompt; the slot is released when it ends.
+        """
+        run: dict[str, Any] = {"stopped": False, "sent": 0, "stream_id": None}
+        _next_time = time.time()
+        for pkt in speech:
+            if run["stopped"]:
+                break
+            _next_time += _FRAME_INTERVAL
+            delay = _next_time - time.time()
+            if delay > 0.001:
+                time.sleep(delay)
+            self._call_from_reactor(self._prompt_frame, protocol, system, pkt, source_id, dst_id, run)
+        self._call_from_reactor(self._prompt_end, protocol, run)
+        return int(run["sent"])
+
+    def _prompt_frame(
+        self, protocol: Any, system: str, pkt: bytes, source_id: bytes, dst_id: bytes, run: dict[str, Any]
+    ) -> None:
+        """Reactor side of ``play_on_slot``: one frame, unless the slot is taken."""
+        if run["stopped"]:
+            return
+        slot = protocol.STATUS.get(2) if getattr(protocol, "STATUS", None) else None
+        if not slot:
+            run["stopped"] = True
+            return
+        stream_id = pkt[16:20]
+        now = time.time()
+        if _slot_taken_by_other_stream(slot, stream_id, now):
+            run["stopped"] = True
+            logger.info(
+                "(%s) Voice on TS2, stopping server prompt after %s frames", system, run["sent"]
+            )
+            return
+        slot["TX_TYPE"] = HBPF_SLT_VHEAD
+        slot["TX_STREAM_ID"] = stream_id
+        slot["TX_RFS"] = source_id
+        slot["TX_TIME"] = now
+        run["stream_id"] = stream_id
+        protocol.send_voice_packet(pkt, source_id, dst_id, slot)
+        run["sent"] += 1
+
+    def _prompt_end(self, protocol: Any, run: dict[str, Any]) -> None:
+        """Reactor side of ``play_on_slot``: free the slot if the prompt still holds it."""
+        slot = protocol.STATUS.get(2) if getattr(protocol, "STATUS", None) else None
+        if slot and run["stream_id"] is not None and slot.get("TX_STREAM_ID") == run["stream_id"]:
+            slot["TX_TYPE"] = HBPF_SLT_VTERM
+
     def play_file_on_request(self, file_number: str, system: str) -> None:
         """Play AMBE file on request (legacy playFileOnRequest). TG 9991-9999 triggers this."""
         if not self._get_protocols or not self._call_from_reactor or not self._audio_path:
@@ -908,19 +979,9 @@ class VoiceUseCases:
         _source_id = self._server_source_id()
         speech = self.pkt_gen(_source_id, bytes_3(9), bytes_4(9), 1, _say)
         time.sleep(1)
-        _slot = protocol.STATUS.get(2)
-        if not _slot:
+        if not protocol.STATUS.get(2):
             return
-        _dst_id = bytes_3(9)
-        _next_time = time.time()
-        _pkt_count = 0
-        for pkt in speech:
-            _next_time += 0.058
-            delay = _next_time - time.time()
-            if delay > 0.001:
-                time.sleep(delay)
-            self._call_from_reactor(protocol.send_voice_packet, pkt, _source_id, _dst_id, _slot)
-            _pkt_count += 1
+        _pkt_count = self.play_on_slot(protocol, system, speech, _source_id, bytes_3(9))
         logger.info("(%s) On-demand playback complete: %s (%d packets)", system, file_number, _pkt_count)
 
     def disconnected_voice(self, system: str) -> None:
@@ -957,17 +1018,10 @@ class VoiceUseCases:
         _source_id = self._server_source_id()
         speech = self.pkt_gen(_source_id, bytes_3(9), bytes_4(9), 1, _say)
         time.sleep(1)
-        _slot = protocol.STATUS.get(2)
-        if not _slot:
+        if not protocol.STATUS.get(2):
             return
         logger.debug("(%s) Sending disconnected voice", system)
-        _next_time = time.time()
-        for pkt in speech:
-            _next_time += 0.058
-            _delay = _next_time - time.time()
-            if _delay > 0.001:
-                time.sleep(_delay)
-            self._call_from_reactor(protocol.send_voice_packet, pkt, _source_id, bytes_3(9), _slot)
+        self.play_on_slot(protocol, system, speech, _source_id, bytes_3(9))
         logger.debug("(%s) disconnected voice thread end", system)
 
     def apply_voice_config(self) -> None:
