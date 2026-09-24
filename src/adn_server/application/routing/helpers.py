@@ -112,17 +112,24 @@ def peer_is_simplex(peer: dict[str, Any]) -> bool:
     return peer_rf_mode(peer) == RF_MODE_SIMPLEX
 
 
+def _slot_leg_active(slot_st: dict[str, Any], leg: str, pkt_time: float) -> bool:
+    """True when the slot's ``RX`` or ``TX`` leg carries voice (within STREAM_TO)."""
+    leg_type = slot_st.get(f"{leg}_TYPE")
+    if leg_type is None or leg_type == HBPF_SLT_VTERM:
+        return False
+    return (pkt_time - float(slot_st.get(f"{leg}_TIME", 0) or 0)) < STREAM_TO
+
+
 def slot_has_active_voice(slot_st: dict[str, Any], pkt_time: float) -> bool:
     """True when the slot has an active group-voice RX or TX leg (within STREAM_TO)."""
-    rx_type = slot_st.get("RX_TYPE")
-    if rx_type is not None and rx_type != HBPF_SLT_VTERM:
-        if (pkt_time - float(slot_st.get("RX_TIME", 0))) < STREAM_TO:
-            return True
-    tx_type = slot_st.get("TX_TYPE")
-    if tx_type is not None and tx_type != HBPF_SLT_VTERM:
-        if (pkt_time - float(slot_st.get("TX_TIME", 0))) < STREAM_TO:
-            return True
-    return False
+    return _slot_leg_active(slot_st, "RX", pkt_time) or _slot_leg_active(slot_st, "TX", pkt_time)
+
+
+def slot_voice_held_by_other_stream(slot_st: dict[str, Any], stream_id: bytes, pkt_time: float) -> bool:
+    """Like ``slot_has_active_voice``, but ``stream_id``'s own TX leg does not count."""
+    if _slot_leg_active(slot_st, "RX", pkt_time):
+        return True
+    return slot_st.get("TX_STREAM_ID") != stream_id and _slot_leg_active(slot_st, "TX", pkt_time)
 
 
 def _slot_last_voice_activity(slot_st: dict[str, Any]) -> tuple[bytes, float]:
