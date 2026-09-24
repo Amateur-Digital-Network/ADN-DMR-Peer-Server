@@ -81,12 +81,38 @@ def test_a_plugin_cannot_send_as_a_radio() -> None:
     assert sender(_frame(src=7140023)) is False and delivered == []
 
 
-def test_voice_and_group_frames_are_refused() -> None:
-    sender, delivered = _sender(_config())
-    assert sender(_frame(call_type="group")) is False
-    assert sender(_frame(frame_type=HBPF_VOICE, dtype=1)) is False
+def test_private_voice_and_non_dmrd_are_refused() -> None:
+    sender, delivered = _sender(_config(group_voice_tgs=[213]))
+    assert sender(_frame(frame_type=HBPF_VOICE, dtype=1)) is False  # unit call type, voice frame
     assert sender(b"not a dmrd frame") is False
     assert delivered == []
+
+
+def test_group_voice_only_on_the_granted_talkgroups() -> None:
+    sender, delivered = _sender(_config(group_voice_tgs=[213]))
+    voice = PacketSpec(rf_src=GATEWAY_ID, dst_id=213, call_type="group", frame_type=HBPF_VOICE, dtype_vseq=1).data()
+    other = PacketSpec(rf_src=GATEWAY_ID, dst_id=214, call_type="group", frame_type=HBPF_VOICE, dtype_vseq=1).data()
+    assert sender(voice) is True
+    assert sender(other) is False
+    assert [pkt for pkt, _ in delivered] == [voice]
+
+
+def test_group_voice_needs_a_grant_even_with_a_source_id() -> None:
+    sender, delivered = _sender(_config())
+    voice = PacketSpec(rf_src=GATEWAY_ID, dst_id=213, call_type="group", frame_type=HBPF_VOICE, dtype_vseq=1).data()
+    assert sender(voice) is False and delivered == []
+
+
+def test_on_the_reactor_thread_the_result_is_the_routing_result() -> None:
+    results = iter([True, False])
+    queued: list = []
+    sender = PluginDmrdSender(
+        "d-aprs", _config(), lambda pkt, name: next(results),
+        call_from_reactor=lambda *a: queued.append(a), in_reactor_thread=lambda: True,
+    )
+    assert sender(_frame()) is True
+    assert sender(_frame()) is False  # e.g. the slot was taken: the plugin should stop
+    assert queued == []
 
 
 def test_rate_limit_per_plugin() -> None:

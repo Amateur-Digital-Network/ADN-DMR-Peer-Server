@@ -25,10 +25,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
-from ....domain import HBPF_DATA_SYNC
+from ....domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, HBPF_VOICE, HBPF_VOICE_SYNC
 
 # CSBK, data header, rate 1/2 and rate 3/4 data blocks: ARS, LRRP, SMS and the like.
 PLUGIN_SENDABLE_DTYPES = frozenset({3, 6, 7, 8})
+UNIT_DATA = "unit_data"
+GROUP_VOICE = "group_voice"
 DEFAULT_MAX_FRAMES_PER_S = 40.0
 
 
@@ -68,15 +70,28 @@ def parse_dmrd_header(pkt: bytes) -> DmrdHeader | None:
     )
 
 
+def plugin_frame_kind(call_type: str, frame_type: int, dtype_vseq: int) -> str | None:
+    """UNIT_DATA, GROUP_VOICE, or None for anything a plugin may not send (e.g. private voice)."""
+    if call_type == "unit":
+        return UNIT_DATA if frame_type == HBPF_DATA_SYNC and dtype_vseq in PLUGIN_SENDABLE_DTYPES else None
+    if call_type == "group":
+        if frame_type in (HBPF_VOICE, HBPF_VOICE_SYNC):
+            return GROUP_VOICE
+        if frame_type == HBPF_DATA_SYNC and dtype_vseq in (HBPF_SLT_VHEAD, HBPF_SLT_VTERM):
+            return GROUP_VOICE
+    return None
+
+
 def is_plugin_sendable(call_type: str, frame_type: int, dtype_vseq: int) -> bool:
-    """Plugins send unit data only (no voice) in this version."""
-    return call_type == "unit" and frame_type == HBPF_DATA_SYNC and dtype_vseq in PLUGIN_SENDABLE_DTYPES
+    return plugin_frame_kind(call_type, frame_type, dtype_vseq) is not None
 
 
 @dataclass(frozen=True)
 class SendPermission:
     allowed_src_ids: frozenset[int]
     max_frames_per_s: float
+    # Talkgroups the plugin may speak on (group voice); empty: unit data only.
+    group_voice_tgs: frozenset[int] = frozenset()
 
 
 def send_permission(server_config: dict[str, Any], plugin: str) -> SendPermission | None:
@@ -94,8 +109,9 @@ def send_permission(server_config: dict[str, Any], plugin: str) -> SendPermissio
     try:
         ids = frozenset(int(i) for i in entry.get("allowed_src_ids") or ())
         rate = float(entry.get("max_frames_per_s", DEFAULT_MAX_FRAMES_PER_S))
+        tgs = frozenset(int(t) for t in entry.get("group_voice_tgs") or ())
     except (TypeError, ValueError):
         return None
     if not ids or rate <= 0:
         return None
-    return SendPermission(ids, rate)
+    return SendPermission(ids, rate, tgs)

@@ -113,6 +113,7 @@ def inject_plugin_dmrd(
     """Feed one plugin frame through ``dmrd_received`` on the same MASTER as announcements.
 
     The peer field is always the SERVER_ID: a plugin never speaks as a connected peer.
+    Group voice is marked ``synthetic_announcement`` exactly like announcements are.
     """
     header = parse_dmrd_header(pkt)
     if header is None:
@@ -130,5 +131,6 @@ def inject_plugin_dmrd(
         header.stream_id,
         pkt,
         ingress_pkt_time=pkt_time,
+        synthetic_announcement=header.call_type == "group",
         plugin_origin=plugin,
     )

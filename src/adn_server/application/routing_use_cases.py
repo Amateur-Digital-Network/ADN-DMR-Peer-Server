@@ -222,10 +222,12 @@ class RoutingUseCases(
         dynamic TG) to that peer.
 
         ``plugin_origin`` names the plugin that sent the frame through
-        ``ServerContext.send_dmrd``. Such frames are unit data only, are delivered by
-        the unit data path alone (SUB_MAP / hotspot ID, never the private call path,
-        so SUB_MAP never learns their source), stay on this server (no OpenBridge or
-        DATA-GATEWAY fan-out), and reach plugins as synthetic events.
+        ``ServerContext.send_dmrd``. Unit data is delivered by the unit data path
+        alone (SUB_MAP / hotspot ID, never the private call path, so SUB_MAP never
+        learns its source), stays on this server (no OpenBridge or DATA-GATEWAY
+        fan-out), and reaches plugins as synthetic events. Group voice comes with
+        ``synthetic_announcement=True`` and is routed exactly like an announcement.
+        Anything else (private voice) is dropped.
         """
         if not self._send_to_system:
             return
@@ -240,7 +242,7 @@ class RoutingUseCases(
         if call_type == "unit" and int_id(dst_id) == 4000:
             return
         if plugin_origin is not None and not is_plugin_sendable(call_type, frame_type, dtype_vseq):
-            logger.warning("(PLUGIN) %s: only unit data may be sent, dropped", plugin_origin)
+            logger.warning("(PLUGIN) %s: only unit data and group voice may be sent, dropped", plugin_origin)
             return False
         if call_type == "unit":
             _int_dst = int_id(dst_id)

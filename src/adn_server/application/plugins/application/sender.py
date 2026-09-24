@@ -29,7 +29,7 @@ import time
 from typing import Any, Callable
 
 from ....domain import int_id
-from ..domain.send import SendPermission, is_plugin_sendable, parse_dmrd_header, send_permission
+from ..domain.send import GROUP_VOICE, SendPermission, parse_dmrd_header, plugin_frame_kind, send_permission
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,12 @@ class PluginDmrdSender:
     """Checks each frame against the plugin's live permission, then hands it to the reactor.
 
     The permission is read from the server config on every call, so a SIGHUP that
-    removes or narrows ``PLUGINS.send.<plugin>`` takes effect at once. Safe to call
-    from any thread; delivery always happens on the reactor.
+    removes or narrows ``PLUGINS.send.<plugin>`` takes effect at once.
+
+    Called on the reactor thread (``on_event``, ``call_later``), the frame is routed at
+    once and the result is whether the server accepted it: a plugin sending voice stops
+    when it gets False. From another thread the frame is queued to the reactor and the
+    result only says the guards passed.
     """
 
     def __init__(
@@ -49,12 +53,14 @@ class PluginDmrdSender:
         deliver: Callable[[bytes, str], Any],
         call_from_reactor: Callable[..., Any],
         clock: Callable[[], float] = time.monotonic,
+        in_reactor_thread: Callable[[], bool] = lambda: False,
     ) -> None:
         self._plugin = plugin
         self._config = server_config
         self._deliver = deliver
         self._call_from_reactor = call_from_reactor
         self._clock = clock
+        self._in_reactor_thread = in_reactor_thread
         self._lock = threading.Lock()
         self._tokens = math.inf  # starts full: clamped to the rate on first use
         self._refilled = clock()
@@ -69,8 +75,11 @@ class PluginDmrdSender:
         header = parse_dmrd_header(bytes(pkt)) if isinstance(pkt, (bytes, bytearray)) else None
         if header is None:
             return self._reject("not a DMRD frame")
-        if not is_plugin_sendable(header.call_type, header.frame_type, header.dtype_vseq):
-            return self._reject("only unit data may be sent")
+        kind = plugin_frame_kind(header.call_type, header.frame_type, header.dtype_vseq)
+        if kind is None:
+            return self._reject("only unit data and group voice may be sent")
+        if kind == GROUP_VOICE and int_id(header.dst_id) not in permission.group_voice_tgs:
+            return self._reject(f"TG {int_id(header.dst_id)} not in group_voice_tgs")
         rf_src = int_id(header.rf_src)
         stream_id, dst_id = header.stream_id, header.dst_id
         if rf_src not in permission.allowed_src_ids:
@@ -87,6 +96,8 @@ class PluginDmrdSender:
             logger.info(
                 "(PLUGIN) %s sent stream %s src %s -> dst %s", self._plugin, int_id(stream_id), rf_src, int_id(dst_id)
             )
+        if self._in_reactor_thread():
+            return bool(self._deliver(bytes(pkt), self._plugin))
         self._call_from_reactor(self._deliver, bytes(pkt), self._plugin)
         return True
 
