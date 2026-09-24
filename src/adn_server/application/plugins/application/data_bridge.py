@@ -31,6 +31,8 @@ from ..application.bus import PluginBus
 from ..domain.events import CallLegContext, UnitDataEnd, UnitDataFrame, UnitDataStart
 from .bridge_common import alias_extra, int_byte, unit_data_label
 
+_DATA_EVENTS = (UnitDataStart, UnitDataFrame, UnitDataEnd)
+
 
 class DataPluginBridge:
     """Emits unit-data events to PluginBus after routing forward."""
@@ -69,13 +71,8 @@ class DataPluginBridge:
         synthetic: bool = False,
     ) -> None:
         """``synthetic``: the frame was sent by a plugin (``ServerContext.send_dmrd``)."""
-        if not self._bus.has_subscribers():
+        if not self._bus.wants_any(*_DATA_EVENTS):
             return
-        systems_cfg = self._config.get("SYSTEMS", {})
-        mode = systems_cfg.get(system_name, {}).get("MODE", "MASTER")
-        server_id = int_byte(self._config.get("GLOBAL", {}).get("SERVER_ID")) or 0
-        bits = data[15] if len(data) > 15 else 0
-        dmrpkt = data[20:53] if len(data) >= 53 else b""
         sid = int_id(stream_id)
         stream_key = (system_name, slot)
         prev = self._active_streams.get(stream_key)
@@ -84,6 +81,14 @@ class DataPluginBridge:
         is_new_stream = prev is None or prev[0] != sid
         if is_new_stream:
             self._active_streams[stream_key] = (sid, pkt_time, synthetic)
+        starts = is_new_stream or dtype_vseq == 6
+        if not (starts and self._bus.wants(UnitDataStart)) and not self._bus.wants(UnitDataFrame):
+            return  # stream tracked for UnitDataEnd; nothing else to build
+        systems_cfg = self._config.get("SYSTEMS", {})
+        mode = systems_cfg.get(system_name, {}).get("MODE", "MASTER")
+        server_id = int_byte(self._config.get("GLOBAL", {}).get("SERVER_ID")) or 0
+        bits = data[15] if len(data) > 15 else 0
+        dmrpkt = data[20:53] if len(data) >= 53 else b""
         ctx = CallLegContext(
             call_family="DATA",
             direction="RX",
@@ -112,7 +117,7 @@ class DataPluginBridge:
             },
         )
         label = unit_data_label(dtype_vseq)
-        if is_new_stream or dtype_vseq == 6:
+        if starts:
             self._bus.emit(
                 UnitDataStart(
                     context=ctx,
