@@ -100,9 +100,9 @@ def peer_listen_slots(peer: dict[str, Any], tgid: int) -> list[int]:
     RF timeslots and is expected to key up on both, same as a real repeater
     configured that way. Simplex peers/bridges always collapse to one slot.
     """
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     if peer_is_simplex(peer):
         tg = str(tgid)
         if tg in ts1 or tg in ts2:

@@ -52,6 +52,7 @@ from ...application.routing.downlink import (
 from ...application.routing.helpers import (
     clear_peer_rx_status_slots,
     clear_peer_ua_sessions,
+    derive_peer_rf_mode,
     hbp_master_ingress_repeat_allowed,
     is_on_demand_service_dst,
     is_server_originated_voice,
@@ -1267,6 +1268,46 @@ class HBPProtocol(DatagramProtocol):
         self._refresh_connected_peer_count()
         self._mark_downlink_index_dirty()
 
+    def _acl_rejects_dmrd(
+        self,
+        rf_src: bytes,
+        dst_id: bytes,
+        slot: int,
+        stream_id: bytes,
+        unit_service_dst: bool,
+    ) -> bool:
+        """Legacy DMRD ACL gate: global rules, then this system's own.
+
+        The MASTER and PEER ingress paths ran identical copies of this. Order,
+        the per-slot ``_laststrid`` guard that logs a rejected call once per
+        stream, and the messages themselves are the legacy ones; on-demand unit
+        services stay exempt from the TG lists but not from the subscriber ACL.
+        """
+        if not self._router:
+            return False
+        for scope, cfg in (("GLOBAL", self._CONFIG.get("GLOBAL", {})), ("SYSTEM", self._config)):
+            if not cfg.get("USE_ACL"):
+                continue
+            if not self._router.acl_check(rf_src, cfg.get("SUB_ACL", (True, []))):
+                if self._laststrid[slot] != stream_id:
+                    logger.info(
+                        "(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY %s ACL",
+                        self._system, int_id(stream_id), int_id(rf_src), scope,
+                    )
+                    self._laststrid[slot] = stream_id
+                return True
+            if unit_service_dst:
+                continue
+            if not self._router.acl_check(dst_id, cfg.get(f"TG{slot}_ACL", (True, []))):
+                if self._laststrid[slot] != stream_id:
+                    logger.info(
+                        "(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY %s TS%s ACL",
+                        self._system, int_id(stream_id), int_id(dst_id), scope, slot,
+                    )
+                    self._laststrid[slot] = stream_id
+                return True
+        return False
+
     def _master_datagram_received(self, _data: bytes, _sockaddr: tuple[str, int]) -> None:
         """Direct port of hblink.py master_datagramReceived (lines 888-1146)."""
         _command = _data[:4]
@@ -1311,38 +1352,8 @@ class HBPProtocol(DatagramProtocol):
                 _int_dst_id = int_id(_dst_id)
                 _unit_service_dst = _call_type == "unit" and is_on_demand_service_dst(_int_dst_id)
                 # ACL (legacy order and _laststrid)
-                if self._router and _global.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, _global.get("SUB_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 1 and not self._router.acl_check(_dst_id, _global.get("TG1_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 2 and not self._router.acl_check(_dst_id, _global.get("TG2_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS2 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                if self._router and self._config.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, self._config.get("SUB_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 1 and not self._router.acl_check(_dst_id, self._config.get("TG1_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 2 and not self._router.acl_check(_dst_id, self._config.get("TG2_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS2 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
+                if self._acl_rejects_dmrd(_rf_src, _dst_id, _slot, _stream_id, _unit_service_dst):
+                    return
                 # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
                 # (peer_id) is new — lets same-system private-call repeat target
                 # the exact hotspot instead of broadcasting to every peer.
@@ -1732,6 +1743,11 @@ class HBPProtocol(DatagramProtocol):
                     _this_peer["URL"] = _data[98:222]
                     _this_peer["SOFTWARE_ID"] = _data[222:262]
                     _this_peer["PACKAGE_ID"] = _data[262:302]
+                    # RPTC carries the only inputs simplex/duplex depends on (SLOTS and
+                    # the two frequencies), so classify here instead of on every frame:
+                    # peer_rf_mode() reads this and the downlink path asks it three
+                    # times per voice frame.
+                    _this_peer["RF_MODE"] = derive_peer_rf_mode(_this_peer)
                     _sent_call = _rptc_field_str(_this_peer["CALLSIGN"])
                     if ("ALLOW_UNREG_ID" in self._config and not self._config["ALLOW_UNREG_ID"]) and _sent_call != self.validate_id(_peer_id):
                         self._remove_peer(_peer_id)
@@ -1911,40 +1927,9 @@ class HBPProtocol(DatagramProtocol):
                     return
                 pkt_time = time.time()
                 _int_dst_id = int_id(_dst_id)
-                _global = self._CONFIG.get("GLOBAL", {})
                 _unit_service_dst = _call_type == "unit" and is_on_demand_service_dst(_int_dst_id)
-                if self._router and _global.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, _global.get("SUB_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 1 and not self._router.acl_check(_dst_id, _global.get("TG1_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 2 and not self._router.acl_check(_dst_id, _global.get("TG2_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS2 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                if self._router and self._config.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, self._config.get("SUB_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 1 and not self._router.acl_check(_dst_id, self._config.get("TG1_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 2 and not self._router.acl_check(_dst_id, self._config.get("TG2_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS2 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
+                if self._acl_rejects_dmrd(_rf_src, _dst_id, _slot, _stream_id, _unit_service_dst):
+                    return
                 # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
                 # (peer_id) is new — see the MASTER-mode write site for why.
                 sub_map = self._CONFIG.get("_SUB_MAP")

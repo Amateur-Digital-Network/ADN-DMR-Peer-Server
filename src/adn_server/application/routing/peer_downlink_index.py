@@ -37,8 +37,9 @@ from .helpers import peer_single_exclusive_tgid
 
 
 def invalidate_peer_options_cache(peer: dict[str, Any]) -> None:
-    """Drop cached OPTIONS parse after RPTO."""
+    """Drop cached OPTIONS parses after RPTO."""
     peer.pop("_CACHED_OPTIONS_STATIC", None)
+    peer.pop("_CACHED_OPTIONS_FIELDS", None)
 
 
 def cached_peer_static_tgs(peer: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:

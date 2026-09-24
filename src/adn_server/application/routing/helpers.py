@@ -1318,10 +1318,23 @@ def _system_has_active_bridge_leg(
 
 
 def peer_options_fields(peer: dict[str, Any]) -> dict[str, Any]:
-    """Parse hotspot OPTIONS into fields used by SINGLE/TIMER resolution."""
+    """Parse hotspot OPTIONS into fields used by SINGLE/TIMER resolution.
+
+    Memoized against the OPTIONS blob, the way ``cached_peer_static_tgs`` already
+    memoizes the static lists: OPTIONS only changes on RPTO, which drops the cache
+    (``invalidate_peer_options_cache``), while ingress asks for these fields
+    several times per voice frame through ``peer_single_mode``.
+    """
+    opts = peer.get("OPTIONS")
+    key = opts if isinstance(opts, bytes) else b""
+    cached = peer.get("_CACHED_OPTIONS_FIELDS")
+    if cached is not None and cached[0] == key:
+        return cached[1]
     from adn_server.application.report.payloads import parse_peer_options_fields
 
-    return parse_peer_options_fields(peer.get("OPTIONS"))
+    fields = parse_peer_options_fields(opts)
+    peer["_CACHED_OPTIONS_FIELDS"] = (key, fields)
+    return fields
 
 
 def _peer_ua_session_entry(
@@ -1381,9 +1394,9 @@ def _peer_static_tg_blocks_slot(peer: dict[str, Any], slot: int, tgid: int) -> b
     match on one slot must not block genuinely independent dynamic activity
     on the *other* slot (e.g. TG static on TS2, this same peer separately
     keying up the same TG on TS1)."""
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     tg = str(tgid)
     if peer_is_simplex(peer):
         return tg in ts1 or tg in ts2
@@ -1868,9 +1881,9 @@ def peer_single_blocks_foreign_same_tg_downlink(
 
 def peer_static_options_tg_count(peer: dict[str, Any]) -> int:
     """Count distinct static group TGs listed in peer OPTIONS (TS1 ∪ TS2)."""
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     return len(set(ts1) | set(ts2))
 
 
@@ -1890,18 +1903,18 @@ def peer_receives_group_tgid(peer: dict[str, Any], slot: int, tgid: int) -> bool
     slot while self-service lists the TG on the other.
     """
     del slot
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     tg = str(tgid)
     return tg in ts1 or tg in ts2
 
 
 def peer_options_static_tg_slot(peer: dict[str, Any], tgid: int) -> int | None:
     """Timeslot (1 or 2) where peer OPTIONS list ``tgid``, when unambiguous."""
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     tg = str(tgid)
     in_ts1 = tg in ts1
     in_ts2 = tg in ts2
@@ -1958,9 +1971,9 @@ def peer_downlink_voice_slot(
     static = peer_options_static_tg_slot(peer, tgid)
     if static is not None:
         return static
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     tg = str(tgid)
     if tg in ts1 and tg in ts2:
         # Static on both slots (peer_options_static_tg_slot returns None
