@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import pickle
 
+import pytest
+
 from adn_server.infrastructure.persistence import PickleSubMapStore, SubMapSaver
 
 
@@ -78,3 +80,18 @@ def test_save_leaves_no_temp_file_and_replaces_atomically(tmp_path):
     PickleSubMapStore().save(str(path), {b"new": ("Y", 2, 1.0)})
     assert [p.name for p in tmp_path.iterdir()] == ["sub_map.pkl"]
     assert PickleSubMapStore().load(str(path)) == {b"new": ("Y", 2, 1.0)}
+
+
+def test_failed_dump_leaves_no_temp_file(tmp_path, monkeypatch):
+    path = tmp_path / "sub_map.pkl"
+    PickleSubMapStore().save(str(path), {b"\x00\x00\x01": ("SYS", 1, 1.0)})
+
+    def boom(*_a, **_k):
+        raise pickle.PicklingError("boom")
+
+    monkeypatch.setattr(pickle, "dump", boom)
+    with pytest.raises(pickle.PicklingError):
+        PickleSubMapStore().save(str(path), {b"\x00\x00\x02": ("SYS", 2, 2.0)})
+
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["sub_map.pkl"]
+    assert PickleSubMapStore().load(str(path)) == {b"\x00\x00\x01": ("SYS", 1, 1.0)}

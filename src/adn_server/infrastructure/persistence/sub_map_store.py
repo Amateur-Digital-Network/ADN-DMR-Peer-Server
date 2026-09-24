@@ -25,12 +25,18 @@
 
 from __future__ import annotations
 
+import itertools
 import os
 import pickle
+import threading
 from collections.abc import Hashable
 from pathlib import Path
 
 from ...application.ports import SubMapStore
+
+# A SIGHUP handler runs on the main thread, so it can interrupt a save already in
+# progress there: pid and thread alone would give both writers the same temp file.
+_tmp_seq = itertools.count()
 
 
 class PickleSubMapStore(SubMapStore):
@@ -53,10 +59,13 @@ class PickleSubMapStore(SubMapStore):
         p.parent.mkdir(parents=True, exist_ok=True)
         # Write aside and rename: a crash mid-dump must not leave a truncated
         # file, which load() would turn into an empty map.
-        tmp = p.with_name(p.name + ".tmp")
-        with open(tmp, "wb") as f:
-            pickle.dump(sub_map, f)
-        os.replace(tmp, p)
+        tmp = p.with_name(f"{p.name}.tmp.{os.getpid()}.{threading.get_ident()}.{next(_tmp_seq)}")
+        try:
+            with open(tmp, "wb") as f:
+                pickle.dump(sub_map, f)
+            tmp.replace(p)
+        finally:
+            tmp.unlink(missing_ok=True)
 
 
 # SUB_MAP is rewritten on every frame, but only the route of an entry (system,
