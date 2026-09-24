@@ -35,6 +35,7 @@ from tests.routing.unit_data_helpers import idle_hbp_slot
 from adn_server.application.plugins.application.bus import PluginBus
 from adn_server.application.plugins.application.data_bridge import DataPluginBridge
 from adn_server.application.plugins.application.ingress import PluginIngress
+from adn_server.application.routing.helpers import hbp_slot_blocks_group_voice
 from adn_server.application.plugins.domain.events import UnitDataFrame
 from adn_server.application.routing.announcement_ptt_inject import inject_plugin_dmrd
 from adn_server.domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, HBPF_VOICE, bytes_3, bytes_4
@@ -170,9 +171,11 @@ def test_the_master_slot_is_held_while_it_plays_and_freed_by_the_terminator() ->
     frames = _beacon()
     _play(sc, ingress, frames[:3])
     slot = sc.protocols["SYSTEM"].STATUS[2]
-    assert slot["TX_TYPE"] == HBPF_SLT_VHEAD and slot["TX_RFS"] == bytes_3(BEACON_ID)
+    assert slot["RX_RFS"] == bytes_3(BEACON_ID) and slot["RX_TYPE"] != HBPF_SLT_VTERM
+    # routed voice for another TG finds the slot busy while the beacon plays
+    assert hbp_slot_blocks_group_voice(slot, bytes_3(214), b"\x07" * 4, sc.clock.time(), 0)
     _play(sc, ingress, frames[3:])
-    assert slot["TX_TYPE"] == HBPF_SLT_VTERM
+    assert slot["RX_TYPE"] == HBPF_SLT_VTERM
 
 
 def test_a_radio_talking_on_the_slot_stops_the_beacon() -> None:
@@ -234,7 +237,8 @@ def test_a_beacon_cut_by_a_radio_still_ends_on_the_monitor() -> None:
     sc.protocols["SYSTEM"].STATUS[2].update(RX_TYPE=HBPF_SLT_VHEAD, RX_TIME=sc.clock.time() + 0.06, RX_STREAM_ID=b"\x09" * 4)
     assert _play(sc, ingress, frames[3:4]) == [False]
     assert sum(e.startswith("GROUP VOICE,END,TX,SYSTEM,") for e in events) == 1
-    assert sc.protocols["SYSTEM"].STATUS[2]["TX_TYPE"] == HBPF_SLT_VTERM
+    slot = sc.protocols["SYSTEM"].STATUS[2]
+    assert slot["RX_STREAM_ID"] == b"\x09" * 4 and slot["RX_TYPE"] == HBPF_SLT_VHEAD  # the radio's state is left alone
 
 
 def test_a_stream_the_plugin_abandons_ends_after_a_silent_second() -> None:
@@ -246,4 +250,34 @@ def test_a_stream_the_plugin_abandons_ends_after_a_silent_second() -> None:
     sc.clock.advance(1.5)
     assert ingress.voice_slot_for_tg(TG) == 2  # the next query sweeps it
     assert sum(e.startswith("GROUP VOICE,END,TX,SYSTEM,") for e in events) == 1
-    assert sc.protocols["SYSTEM"].STATUS[2]["TX_TYPE"] == HBPF_SLT_VTERM
+    assert sc.protocols["SYSTEM"].STATUS[2]["RX_TYPE"] == HBPF_SLT_VTERM  # released by the sweep
+
+
+def test_a_beacon_on_a_slot_with_stale_rx_state_is_forwarded_whole_with_its_own_lc() -> None:
+    """Regression (2131, 25-sep-2026): the ingress slot still held the last radio's RX
+    state. From the second frame on, routing took the beacon for a colliding QSO,
+    suppressed the uplink, and forwarded only 2 frames; the LC came from RX_LC."""
+    from adn_server.domain.dmr import decode
+
+    sc, ingress, _ = _voice_scenario()
+    sc.protocols["SYSTEM"].STATUS[2].update(
+        RX_TYPE=HBPF_SLT_VTERM, RX_STREAM_ID=b"\x0e" * 4, RX_RFS=bytes_3(3120001), RX_TGID=bytes_3(214),
+        RX_PEER=bytes_4(1001), RX_TIME=sc.clock.time() - 30, RX_LC=b"\x00\x00\x20" + bytes_3(214) + bytes_3(3120001),
+    )
+    frames = _beacon()
+    assert _play(sc, ingress, frames) == [True] * len(frames)
+    to_b = sc.capture.for_system("SYSTEM-B")
+    assert len(to_b) == len(frames)
+    lc = decode.voice_head_term(to_b[0].packet[20:53])["LC"]
+    assert lc[3:6] == bytes_3(TG) and lc[6:9] == bytes_3(BEACON_ID)
+    # the embedded LC of the voice bursts B-E must be the beacon's too, not the stale RX_LC
+    from bitarray import bitarray
+
+    from adn_server.domain.dmr import bptc
+
+    by_vseq = {p.packet[15] & 0x0F: p.packet for p in to_b[1:-1]}
+    frags = bitarray(endian="big")
+    for vseq in (1, 2, 3, 4):
+        frags += decode.voice(by_vseq[vseq][20:53])["EMBED"]
+    emb = bptc.decode_emblc(frags)
+    assert emb[3:6] == bytes_3(TG) and emb[6:9] == bytes_3(BEACON_ID)

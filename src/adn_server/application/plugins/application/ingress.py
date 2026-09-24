@@ -26,7 +26,10 @@ import logging
 import time
 from typing import Any, Callable
 
-from ....domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM
+from ....domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, int_id
+from ....domain.dmr import decode
+from ....domain.dmr.const import LC_OPT
+from ....domain.hbp_protocol import STREAM_TO
 from ....domain.mesh_engine import server_id_bytes
 from ...routing.announcement_ptt_inject import announcement_ptt_system, inject_plugin_dmrd
 from ...routing.helpers import master_dynamic_tg_slots, slot_voice_held_by_other_stream
@@ -44,9 +47,11 @@ class PluginIngress:
 
     Group voice is routed like a scheduled announcement: through the bridges (OpenBridge
     legs included, as for any local ingress), and out to the hotspots of the MASTER it
-    enters on. While a plugin's stream plays it holds that MASTER slot (TX_TYPE=VHEAD,
-    TX_STREAM_ID, TX_RFS), so routed voice finds it busy; a radio or another stream on the
-    slot makes the frame fail, which tells the plugin to stop. The terminator frees it.
+    enters on. Each accepted frame records the slot's RX state exactly as ``udp_hbp`` does
+    for a hotspot's frame (RX_STREAM_ID, RX_LC, RX_RFS, RX_TGID, RX_TYPE, RX_TIME…): routing
+    then knows the stream it is continuing and the LC it carries, and routed voice finds
+    the slot busy. A radio or another stream on the slot makes the frame fail, which tells
+    the plugin to stop. The terminator frees the slot.
     """
 
     def __init__(
@@ -131,18 +136,12 @@ class PluginIngress:
         slot = getattr(proto, "STATUS", {}).get(header.slot) if proto is not None else None
         if slot is None:
             return False
-        if slot_voice_held_by_other_stream(slot, header.stream_id, now) or (
-            self._route(master, pkt, now, server_id, plugin) is not True
-        ):
+        if _slot_taken(slot, header.stream_id, now) or self._route(master, pkt, now, server_id, plugin) is not True:
             self._release(slot, header.stream_id)
             self._off_air(header.stream_id, now)
             return False
         is_term = header.frame_type == HBPF_DATA_SYNC and header.dtype_vseq == HBPF_SLT_VTERM
-        slot["TX_TYPE"] = HBPF_SLT_VTERM if is_term else HBPF_SLT_VHEAD
-        slot["TX_STREAM_ID"] = header.stream_id
-        slot["TX_RFS"] = header.rf_src
-        slot["TX_TGID"] = header.dst_id
-        slot["TX_TIME"] = now
+        _record_rx(slot, header, pkt, server_id, now)
         self._send_local(master, pkt)
         if header.stream_id not in self._on_air:
             self._on_air_start(master, header, now)
@@ -191,8 +190,41 @@ class PluginIngress:
 
     @staticmethod
     def _release(slot: dict[str, Any], stream_id: bytes) -> None:
-        if slot.get("TX_STREAM_ID") == stream_id:
-            slot["TX_TYPE"] = HBPF_SLT_VTERM
+        if slot.get("RX_STREAM_ID") == stream_id:
+            slot["RX_TYPE"] = HBPF_SLT_VTERM
 
     def _server_id(self) -> bytes:
         return server_id_bytes(self._config.get("GLOBAL", {}).get("SERVER_ID"))[:4]
+
+
+def _slot_taken(slot: dict[str, Any], stream_id: bytes, now: float) -> bool:
+    """Live voice on the slot that is not this stream: a radio, or another stream."""
+    for leg in ("RX", "TX"):
+        leg_type = slot.get(f"{leg}_TYPE")
+        if leg_type is None or leg_type == HBPF_SLT_VTERM:
+            continue
+        if slot.get(f"{leg}_STREAM_ID") == stream_id:
+            continue
+        if now - float(slot.get(f"{leg}_TIME", 0) or 0) < STREAM_TO:
+            return True
+    return False
+
+
+def _record_rx(slot: dict[str, Any], header: Any, pkt: bytes, peer_id: bytes, now: float) -> None:
+    """The slot RX state ``udp_hbp`` records after routing accepts a hotspot's frame."""
+    if header.stream_id != slot.get("RX_STREAM_ID"):
+        slot["RX_START"] = now
+        lc = LC_OPT + header.dst_id + header.rf_src
+        if header.frame_type == HBPF_DATA_SYNC and header.dtype_vseq == HBPF_SLT_VHEAD:
+            try:
+                lc = decode.voice_head_term(pkt[20:53])["LC"]
+            except Exception:
+                pass
+        slot["RX_LC"] = lc
+    slot["RX_PEER"] = peer_id
+    slot["RX_SEQ"] = header.seq
+    slot["RX_RFS"] = header.rf_src
+    slot["RX_TYPE"] = header.dtype_vseq
+    slot["RX_TGID"] = header.dst_id
+    slot["RX_TIME"] = now
+    slot["RX_STREAM_ID"] = header.stream_id
