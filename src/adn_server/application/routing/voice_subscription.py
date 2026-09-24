@@ -44,7 +44,9 @@
 from __future__ import annotations
 
 import logging
+from typing import Any, NamedTuple
 
+from ...domain.value_objects import TgId, bytes_3
 from ...domain.voice_routing import ForwardLeg, VoiceIngress
 from ..ports import SubscriptionStore
 from ..subscription.ingress import build_voice_ingress
@@ -52,12 +54,53 @@ from ..subscription.router import SubscriptionRouter
 
 logger = logging.getLogger(__name__)
 
+# Same set as ``build_voice_ingress``: other call types resolve to no legs.
+_BRIDGE_CALL_TYPES = frozenset({"group", "vcsbk"})
+_FORWARD_PLAN_CACHE_MAX = 4096
+
+
+class ForwardPlan(NamedTuple):
+    """Where one group voice frame goes, ready for the forwarding loop."""
+
+    tables: tuple[str, ...]
+    legs: tuple[ForwardLeg, ...]
+    # (relay table key, target entry) per leg; shared between frames, read only.
+    entries: tuple[tuple[str, dict[str, Any]], ...]
+
+
+class _CachedPlan(NamedTuple):
+    revision: int
+    # Every SYSTEMS block the plan read, as the object it read: a reload
+    # replaces the block, which is what makes the plan stale. Identity only
+    # catches reloads, though: blocks are also changed in place at runtime (the
+    # static TGs, for one). That is safe because the plan reads nothing from a
+    # block but MODE, which only a reload changes. A plan that reads any other
+    # field must also be keyed on it, or it will be silently stale.
+    blocks: tuple[tuple[str, Any], ...]
+    plan: ForwardPlan
+
+
+def _route_ingress(system_name: str, slot: int, dst_int: int, call_type: str, mode: str) -> VoiceIngress:
+    """An ingress carrying only what ``resolve()`` routes on: no peer, radio or stream.
+
+    Leaving those out is what lets one plan serve every frame of a call; a router
+    that starts reading them has to be added to the plan cache key first.
+    """
+    return VoiceIngress(
+        source_system=system_name,
+        slot=1 if int(slot) == 1 else 2,  # type: ignore[arg-type]
+        dst_tgid=TgId(dst_int),
+        source_is_obp=mode == "OPENBRIDGE",
+        call_type=call_type,
+    )
+
 
 class VoiceSubscriptionMixin:
     """Wire ``SubscriptionRouter`` into ``dmrd_received``."""
 
     _subscription_store: SubscriptionStore
     _subscription_router: SubscriptionRouter | None
+    _forward_plan_cache: dict[tuple, _CachedPlan]
 
     def _subscription_router_instance(self) -> SubscriptionRouter:
         router = getattr(self, "_subscription_router", None)
@@ -89,6 +132,78 @@ class VoiceSubscriptionMixin:
             call_type=call_type,
             stream_id=stream_id,
         )
+
+    def _group_voice_forward_plan(
+        self,
+        *,
+        system_name: str,
+        slot: int,
+        call_type: str,
+        source_is_obp: bool,
+        bridge_match_slot: int,
+        dst_int: int,
+    ) -> ForwardPlan:
+        """The forward plan of a group voice frame, rebuilt only when it can differ.
+
+        It depends on the subscription store, the source and target SYSTEMS blocks
+        and on nothing in the frame beyond the key, so each frame of a call reuses
+        the plan of the first until the store is written or a block is reloaded.
+        Per-frame checks (ENABLED, quench, keepalive, contention) stay in the loop.
+
+        Invariant: from the SYSTEMS blocks it reads only MODE (see ``_CachedPlan``).
+        """
+        systems = self._config.get("SYSTEMS", {})
+        revision = getattr(self._subscription_store, "revision", None)
+        src_block = systems.get(system_name)
+        mode = "OPENBRIDGE" if source_is_obp else (src_block or {}).get("MODE", "")
+        routable = call_type in _BRIDGE_CALL_TYPES
+        # VoiceIngress.bridge_match_slot, which is what resolve() matches on.
+        match_slot = 1 if mode == "OPENBRIDGE" else (1 if int(slot) == 1 else 2)
+        key = (system_name, bridge_match_slot, match_slot, dst_int, mode == "OPENBRIDGE", routable)
+        cache = self._forward_plan_cache
+        hit = cache.get(key) if revision is not None else None
+        if (
+            hit is not None
+            and hit.revision == revision
+            and all(systems.get(name) is block for name, block in hit.blocks)
+        ):
+            return hit.plan
+
+        router = self._subscription_router_instance()
+        tables = router.relay_tables_with_active_source(system_name, bridge_match_slot, dst_int)
+        legs = router.resolve(_route_ingress(system_name, slot, dst_int, call_type, mode)) if routable else ()
+        # One leg per (target, translated TGID) on MASTER/PEER targets: their
+        # send_peers() picks each peer's slot itself, so a second leg is the same
+        # audio twice. OpenBridge targets keep per-slot legs (separate links).
+        seen_hbp: set[tuple[str, int]] = set()
+        deduped = []
+        for leg in legs:
+            if systems.get(leg.target_system, {}).get("MODE") != "OPENBRIDGE":
+                hbp_key = (leg.target_system, int(leg.target_tgid))
+                if hbp_key in seen_hbp:
+                    continue
+                seen_hbp.add(hbp_key)
+            deduped.append(leg)
+        table_key = tables[0] if tables else str(dst_int)
+        entries = tuple(
+            (
+                table_key,
+                {
+                    "SYSTEM": leg.target_system,
+                    "TS": int(leg.slot),
+                    "TGID": bytes_3(int(leg.target_tgid)),
+                    "ACTIVE": True,
+                },
+            )
+            for leg in deduped
+        )
+        plan = ForwardPlan(tables, tuple(deduped), entries)
+        if revision is not None:
+            names = {system_name, *(leg.target_system for leg in legs)}
+            if len(cache) >= _FORWARD_PLAN_CACHE_MAX:
+                del cache[next(iter(cache))]  # oldest first, not the whole cache
+            cache[key] = _CachedPlan(revision, tuple((n, systems.get(n)) for n in names), plan)
+        return plan
 
     def _voice_relay_tables_with_active_source(
         self,

@@ -30,7 +30,7 @@ from adn_server.application.routing.helpers import is_special_tg
 from adn_server.application.subscription.routing_table_export import _legacy_to_type
 from adn_server.application.subscription.trigger_bytes import dst_in_triggers
 from adn_server.domain import bytes_3, int_id
-from adn_server.domain.subscription import ActivationPolicy, Subscription, SubscriptionPhase
+from adn_server.domain.subscription import ActivationPolicy, Subscription, SubscriptionPhase, SystemId
 
 logger = logging.getLogger(__name__)
 
@@ -52,10 +52,7 @@ def apply_in_band_signalling_store(
     dst_group = int_id(dst_id)
     dst_id_b = dst_id if isinstance(dst_id, bytes) and len(dst_id) >= 3 else bytes_3(dst_group)
 
-    for sub in store.snapshot():
-        if sub.system.value != system_name:
-            continue
-
+    for sub in store.list_by_system(SystemId(system_name)):
         relay_table_key = sub.table_key()
         if relay_table_key[:1] == "#" and dst_group != 9:
             continue

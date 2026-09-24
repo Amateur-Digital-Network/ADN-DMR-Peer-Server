@@ -42,12 +42,20 @@ class InMemorySubscriptionStore(SubscriptionStore):
 
     def __init__(self) -> None:
         self._items: dict[SubscriptionId, Subscription] = {}
+        # Per system, in the same order as _items (an upsert keeps its place).
+        self._by_system: dict[str, dict[SubscriptionId, Subscription]] = {}
         self._by_table: dict[str, list[Subscription]] = defaultdict(list)
         self._source_tables: dict[_IndexKey, set[str]] = {}
         self._active_target_counts: dict[_IndexKey, int] = {}
         # What each leg was indexed under. Callers change a leg in place and then
         # upsert it, so by the time it is unindexed it may no longer say where it is.
         self._indexed: dict[SubscriptionId, tuple[str, _IndexKey | None]] = {}
+        self._revision = 0
+
+    @property
+    def revision(self) -> int:
+        """Bumped on every write, so readers can keep what they derived until it moves."""
+        return self._revision
 
     def get(self, sub_id: SubscriptionId) -> Subscription | None:
         return self._items.get(sub_id)
@@ -57,27 +65,39 @@ class InMemorySubscriptionStore(SubscriptionStore):
         if old is not None:
             self._unindex(old)
         self._items[subscription.subscription_id] = subscription
+        self._by_system.setdefault(subscription.system.value, {})[subscription.subscription_id] = subscription
         self._index(subscription)
+        self._revision += 1
 
     def remove(self, sub_id: SubscriptionId) -> bool:
         old = self._items.pop(sub_id, None)
         if old is None:
             return False
+        of_system = self._by_system.get(old.system.value)
+        if of_system is not None:
+            of_system.pop(sub_id, None)
+            if not of_system:
+                del self._by_system[old.system.value]
         self._unindex(old)
+        self._revision += 1
         return True
 
     def clear(self) -> None:
         self._items.clear()
+        self._by_system.clear()
         self._by_table.clear()
         self._source_tables.clear()
         self._active_target_counts.clear()
         self._indexed.clear()
+        self._revision += 1
 
     def replace_all(self, subscriptions: Sequence[Subscription]) -> None:
         self.clear()
         for sub in subscriptions:
             self._items[sub.subscription_id] = sub
+            self._by_system.setdefault(sub.system.value, {})[sub.subscription_id] = sub
             self._index(sub)
+        self._revision += 1
 
     def snapshot(self) -> tuple[Subscription, ...]:
         return tuple(self._items.values())
@@ -86,7 +106,7 @@ class InMemorySubscriptionStore(SubscriptionStore):
         return tuple(sub for sub in self._items.values() if sub.channel == channel)
 
     def list_by_system(self, system: SystemId) -> tuple[Subscription, ...]:
-        return tuple(sub for sub in self._items.values() if sub.system == system)
+        return tuple(self._by_system.get(system.value, {}).values())
 
     def list_active(self) -> tuple[Subscription, ...]:
         return tuple(sub for sub in self._items.values() if sub.is_active())
@@ -105,6 +125,10 @@ class InMemorySubscriptionStore(SubscriptionStore):
         if not keys:
             return ()
         return tuple(sorted(keys))
+
+    def has_table(self, table_key: str) -> bool:
+        """O(1): the table index instead of a scan of every subscription."""
+        return bool(self._by_table.get(table_key))
 
     def legs_in_table(self, table_key: str) -> tuple[Subscription, ...]:
         """All legs for a relay table key (indexed)."""

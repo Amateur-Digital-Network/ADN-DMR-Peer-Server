@@ -299,6 +299,11 @@ class SubscriptionStore(ABC):
         ...
 
     @abstractmethod
+    def has_table(self, table_key: str) -> bool:
+        """True when at least one leg belongs to ``table_key``; runs per datagram."""
+        ...
+
+    @abstractmethod
     def has_active_target_leg(self, system: str, slot: int, tgid: int) -> bool:
         ...
 
