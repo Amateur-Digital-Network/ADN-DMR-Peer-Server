@@ -26,8 +26,12 @@ from adn_server.application.ports import SubscriptionStore
 
 
 def store_has_table(store: SubscriptionStore, table_key: str) -> bool:
-    """True when the store has at least one leg in ``table_key``."""
-    return any(sub.table_key() == table_key for sub in store.snapshot())
+    """True when the store has at least one leg in ``table_key``.
+
+    Indexed: this runs per datagram, and the scan it replaces was building a tuple
+    of every subscription to answer a yes/no question.
+    """
+    return bool(store.legs_in_table(table_key))
 
 
 def system_has_active_leg_in_store(
