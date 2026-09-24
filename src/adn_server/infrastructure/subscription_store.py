@@ -45,6 +45,9 @@ class InMemorySubscriptionStore(SubscriptionStore):
         self._by_table: dict[str, list[Subscription]] = defaultdict(list)
         self._source_tables: dict[_IndexKey, set[str]] = {}
         self._active_target_counts: dict[_IndexKey, int] = {}
+        # What each leg was indexed under. Callers change a leg in place and then
+        # upsert it, so by the time it is unindexed it may no longer say where it is.
+        self._indexed: dict[SubscriptionId, tuple[str, _IndexKey | None]] = {}
 
     def get(self, sub_id: SubscriptionId) -> Subscription | None:
         return self._items.get(sub_id)
@@ -68,6 +71,7 @@ class InMemorySubscriptionStore(SubscriptionStore):
         self._by_table.clear()
         self._source_tables.clear()
         self._active_target_counts.clear()
+        self._indexed.clear()
 
     def replace_all(self, subscriptions: Sequence[Subscription]) -> None:
         self.clear()
@@ -116,13 +120,18 @@ class InMemorySubscriptionStore(SubscriptionStore):
     def _index(self, sub: Subscription) -> None:
         table_key = sub.table_key()
         self._by_table[table_key].append(sub)
+        key = None
         if sub.is_active():
             key = self._index_key(sub)
             self._source_tables.setdefault(key, set()).add(table_key)
             self._active_target_counts[key] = self._active_target_counts.get(key, 0) + 1
+        self._indexed[sub.subscription_id] = (table_key, key)
 
     def _unindex(self, sub: Subscription) -> None:
-        table_key = sub.table_key()
+        indexed = self._indexed.pop(sub.subscription_id, None)
+        if indexed is None:
+            return
+        table_key, key = indexed
         legs = self._by_table.get(table_key)
         if legs:
             try:
@@ -131,8 +140,7 @@ class InMemorySubscriptionStore(SubscriptionStore):
                 pass
             if not legs:
                 del self._by_table[table_key]
-        if sub.is_active():
-            key = self._index_key(sub)
+        if key is not None:
             keys = self._source_tables.get(key)
             if keys is not None:
                 keys.discard(table_key)
