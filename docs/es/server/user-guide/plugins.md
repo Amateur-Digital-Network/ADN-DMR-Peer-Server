@@ -47,7 +47,7 @@ PLUGINS:
 | `overrides` | Parches por plugin sin editar `plugins/<name>/config.yaml` |
 | `send` | Permiso por plugin para enviar datos y voz de grupo — ver [Envío](#envío-de-datos-y-voz-de-grupo-opcional) |
 
-Con **SIGHUP**, `PluginManager.rescan()` carga plugins nuevos, descarga los eliminados y llama `on_reload()` si cambió `config.yaml`.
+Con **SIGHUP**, el bloque `PLUGINS` se vuelve a leer de `adn-server.yaml` (quitarlo equivale a quitar todo lo que contenía) y `PluginManager.rescan()` carga plugins nuevos, descarga los eliminados y llama `on_reload()` si cambió `config.yaml`.
 
 ### Claves reservadas en `config.yaml`
 
@@ -116,6 +116,7 @@ PLUGINS:
 ```
 
 - `send_dmrd` es `None` salvo que el plugin tenga una entrada con al menos un ID de origen.
+- La lista de IDs permitidos y el límite de ritmo protegen frente a un plugin **con fallos** (que emita como una radio o inunde la red). No son un aislamiento: un plugin corre en el mismo proceso con la configuración viva y podría reescribir su propia entrada, así que instala solo plugins de confianza.
 - Cada trama se comprueba contra la configuración **actual**: quitar la entrada (SIGHUP) o `master_kill` corta el envío al instante. Autorizar a un plugin ya cargado exige recargar ese plugin.
 - Las tramas rechazadas (no son datos, origen no permitido, exceso de ritmo) devuelven `False` y se registran y cuentan; la primera trama de cada stream se registra en INFO.
 - Llamado desde el hilo del reactor (`on_event`, `call_later`), la trama se enruta en el acto y el resultado indica si el servidor la **aceptó**; un plugin que emite voz debe parar cuando recibe `False`. Desde otro hilo la trama se encola al reactor y `True` solo significa que pasó las salvaguardas.

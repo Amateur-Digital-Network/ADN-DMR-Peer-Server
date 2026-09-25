@@ -114,6 +114,9 @@ class YamlConfigLoader:
         # "absent" (defaults apply) from "present but disabled".
         if isinstance(data.get("OBP_PROXY"), dict):
             config["OBP_PROXY"] = data["OBP_PROXY"]
+        # PLUGINS (directory, master_kill, overrides, send) is read by the plugin manager.
+        if isinstance(data.get("PLUGINS"), dict):
+            config["PLUGINS"] = data["PLUGINS"]
         apply_proxy_env_overrides(config)
         # Ensure REPORT_CLIENTS is list
         if "REPORT_CLIENTS" in config["REPORTS"] and isinstance(config["REPORTS"]["REPORT_CLIENTS"], str):

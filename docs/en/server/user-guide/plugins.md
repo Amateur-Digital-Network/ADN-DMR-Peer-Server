@@ -47,7 +47,7 @@ PLUGINS:
 | `overrides` | Per-plugin config patches without editing `plugins/<name>/config.yaml` |
 | `send` | Per-plugin permission to send unit data and group voice — see [Sending](#sending-unit-data-and-group-voice-opt-in) |
 
-On **SIGHUP**, `PluginManager.rescan()` loads new plugins, unloads removed ones, and calls `on_reload()` when `config.yaml` changed.
+On **SIGHUP**, the `PLUGINS` block is re-read from `adn-server.yaml` (removing it counts as removing everything in it) and `PluginManager.rescan()` loads new plugins, unloads removed ones, and calls `on_reload()` when `config.yaml` changed.
 
 ### `config.yaml` reserved keys
 
@@ -116,6 +116,7 @@ PLUGINS:
 ```
 
 - `send_dmrd` is `None` unless the plugin has an entry with at least one source ID.
+- The allowlist and the rate limit guard against a **buggy** plugin (sending as a radio, flooding the mesh). They are no sandbox: a plugin runs in-process with the live config and could rewrite its own entry, so only install plugins you trust.
 - Each frame is checked against the **current** config: removing the entry (SIGHUP) or `master_kill` stops sending at once. Granting it to a plugin already loaded needs that plugin reloaded.
 - Rejected frames (not unit data, source not allowed, over the rate) return `False` and are logged and counted; the first frame of each stream is logged at INFO.
 - Called on the reactor thread (`on_event`, `call_later`), the frame is routed at once and the result is whether the server **accepted** it; a plugin sending voice must stop when it gets `False`. From another thread the frame is queued to the reactor and `True` only means the guards passed.

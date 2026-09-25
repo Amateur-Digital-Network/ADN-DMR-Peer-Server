@@ -22,10 +22,12 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
 from ....domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, HBPF_VOICE, HBPF_VOICE_SYNC
+from ....domain.mesh_admission import call_attributes
 
 # CSBK, data header, rate 1/2 and rate 3/4 data blocks: ARS, LRRP, SMS and the like.
 PLUGIN_SENDABLE_DTYPES = frozenset({3, 6, 7, 8})
@@ -50,22 +52,16 @@ def parse_dmrd_header(pkt: bytes) -> DmrdHeader | None:
     """The HBP DMRD header fields of any call type (group, vcsbk or unit)."""
     if len(pkt) < 53 or pkt[:4] != b"DMRD":
         return None
-    bits = pkt[15]
-    if bits & 0x40:
-        call_type = "unit"
-    elif (bits & 0x23) == 0x23:
-        call_type = "vcsbk"
-    else:
-        call_type = "group"
+    attrs = call_attributes(pkt[15])
     return DmrdHeader(
         seq=pkt[4],
         rf_src=pkt[5:8],
         dst_id=pkt[8:11],
         peer_id=pkt[11:15],
-        slot=2 if bits & 0x80 else 1,
-        call_type=call_type,
-        frame_type=(bits & 0x30) >> 4,
-        dtype_vseq=bits & 0xF,
+        slot=attrs.slot,
+        call_type=attrs.call_type,
+        frame_type=attrs.frame_type,
+        dtype_vseq=attrs.dtype_vseq,
         stream_id=pkt[16:20],
     )
 
@@ -97,8 +93,10 @@ class SendPermission:
 def send_permission(server_config: dict[str, Any], plugin: str) -> SendPermission | None:
     """The plugin's entry in ``PLUGINS.send``, or None when it may not send.
 
-    An entry without source IDs grants nothing: the allowlist is what stops a
-    plugin from sending as a radio.
+    An entry without source IDs grants nothing. The allowlist and the rate limit
+    guard against a *buggy* plugin (sending as a radio, flooding the mesh); they are
+    no sandbox: a plugin runs in-process with the live config and could rewrite its
+    own entry, so only install plugins you trust.
     """
     plugins_cfg = server_config.get("PLUGINS") or {}
     if plugins_cfg.get("master_kill"):
@@ -112,6 +110,6 @@ def send_permission(server_config: dict[str, Any], plugin: str) -> SendPermissio
         tgs = frozenset(int(t) for t in entry.get("group_voice_tgs") or ())
     except (TypeError, ValueError):
         return None
-    if not ids or rate <= 0:
+    if not ids or not math.isfinite(rate) or rate <= 0:
         return None
     return SendPermission(ids, rate, tgs)

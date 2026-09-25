@@ -26,7 +26,8 @@ import logging
 import time
 from typing import Any, Callable
 
-from ....domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, bytes_4, int_id
+from ....domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM
+from ....domain.mesh_engine import server_id_bytes
 from ...routing.announcement_ptt_inject import announcement_ptt_system, inject_plugin_dmrd
 from ...routing.helpers import slot_voice_held_by_other_stream
 from ..domain.send import GROUP_VOICE, UNIT_DATA, parse_dmrd_header, plugin_frame_kind
@@ -106,7 +107,4 @@ class PluginIngress:
             slot["TX_TYPE"] = HBPF_SLT_VTERM
 
     def _server_id(self) -> bytes:
-        server_id = self._config.get("GLOBAL", {}).get("SERVER_ID", b"\x00\x00\x00\x00")
-        if isinstance(server_id, bytes) and len(server_id) >= 4:
-            return server_id[:4]
-        return bytes_4(int(int_id(server_id) if isinstance(server_id, bytes) else server_id or 0) & 0xFFFFFFFF)
+        return server_id_bytes(self._config.get("GLOBAL", {}).get("SERVER_ID"))[:4]

@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from tests.harness.deterministic import PacketSpec
 
 from adn_server.application.plugins.application.bus import PluginBus
@@ -168,3 +170,83 @@ def test_only_the_granted_plugin_gets_send_dmrd(tmp_path) -> None:
     assert type(loaded["d-aprs"]).ctx.send_dmrd is not None
     assert type(loaded["logger"]).ctx.send_dmrd is None
     assert made == ["d-aprs"]
+
+
+# --- through the real SIGHUP reload path (review of #104) ---
+
+from adn_server.application.runtime_context import (  # noqa: E402
+    ConfigProxy,
+    RuntimeContext,
+    RuntimeContextHolder,
+    prepare_reload_config,
+    swap_runtime_config,
+)
+from adn_server.infrastructure.config_reload import merge_top_level_config  # noqa: E402
+
+
+def _reload(holder: RuntimeContextHolder, incoming: dict) -> None:
+    """What a SIGHUP does with a freshly parsed adn-server.yaml (``incoming``)."""
+    new_config = prepare_reload_config(holder)
+    merge_top_level_config(new_config, incoming)
+    swap_runtime_config(holder, new_config)
+
+
+@pytest.mark.parametrize(
+    "incoming",
+    [
+        {"GLOBAL": {}, "PLUGINS": {"send": {}}},  # entry removed
+        {"GLOBAL": {}, "PLUGINS": {"master_kill": True, **_config()["PLUGINS"]}},  # master_kill
+        {"GLOBAL": {}},  # the whole PLUGINS section removed
+    ],
+    ids=["entry-removed", "master-kill", "section-removed"],
+)
+def test_a_sighup_reload_revokes_sending(incoming) -> None:
+    holder = RuntimeContextHolder(RuntimeContext(config={"GLOBAL": {}, **_config()}))
+    sender, delivered = _sender(ConfigProxy(holder))
+    assert sender(_frame()) is True
+    _reload(holder, incoming)
+    assert sender(_frame()) is False
+    assert len(delivered) == 1
+
+
+def test_a_sighup_reload_can_grant_a_new_talkgroup() -> None:
+    holder = RuntimeContextHolder(RuntimeContext(config={"GLOBAL": {}, **_config()}))
+    sender, _ = _sender(ConfigProxy(holder))
+    voice = PacketSpec(rf_src=GATEWAY_ID, dst_id=213, call_type="group", frame_type=HBPF_VOICE, dtype_vseq=1).data()
+    assert sender(voice) is False
+    _reload(holder, {"GLOBAL": {}, **_config(group_voice_tgs=[213])})
+    assert sender(voice) is True
+
+
+def test_plugins_section_is_read_from_adn_server_yaml_and_followed_on_reload(tmp_path) -> None:
+    """The whole chain with the real loader: PLUGINS used to be dropped by YamlConfigLoader,
+    so neither master_kill, overrides nor send permissions ever reached the server."""
+    import logging
+    from pathlib import Path
+
+    from adn_server.infrastructure.config_loader import YamlConfigLoader
+    from adn_server.infrastructure.config_reload import prepare_incoming_config
+
+    example = Path(__file__).resolve().parents[2] / "adn-server.example.yaml"
+    base = example.read_text(encoding="utf-8")
+    path = tmp_path / "adn-server.yaml"
+    grant = "\nPLUGINS:\n  send:\n    d-aprs:\n      allowed_src_ids: [900999]\n"
+    path.write_text(base + grant, encoding="utf-8")
+    log = logging.getLogger("test")
+
+    boot = prepare_incoming_config(YamlConfigLoader(), str(path), log)
+    assert boot["PLUGINS"]["send"]["d-aprs"]["allowed_src_ids"] == [900999]
+    holder = RuntimeContextHolder(RuntimeContext(config=boot))
+    sender, _ = _sender(ConfigProxy(holder))
+    assert sender(_frame()) is True
+
+    path.write_text(base + "\nPLUGINS:\n  master_kill: true\n" + grant[len("\nPLUGINS:\n"):], encoding="utf-8")
+    _reload(holder, prepare_incoming_config(YamlConfigLoader(), str(path), log))
+    assert sender(_frame()) is False
+
+
+@pytest.mark.parametrize("rate", [float("inf"), float("nan"), 0, -5])
+def test_a_rate_that_is_not_a_positive_number_grants_nothing(rate) -> None:
+    from adn_server.application.plugins.domain.send import send_permission
+
+    assert send_permission(_config(max_frames_per_s=rate), "d-aprs") is None
