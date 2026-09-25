@@ -119,12 +119,15 @@ def merge_system_config(old_cfg: dict[str, Any], new_cfg: dict[str, Any]) -> dic
 
 
 def merge_top_level_config(config: dict[str, Any], incoming: dict[str, Any]) -> None:
-    """Update GLOBAL / REPORTS / ALIASES / LOGGER in the live config dict."""
+    """Update GLOBAL / REPORTS / ALIASES / LOGGER / … / PLUGINS in the live config dict."""
     kill_flag = config.get("GLOBAL", {}).get("_KILL_SERVER")
     for key in ("GLOBAL", "REPORTS", "ALIASES", "LOGGER", "PROXY", "DATABASE", "SELF_SERVICE"):
         if key not in incoming:
             continue
         config[key] = copy.deepcopy(incoming[key])
+    # PLUGINS always follows the file, absent included: it carries master_kill and the
+    # per-plugin send permissions, whose removal must take effect on this reload.
+    config["PLUGINS"] = copy.deepcopy(incoming.get("PLUGINS") or {})
     if kill_flag is not None:
         config.setdefault("GLOBAL", {})["_KILL_SERVER"] = kill_flag
     for rk in _RUNTIME_TOP_KEYS:

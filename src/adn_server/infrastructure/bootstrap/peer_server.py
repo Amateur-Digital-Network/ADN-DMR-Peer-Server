@@ -29,6 +29,7 @@ import time
 from typing import Any
 
 from twisted.internet import reactor, task, threads
+from twisted.python.threadable import isInIOThread
 
 from adn_server.application import (
     IdentUseCases,
@@ -41,7 +42,9 @@ from adn_server.application.dynamic_tg_use_cases import DynamicTgUseCases
 from adn_server.application.plugins.application.bus import PluginBus
 from adn_server.application.plugins.application.context import ServerContext
 from adn_server.application.plugins.application.data_bridge import DataPluginBridge
+from adn_server.application.plugins.application.ingress import PluginIngress
 from adn_server.application.plugins.application.manager import PluginManager
+from adn_server.application.plugins.application.sender import PluginDmrdSender
 from adn_server.application.plugins.application.voice_bridge import VoicePluginBridge
 from adn_server.application.proxy.deployment import (
     is_obp_proxy_managed,
@@ -447,7 +450,21 @@ def run_peer_server(
         call_from_reactor=reactor.callFromThread,
         call_later=reactor.callLater,
     )
-    plugin_manager = PluginManager(plugin_bus, server_ctx, project_root)
+    def _send_local(system: str, pkt: bytes) -> None:
+        send_system = getattr(protocols.get(system), "send_system", None)
+        if callable(send_system):
+            send_system(pkt)
+
+    plugin_ingress = PluginIngress(None, config, lambda: protocols, _send_local)  # routing set below
+
+    plugin_manager = PluginManager(
+        plugin_bus,
+        server_ctx,
+        project_root,
+        sender_factory=lambda name: PluginDmrdSender(
+            name, config, plugin_ingress.deliver, reactor.callFromThread, in_reactor_thread=isInIOThread,
+        ),
+    )
     voice_plugin_bridge = VoicePluginBridge(plugin_bus, config, get_dmra_blocks=get_dmra_blocks)
     data_plugin_bridge = DataPluginBridge(plugin_bus, config)
 
@@ -468,6 +485,7 @@ def run_peer_server(
         voice_plugin_bridge=voice_plugin_bridge,
         data_plugin_bridge=data_plugin_bridge,
     )
+    plugin_ingress.set_routing(routing_use_cases)
     plugin_manager.discover_and_load(config)
     reactor.addSystemEventTrigger("before", "shutdown", plugin_manager.shutdown_all)
     routing_use_cases.apply_startup_subscriptions()

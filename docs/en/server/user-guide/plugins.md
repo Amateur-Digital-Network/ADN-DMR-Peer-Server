@@ -45,8 +45,9 @@ PLUGINS:
 | `directory` | Absolute path or relative to project root |
 | `master_kill` | Emergency disable — no plugins loaded |
 | `overrides` | Per-plugin config patches without editing `plugins/<name>/config.yaml` |
+| `send` | Per-plugin permission to send unit data and group voice — see [Sending](#sending-unit-data-and-group-voice-opt-in) |
 
-On **SIGHUP**, `PluginManager.rescan()` loads new plugins, unloads removed ones, and calls `on_reload()` when `config.yaml` changed.
+On **SIGHUP**, the `PLUGINS` block is re-read from `adn-server.yaml` (removing it counts as removing everything in it) and `PluginManager.rescan()` loads new plugins, unloads removed ones, and calls `on_reload()` when `config.yaml` changed.
 
 ### `config.yaml` reserved keys
 
@@ -93,8 +94,46 @@ Passed to `on_load` as `server_ctx` (`application/plugins/application/context.py
 | `defer_to_thread(fn, *args)` | Run blocking I/O off the reactor |
 | `call_from_reactor(fn, *args)` | Schedule callback on reactor thread |
 | `call_later(delay_s, fn, *args)` | Reactor timer |
+| `send_dmrd(pkt) -> bool` | Send one DMRD frame — **only** for a plugin granted it in `PLUGINS.send`, otherwise `None` ([Sending](#sending-unit-data-and-group-voice-opt-in)) |
 
 **Pattern:** do only dispatch in `on_event`; call `defer_to_thread` for file writes, HTTP, heavy CPU.
+
+---
+
+## Sending unit data and group voice (opt-in)
+
+A plugin can send **unit data** (data header, rate 1/2 and 3/4 blocks, CSBK: ARS, LRRP, SMS…) and **group voice** on granted talkgroups (voice beacons, announcements) with `server_ctx.send_dmrd(pkt)`, one complete HBP `DMRD` frame per call. Enabling a plugin never lets it transmit: the sysop grants it per plugin in `adn-server.yaml`:
+
+```yaml
+PLUGINS:
+  send:
+    d-aprs:
+      allowed_src_ids: [900999]   # rf_src the plugin may send as; required
+      max_frames_per_s: 40        # per-plugin token bucket (default 40)
+    beacon:
+      allowed_src_ids: [2130035]
+      group_voice_tgs: [213]      # group voice only on these TGs; none: unit data only
+```
+
+- `send_dmrd` is `None` unless the plugin has an entry with at least one source ID.
+- The allowlist and the rate limit guard against a **buggy** plugin (sending as a radio, flooding the mesh). They are no sandbox: a plugin runs in-process with the live config and could rewrite its own entry, so only install plugins you trust.
+- Each frame is checked against the **current** config: removing the entry (SIGHUP) or `master_kill` stops sending at once. Granting it to a plugin already loaded needs that plugin reloaded.
+- Rejected frames (not unit data, source not allowed, over the rate) return `False` and are logged and counted; the first frame of each stream is logged at INFO.
+- Called on the reactor thread (`on_event`, `call_later`), the frame is routed at once and the result is whether the server **accepted** it; a plugin sending voice must stop when it gets `False`. From another thread the frame is queued to the reactor and `True` only means the guards passed.
+
+How the server treats them:
+
+| | |
+|---|---|
+| Ingress | The same MASTER as scheduled announcements, with the SERVER_ID as peer |
+| Delivery | Unit data path only: `SUB_MAP` / hotspot peer ID, to the exact hotspot of the destination — also on the ingress MASTER itself |
+| `SUB_MAP` | Never learns the plugin's source ID (so replies to it are not spread over the MASTER's hotspots) |
+| OpenBridge / `DATA-GATEWAY` | No fan-out: plugin frames stay on this server |
+| Events | Reach plugins with `is_synthetic=True`, so a plugin can ignore its own frames |
+
+Group voice is routed **like a scheduled announcement** (synthetic PTT on the same MASTER): through the TG's bridges, OpenBridge legs included, and to the hotspots of that MASTER. While a plugin stream plays it holds that MASTER slot, so routed calls find it busy; a radio or another stream on the slot makes the next frame fail. The terminator frees the slot. Private voice can't be sent.
+
+Pacing (about 60 ms per burst) is the plugin's job, e.g. with `call_later`.
 
 ---
 

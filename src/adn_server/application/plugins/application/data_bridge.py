@@ -39,7 +39,7 @@ class DataPluginBridge:
         self._bus = bus
         self._config = config
         # (origin_system, slot) -> (stream_id, start_pkt_time)
-        self._active_streams: dict[tuple[str, int], tuple[int, float]] = {}
+        self._active_streams: dict[tuple[str, int], tuple[int, float, bool]] = {}
 
     def update_config(self, config: dict[str, Any]) -> None:
         self._config = config
@@ -66,7 +66,9 @@ class DataPluginBridge:
         obp_rssi: bytes,
         obp_source_rptr: bytes,
         forwarded: list[str],
+        synthetic: bool = False,
     ) -> None:
+        """``synthetic``: the frame was sent by a plugin (``ServerContext.send_dmrd``)."""
         if not self._bus.has_subscribers():
             return
         systems_cfg = self._config.get("SYSTEMS", {})
@@ -78,10 +80,10 @@ class DataPluginBridge:
         stream_key = (system_name, slot)
         prev = self._active_streams.get(stream_key)
         if prev is not None and prev[0] != sid:
-            self._emit_end(system_name, slot, pkt_time, prev[0], prev[1])
+            self._emit_end(system_name, slot, pkt_time, prev[0], prev[1], prev[2])
         is_new_stream = prev is None or prev[0] != sid
         if is_new_stream:
-            self._active_streams[stream_key] = (sid, pkt_time)
+            self._active_streams[stream_key] = (sid, pkt_time, synthetic)
         ctx = CallLegContext(
             call_family="DATA",
             direction="RX",
@@ -93,7 +95,7 @@ class DataPluginBridge:
             slot=slot,
             stream_id=sid,
             server_id=server_id,
-            is_synthetic=False,
+            is_synthetic=synthetic,
             is_proxy_ingress=is_proxy_inject_only(self._config, system_name),
             pkt_time=pkt_time,
             obp_source_server_id=int_byte(obp_source_server) if source_is_obp else None,
@@ -139,6 +141,7 @@ class DataPluginBridge:
         pkt_time: float,
         stream_id: int,
         start_time: float,
+        synthetic: bool = False,
     ) -> None:
         duration = max(0.0, pkt_time - start_time)
         systems_cfg = self._config.get("SYSTEMS", {})
@@ -155,7 +158,7 @@ class DataPluginBridge:
             slot=slot,
             stream_id=stream_id,
             server_id=server_id,
-            is_synthetic=False,
+            is_synthetic=synthetic,
             is_proxy_ingress=is_proxy_inject_only(self._config, system_name),
             pkt_time=pkt_time,
         )
