@@ -298,12 +298,12 @@ class HBPProtocol(DatagramProtocol):
             self._dmra_by_stream: dict[bytes, dict[str, Any]] = {}
             self._dmra_rf_stream: dict[tuple[bytes, bytes], bytes] = {}
             self._ta_voice_acc: dict[bytes, dict[int, Any]] = {}
-            self._ta_decoded_logged: set[bytes] = set()
+            self._ta_complete: set[bytes] = set()
         else:
             self._dmra_by_stream = {}
             self._dmra_rf_stream = {}
             self._ta_voice_acc = {}
-            self._ta_decoded_logged = set()
+            self._ta_complete = set()
         if self._config.get("MODE") == "PEER":
             self._dmra_downlink: dict[bytes, dict[str, Any]] = {}
         if self._config.get("MODE") == "PEER":
@@ -947,19 +947,24 @@ class HBPProtocol(DatagramProtocol):
             return
         if not self._CONFIG.get("GLOBAL", {}).get("TALKER_ALIAS", False):
             return
-        entry = self._dmra_by_stream.setdefault(
-            stream_id,
-            {"blocks": {}, "rf_src": rf_src, "peer": peer_id, "last": time.time()},
-        )
+        entry = self._dmra_by_stream.get(stream_id)
+        if entry is None:
+            entry = self._dmra_by_stream[stream_id] = {
+                "blocks": {}, "rf_src": rf_src, "peer": peer_id, "last": time.time()
+            }
+        elif stream_id in self._ta_complete:
+            # A stream's alias does not change once decoded; only keep it from expiring.
+            entry["last"] = time.time()
+            return
         acc = self._ta_voice_acc.setdefault(stream_id, {})
         if try_buffer_ta_from_voice_fragments(acc, vseq, dmrpkt, entry["blocks"]):
             entry["last"] = time.time()
             entry["rf_src"] = rf_src
             entry["peer"] = peer_id
-            if stream_id not in self._ta_decoded_logged:
+            if stream_id not in self._ta_complete:
                 text = decode_ta_from_blocks(entry["blocks"])
                 if text:
-                    self._ta_decoded_logged.add(stream_id)
+                    self._ta_complete.add(stream_id)
                     logger.debug(
                         "(%s) *TALKER ALIAS* decoded '%s' from embedded voice (src %s stream %s)",
                         self._system, text, int_id(rf_src), int_id(stream_id),
@@ -970,7 +975,7 @@ class HBPProtocol(DatagramProtocol):
     def clear_ta_stream_buffer(self, stream_id: bytes) -> None:
         self._dmra_by_stream.pop(stream_id, None)
         self._ta_voice_acc.pop(stream_id, None)
-        self._ta_decoded_logged.discard(stream_id)
+        self._ta_complete.discard(stream_id)
 
     def copy_ta_stream_buffer(self, from_stream: bytes, to_stream: bytes) -> None:
         """Carry decoded TA blocks from recording stream to echo playback stream."""
@@ -1002,7 +1007,7 @@ class HBPProtocol(DatagramProtocol):
             if self._dmra_by_stream[stream_id].get("last", 0) < cutoff:
                 del self._dmra_by_stream[stream_id]
                 self._ta_voice_acc.pop(stream_id, None)
-                self._ta_decoded_logged.discard(stream_id)
+                self._ta_complete.discard(stream_id)
 
     def send_dmra_to_peers(
         self,
