@@ -24,11 +24,6 @@ from __future__ import annotations
 
 from typing import Any, Iterator
 
-from adn_server.application.routing.announcement_ptt_inject import (
-    announcement_ptt_system,
-    inject_announcement_ptt,
-)
-from adn_server.application.voice_use_cases import VoiceUseCases
 from adn_server.domain import bytes_3, bytes_4
 from tests.harness.deterministic import DeterministicScenario, FakeHbpProtocol, active_routing_table
 
@@ -54,11 +49,6 @@ class FakeVoiceProvider:
     def read_single_file(self, audio_path: str, lang: str, file_number: str) -> list:
         del audio_path, lang, file_number
         return [b"\x00" * 7]
-
-    def ensure_tts_ambe(self, config: dict, item: dict, audio_path: str) -> str | None:
-        del config, item, audio_path
-        return "/tmp/fake.ambe"
-
 
 class FakeMasterForVoice(FakeHbpProtocol):
     def __init__(self, name: str) -> None:
@@ -102,101 +92,6 @@ def reflector_routing_entry(system: str = "MASTER-A", reflector: int = 310) -> d
                 "OFF": [],
                 "RESET": [],
                 "TIMER": 1000.0,
-            }
-        ]
-    }
-
-
-def make_voice_uc(
-    scenario: DeterministicScenario,
-    master: FakeMasterForVoice,
-    *,
-    audio_path: str = "/tmp/audio",
-) -> VoiceUseCases:
-    scheduled: list[tuple[float, tuple]] = []
-    ptt_system = announcement_ptt_system(scenario.config)
-    server_id = scenario.config.get("GLOBAL", {}).get("SERVER_ID", bytes_4(9990))
-    if not isinstance(server_id, bytes):
-        server_id = bytes_4(int(server_id or 0) & 0xFFFFFFFF)
-
-    def call_later(delay, fn, *args):
-        scheduled.append((delay, (fn, args)))
-        return type("H", (), {"active": lambda self: True, "cancel": lambda self: None})()
-
-    def inject_announcement_ptt_cb(pkt: bytes, pkt_time: float) -> bool | None:
-        if not ptt_system:
-            return False
-        accepted = inject_announcement_ptt(
-            scenario.routing,
-            ptt_system,
-            pkt,
-            pkt_time=pkt_time,
-            server_id=server_id,
-        )
-        if hasattr(master, "send_system"):
-            master.send_system(pkt)
-        return accepted
-
-    uc = VoiceUseCases(
-        FakeVoiceProvider(),
-        scenario.config,
-        get_protocols=lambda: {"MASTER-A": master, **{k: v for k, v in scenario.protocols.items() if k != "MASTER-A"}},
-        routing_table_for_report=scenario.routing.routing_table_for_report,
-        call_later=call_later,
-        audio_path=audio_path,
-        inject_announcement_ptt=inject_announcement_ptt_cb,
-    )
-    uc._announcement_ptt_system = ptt_system
-    uc._scheduled = scheduled
-    return uc
-
-
-def drain_call_later(uc: VoiceUseCases, max_rounds: int = 200) -> None:
-    scheduled = getattr(uc, "_scheduled", None)
-    if scheduled is None:
-        return
-    for _ in range(max_rounds):
-        if not scheduled:
-            break
-        _, (fn, args) = scheduled.pop(0)
-        fn(*args)
-
-
-def voice_announcement_config(
-    scenario: DeterministicScenario,
-    *,
-    tg: int = 91,
-    enabled: bool = True,
-    file_number: str = "test-msg",
-) -> None:
-    scenario.config["VOICE"] = {
-        "ANNOUNCEMENTS": [
-            {
-                "ENABLED": enabled,
-                "TG": tg,
-                "FILE": file_number,
-                "LANGUAGE": "en_GB",
-                "MODE": "interval",
-            }
-        ]
-    }
-
-
-def voice_tts_config(
-    scenario: DeterministicScenario,
-    *,
-    tg: int = 91,
-    enabled: bool = True,
-    file_number: str = "tts-msg.ambe",
-) -> None:
-    scenario.config["VOICE"] = {
-        "TTS_ANNOUNCEMENTS": [
-            {
-                "ENABLED": enabled,
-                "TG": tg,
-                "FILE": file_number,
-                "LANGUAGE": "en_GB",
-                "MODE": "interval",
             }
         ]
     }

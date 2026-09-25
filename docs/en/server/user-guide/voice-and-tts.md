@@ -1,5 +1,7 @@
 # Voice, announcements, and TTS
 
+> **Scheduled announcements and TTS are a plugin** — `plugins/voice-announcements/`, enabled by default. Configuration is unchanged (this file); the plugin follows it every 15 s and the server grants it exactly the talkgroups and DMR IDs its items use (override with `PLUGINS.send.voice-announcements`, see [Plugins](plugins.md#sending-unit-data-and-group-voice-opt-in)). Voice ident, on-demand 999x and disconnected prompts stay in the core.
+
 ## Configuration files
 
 - **`adn-voice.yaml`** (optional, not committed) — merged into `config["VOICE"]`.
@@ -62,7 +64,7 @@ Configure **`TTS_VOCODER_CMD`** or **`TTS_AMBESERVER_HOST`** / **`TTS_AMBESERVER
 
 When scheduling announcements, the server may **wait** if target slots are busy, **drop** targets if a live QSO appears mid-stream, and only mark **hourly** announcement state after a successful target list — this avoids clobbering live traffic.
 
-Scheduled and TTS broadcasts inject each frame as a **synthetic hotspot PTT** on `PROXY.TARGET_SYSTEM` (the same MASTER used by the integrated proxy). Routing fans out to bridged hotspots and OPENBRIDGE legs; local peers on that MASTER still receive frames via `send_system`.
+The plugin sends each frame through `send_dmrd`, which the core injects as a **synthetic hotspot PTT** on `PROXY.TARGET_SYSTEM` (the same MASTER used by the integrated proxy). Routing fans out to bridged hotspots and OPENBRIDGE legs; local peers on that MASTER still receive frames via `send_system`. While it plays, the stream holds that MASTER slot; a radio taking the slot stops it.
 
 ## Broadcast queue
 

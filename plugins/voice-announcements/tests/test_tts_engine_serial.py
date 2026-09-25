@@ -27,8 +27,8 @@ import threading
 import time
 import wave
 
-from adn_server.infrastructure.voice import tts_engine
-from adn_server.infrastructure.voice.tts_engine import DV3K_PRODID_REQ, DV3K_SAMPLES_PER_FRAME
+from plugin.infrastructure import tts_engine
+from plugin.infrastructure.tts_engine import DV3K_PRODID_REQ, DV3K_SAMPLES_PER_FRAME
 
 
 def test_text_to_ambe_serializes_parallel_conversions(tmp_path, monkeypatch) -> None:

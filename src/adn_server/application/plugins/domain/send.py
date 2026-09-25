@@ -34,6 +34,8 @@ PLUGIN_SENDABLE_DTYPES = frozenset({3, 6, 7, 8})
 UNIT_DATA = "unit_data"
 GROUP_VOICE = "group_voice"
 DEFAULT_MAX_FRAMES_PER_S = 40.0
+# A voice stream is one frame every 60 ms (~17/s), at most one per talkgroup at a time.
+VOICE_FRAMES_PER_S_PER_TG = 18.0
 
 
 class DmrdHeader(NamedTuple):
@@ -90,24 +92,56 @@ class SendPermission:
     group_voice_tgs: frozenset[int] = frozenset()
 
 
+ANNOUNCEMENTS_PLUGIN = "voice-announcements"
+
+
+def announcements_grant(server_config: dict[str, Any]) -> dict[str, Any]:
+    """What the official announcements plugin may send, read from ``VOICE``.
+
+    The talkgroups and DMR IDs its items use (enabled or not, so enabling one in
+    adn-voice.yaml needs no restart), plus the server voice ID: announcements kept
+    working unchanged when they moved out of the core.
+    """
+    from ...server_voice import announcement_item_dmr_id, server_voice_dmr_id
+
+    voice = server_config.get("VOICE") or {}
+    ids = {server_voice_dmr_id(server_config)}
+    tgs: set[int] = set()
+    for section in ("ANNOUNCEMENTS", "TTS_ANNOUNCEMENTS"):
+        for item in voice.get(section) or []:
+            if not isinstance(item, dict):
+                continue
+            ids.add(announcement_item_dmr_id(item, server_config))
+            try:
+                if int(item.get("TG", 0)):
+                    tgs.add(int(item["TG"]))
+            except (TypeError, ValueError):
+                continue
+    return {"allowed_src_ids": sorted(ids), "group_voice_tgs": sorted(tgs)}
+
+
 def send_permission(server_config: dict[str, Any], plugin: str) -> SendPermission | None:
     """The plugin's entry in ``PLUGINS.send``, or None when it may not send.
 
     An entry without source IDs grants nothing. The allowlist and the rate limit
     guard against a *buggy* plugin (sending as a radio, flooding the mesh); they are
     no sandbox: a plugin runs in-process with the live config and could rewrite its
-    own entry, so only install plugins you trust.
+    own entry, so only install plugins you trust. The official announcements plugin
+    without an entry gets what ``VOICE`` configures (see ``announcements_grant``).
     """
     plugins_cfg = server_config.get("PLUGINS") or {}
     if plugins_cfg.get("master_kill"):
         return None
     entry = (plugins_cfg.get("send") or {}).get(plugin)
+    if entry is None and plugin == ANNOUNCEMENTS_PLUGIN:
+        entry = announcements_grant(server_config)
     if not isinstance(entry, dict):
         return None
     try:
         ids = frozenset(int(i) for i in entry.get("allowed_src_ids") or ())
-        rate = float(entry.get("max_frames_per_s", DEFAULT_MAX_FRAMES_PER_S))
         tgs = frozenset(int(t) for t in entry.get("group_voice_tgs") or ())
+        default_rate = DEFAULT_MAX_FRAMES_PER_S + VOICE_FRAMES_PER_S_PER_TG * len(tgs)
+        rate = float(entry.get("max_frames_per_s", default_rate))
     except (TypeError, ValueError):
         return None
     if not ids or not math.isfinite(rate) or rate <= 0:

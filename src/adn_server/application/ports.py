@@ -196,11 +196,6 @@ class VoiceProvider(ABC):
         """Generate HBP voice packets for a phrase (generator). Legacy mk_voice.pkt_gen."""
         ...
 
-    @abstractmethod
-    def ensure_tts_ambe(self, config: dict[str, Any], item: dict[str, Any], audio_path: str) -> str | None:
-        """TTS to AMBE file; return path or None. Legacy tts_engine.ensure_tts_ambe."""
-        ...
-
     def read_single_file(self, audio_path: str, lang: str, file_number: str) -> list:
         """Read one AMBE file (e.g. ondemand/{file_number}.ambe). Legacy readSingleFile for playFileOnRequest."""
         return []

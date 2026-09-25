@@ -415,24 +415,14 @@ def run_peer_server(
         voice_provider = DefaultVoiceProvider()
     else:
         voice_provider = StubVoiceProvider()
-    def _start_voice_loop(fn, interval: float, now: bool):
-        lc = task.LoopingCall(fn)
-        d = lc.start(interval, now=now)
-        d.addErrback(_looping_errback, logger)
-        return lc
-
+    # Scheduled announcements and TTS: plugins/voice-announcements (via PLUGINS.send).
     voice_use_cases = VoiceUseCases(
         voice_provider,
         config,
         get_protocols=lambda: protocols,
         call_from_reactor=reactor.callFromThread,
         audio_path=audio_path,
-        routing_table_for_report=lambda: {},
-        call_later=reactor.callLater,
-        start_looping_call=_start_voice_loop,
-        defer_to_thread=threads.deferToThread,
     )
-    voice_use_cases.apply_voice_config()
     ident_use_cases = IdentUseCases(
         config,
         voice_use_cases,
@@ -455,14 +445,17 @@ def run_peer_server(
         if callable(send_system):
             send_system(pkt)
 
-    plugin_ingress = PluginIngress(None, config, lambda: protocols, _send_local)  # routing set below
+    plugin_ingress = PluginIngress(  # routing set below
+        None, config, lambda: protocols, _send_local, send_routing_event=reporting_use_cases.send_routing_event,
+    )
 
     plugin_manager = PluginManager(
         plugin_bus,
         server_ctx,
         project_root,
         sender_factory=lambda name: PluginDmrdSender(
-            name, config, plugin_ingress.deliver, reactor.callFromThread, in_reactor_thread=isInIOThread,
+            name, config, plugin_ingress.deliver, reactor.callFromThread,
+            in_reactor_thread=isInIOThread, slot_for_tg=plugin_ingress.voice_slot_for_tg,
         ),
     )
     voice_plugin_bridge = VoicePluginBridge(plugin_bus, config, get_dmra_blocks=get_dmra_blocks)
@@ -494,36 +487,6 @@ def run_peer_server(
         on_restored=routing_use_cases.sync_restored_dynamic_tgs,
     )
     routing_table_for_report = routing_use_cases.routing_table_for_report
-    voice_use_cases._routing_table_for_report = routing_table_for_report
-    from adn_server.application.routing.announcement_ptt_inject import (
-        announcement_ptt_system,
-        inject_announcement_ptt,
-    )
-
-    _ptt_system = announcement_ptt_system(config)
-
-    def _inject_announcement_ptt(pkt: bytes, pkt_time: float) -> bool | None:
-        if not _ptt_system:
-            return False
-        server_id = config.get("GLOBAL", {}).get("SERVER_ID", b"\x00\x00\x00\x00")
-        if not isinstance(server_id, bytes):
-            server_id = bytes_4(int(server_id or 0) & 0xFFFFFFFF)
-        accepted = inject_announcement_ptt(
-            routing_use_cases,
-            _ptt_system,
-            pkt,
-            pkt_time=pkt_time,
-            server_id=server_id,
-        )
-        proto = protocols.get(_ptt_system)
-        send_system = getattr(proto, "send_system", None) if proto is not None else None
-        if callable(send_system):
-            send_system(pkt)
-        return accepted
-
-    voice_use_cases._inject_announcement_ptt = _inject_announcement_ptt
-    voice_use_cases._announcement_ptt_system = _ptt_system
-    voice_use_cases._send_routing_event = reporting_use_cases.send_routing_event
     report_factory.set_routing_table(routing_table_for_report())
     report_factory.set_systems(config.get("SYSTEMS", {}))
 
@@ -882,8 +845,7 @@ def run_peer_server(
                     return
                 voice_config_mtime = mtime
                 logger.info("(VOICE-RELOAD) config file change detected, reloading configuration...")
-            loader.reload_voice_config(config, voice_config_path)
-            voice_use_cases.apply_voice_config()
+            loader.reload_voice_config(config, voice_config_path)  # voice-announcements follows config["VOICE"]
             if voice_config_path and voice_config_mtime:
                 logger.info("(VOICE-RELOAD) config reload completed")
         except Exception as e:

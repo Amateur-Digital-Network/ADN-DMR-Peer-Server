@@ -136,10 +136,16 @@ class PluginManager:
         The sender re-reads the permission on every frame, so revoking it on SIGHUP
         is immediate; granting it to an already loaded plugin needs that plugin reloaded.
         """
-        if self._sender_factory is None or send_permission(server_config, name) is None:
+        permission = send_permission(server_config, name) if self._sender_factory is not None else None
+        if permission is None:
             return self._ctx
-        logger.info("(PLUGIN-MANAGER) %s may send unit data (PLUGINS.send)", name)
-        return replace(self._ctx, send_dmrd=self._sender_factory(name))
+        sender = self._sender_factory(name)
+        logger.info(
+            "(PLUGIN-MANAGER) %s may send unit data%s (PLUGINS.send)",
+            name, f" and group voice on TG {sorted(permission.group_voice_tgs)}" if permission.group_voice_tgs else "",
+        )
+        # voice_slot_for_tg checks the talkgroup grant live, like send_dmrd.
+        return replace(self._ctx, send_dmrd=sender, voice_slot_for_tg=getattr(sender, "voice_slot_for_tg", None))
 
     def shutdown_all(self) -> None:
         for name in list(self._loaded):

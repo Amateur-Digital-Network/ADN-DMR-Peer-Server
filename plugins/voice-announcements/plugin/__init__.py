@@ -1,4 +1,4 @@
-# ADN DMR Peer Server - plugin server context
+# ADN DMR Peer Server plugin - voice-announcements factory
 #
 # Copyright (C) 2026  Rodrigo Pérez, CE5RPY <ce5rpy@qmd.cl>
 #
@@ -18,22 +18,12 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 ###############################################################################
 
-"""Capabilities exposed to plugins (application layer)."""
+"""voice-announcements plugin — drop-in factory."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from typing import Any, Callable
+from .application.plugin_impl import VoiceAnnouncementsPlugin
 
 
-@dataclass
-class ServerContext:
-    config: dict[str, Any]
-    project_root: str
-    defer_to_thread: Callable[..., Any]
-    call_from_reactor: Callable[..., Any]
-    call_later: Callable[..., Any]
-    # Present only for a plugin listed in PLUGINS.send (see domain/send.py).
-    send_dmrd: Callable[[bytes], bool] | None = None
-    # With group voice granted: the MASTER slot to speak a TG on now, None while all are busy.
-    voice_slot_for_tg: Callable[[int], int | None] | None = None
+def create_plugin() -> VoiceAnnouncementsPlugin:
+    return VoiceAnnouncementsPlugin()
