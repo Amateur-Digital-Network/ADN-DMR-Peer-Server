@@ -34,7 +34,8 @@ import time
 from datetime import datetime
 from typing import Any, Callable
 
-from adn_server.domain import bytes_3, bytes_4
+from adn_server.domain import bytes_3
+from adn_server.domain.mesh_engine import server_id_bytes
 
 from ..domain.schedule import FILE, Item, enabled_items, hourly_due
 from ..domain.tg_queue import TalkgroupQueue
@@ -206,7 +207,4 @@ class Announcer:
         return os.path.join(self._ctx.project_root, (self._ctx.config.get("VOICE") or {}).get("AUDIO_PATH", "Audio"))
 
     def _server_id(self) -> bytes:
-        server_id = self._ctx.config.get("GLOBAL", {}).get("SERVER_ID", 0)
-        if isinstance(server_id, bytes):
-            return server_id[:4].rjust(4, b"\x00")
-        return bytes_4(int(server_id or 0) & 0xFFFFFFFF)
+        return server_id_bytes(self._ctx.config.get("GLOBAL", {}).get("SERVER_ID"))[:4]
