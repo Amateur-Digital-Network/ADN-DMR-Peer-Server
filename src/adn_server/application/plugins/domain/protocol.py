@@ -30,6 +30,10 @@ class ServerPlugin(Protocol):
     """Drop-in plugin loaded from plugins/<name>/plugin/."""
 
     name: str
+    # Optional: the event classes this plugin handles, e.g. (VoiceCallFrame, VoiceCallEnd).
+    # Declaring them lets the server skip building every other event; without it the
+    # plugin receives all of them. Read when the plugin is registered, after on_load.
+    # events: tuple[type, ...]
 
     def on_load(self, bus: Any, config: dict[str, Any], server_ctx: Any) -> None:
         """Subscribe to bus; read plugin config."""

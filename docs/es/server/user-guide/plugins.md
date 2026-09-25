@@ -68,6 +68,7 @@ Definido en `src/adn_server/application/plugins/domain/protocol.py`:
 | Método | Hilo | Función |
 |--------|------|---------|
 | `name: str` | — | Identificador (nombre del directorio) |
+| `events` *(opcional)* | — | Clases de evento que maneja el plugin, p. ej. `(VoiceCallFrame, VoiceCallEnd)`. El servidor deja entonces de construir las demás — ver [Declarar los eventos que necesitas](#declarar-los-eventos-que-necesitas). Sin él, se entregan todos |
 | `on_load(bus, config, server_ctx)` | reactor | Leer config; suscribirse al bus si hace falta |
 | `on_event(event)` | **reactor** | Manejar eventos — **O(1), sin I/O bloqueante** |
 | `on_reload(config)` | reactor | Hot-reload opcional tras cambio de `config.yaml` |
@@ -144,6 +145,28 @@ El ritmo (unos 60 ms por ráfaga) lo marca el plugin, por ejemplo con `call_late
 - Los eventos se emiten **después del forward** de voz/datos (`emit_deferred` — siguiente tick del reactor).
 - Excepciones no capturadas incrementan un contador; tras repetir fallos el plugin se **deshabilita** y se llama `on_shutdown()` (circuit breaker).
 - `bus.subscribe(handler)` existe para handlers internos; los plugins suelen usar solo `on_event`.
+- Los eventos diferidos se agrupan: todos los de un ciclo del reactor se entregan con un solo `call_later`.
+
+### Declarar los eventos que necesitas
+
+Construir un evento le cuesta trabajo al servidor en cada trama (una llamada de voz son ~17 tramas por segundo y por stream), la mire o no un plugin. Un plugin que declara los eventos que maneja le ahorra al servidor el resto:
+
+```python
+from adn_server.application.plugins.domain.events import UnitDataFrame
+
+class DAprsPlugin:
+    name = "d-aprs"
+    events = (UnitDataFrame,)   # para este plugin no se construye ningún evento de voz
+```
+
+Medido en una Raspberry Pi 5, voz de grupo enrutada a 6 OpenBridge y un MASTER (48 µs por trama sin plugins):
+
+| Plugins cargados | Coste por trama de voz |
+|---|---|
+| Uno que declara solo eventos de datos | +1,4 µs |
+| Uno que declara eventos de voz, o no declara nada | +11 µs |
+
+`events` se lee al registrar el plugin (después de `on_load`). Los handlers internos añadidos con `bus.subscribe` reciben todos los eventos.
 
 ---
 

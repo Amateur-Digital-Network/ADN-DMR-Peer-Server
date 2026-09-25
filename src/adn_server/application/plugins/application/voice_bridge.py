@@ -33,6 +33,10 @@ from ..application.bus import PluginBus
 from ..domain.events import CallLegContext, VoiceCallEnd, VoiceCallFrame, VoiceCallStart
 from .bridge_common import alias_extra, int_byte, stream_talker_alias
 
+_VOICE_EVENTS = (VoiceCallStart, VoiceCallFrame, VoiceCallEnd)
+_ENDED_KEEP = 4096
+_STREAM_CTX_KEEP = 512
+
 
 class VoicePluginBridge:
     def __init__(
@@ -45,14 +49,23 @@ class VoicePluginBridge:
         self._bus = bus
         self._config = config
         self._get_dmra_blocks = get_dmra_blocks
+        # Streams whose START / END went out, so each is emitted once. END drops the
+        # START key; ended keys are kept, oldest first, only up to _ENDED_KEEP.
         self._plugin_started: set[tuple[str, int]] = set()
-        self._plugin_ended: set[tuple[str, int]] = set()
+        self._plugin_ended: dict[tuple[str, int], None] = {}
+        # Per-stream constant part of the event context, oldest first, bounded.
+        self._stream_ctx: dict[tuple, dict[str, Any]] = {}
 
     def update_config(self, config: dict[str, Any]) -> None:
         self._config = config
 
+    def _forget_stream(self, system_name: str, stream_id: bytes) -> None:
+        for key in [k for k in self._stream_ctx if k[0] == system_name and k[1] == stream_id]:
+            del self._stream_ctx[key]
+
     def has_subscribers(self) -> bool:
-        return self._bus.has_subscribers()
+        """True when some subscriber takes voice events at all."""
+        return self._bus.wants_any(*_VOICE_EVENTS)
 
     def _end_extra(
         self,
@@ -94,23 +107,31 @@ class VoicePluginBridge:
         forwarded: tuple[str, ...] | list[str],
         extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        systems_cfg = self._config.get("SYSTEMS", {})
-        sys_cfg = systems_cfg.get(system_name, {})
-        mode = sys_cfg.get("MODE", "MASTER")
-        server_id = int_byte(self._config.get("GLOBAL", {}).get("SERVER_ID")) or 0
+        # What stays the same for every frame of a stream is resolved once (IDs, mode,
+        # proxy flag, aliases); only per-frame fields are recomputed.
+        key = (system_name, stream_id, peer_id, rf_src, dst_id, slot, bool(synthetic_announcement))
+        fixed = self._stream_ctx.get(key)
+        if fixed is None:
+            if len(self._stream_ctx) >= _STREAM_CTX_KEEP:
+                del self._stream_ctx[next(iter(self._stream_ctx))]
+            sys_cfg = self._config.get("SYSTEMS", {}).get(system_name, {})
+            fixed = self._stream_ctx[key] = dict(
+                call_family="GROUP",
+                direction="RX",
+                origin_system=system_name,
+                system_mode=str(sys_cfg.get("MODE", "MASTER")),
+                peer_id=int_id(peer_id),
+                src_id=int_id(rf_src),
+                dst_id=int_id(dst_id),
+                slot=slot,
+                stream_id=int_id(stream_id),
+                server_id=int_byte(self._config.get("GLOBAL", {}).get("SERVER_ID")) or 0,
+                is_synthetic=bool(synthetic_announcement),
+                is_proxy_ingress=is_proxy_inject_only(self._config, system_name),
+                extra=alias_extra(self._config, peer_id, rf_src, dst_id),
+            )
         return dict(
-            call_family="GROUP",
-            direction="RX",
-            origin_system=system_name,
-            system_mode=str(mode),
-            peer_id=int_id(peer_id),
-            src_id=int_id(rf_src),
-            dst_id=int_id(dst_id),
-            slot=slot,
-            stream_id=int_id(stream_id),
-            server_id=server_id,
-            is_synthetic=bool(synthetic_announcement),
-            is_proxy_ingress=is_proxy_inject_only(self._config, system_name),
+            fixed,
             pkt_time=pkt_time,
             obp_source_server_id=int_byte(obp_source_server) if source_is_obp else None,
             obp_hops=int_byte(obp_hops) if source_is_obp else None,
@@ -118,7 +139,7 @@ class VoicePluginBridge:
             ber=int_byte(obp_ber),
             rssi=int_byte(obp_rssi),
             forwarded_systems=tuple(forwarded),
-            extra=extra if extra is not None else alias_extra(self._config, peer_id, rf_src, dst_id),
+            extra=dict(extra if extra is not None else fixed["extra"]),  # each event owns its dict
         )
 
     def emit_group_voice_start(
@@ -141,7 +162,7 @@ class VoicePluginBridge:
         forwarded: tuple[str, ...] | list[str] = (),
         voice_phase: str | None = None,
     ) -> bool:
-        if not self._bus.has_subscribers():
+        if not self.has_subscribers():
             return False
         ctx_base = self._group_ctx_base(
             system_name=system_name,
@@ -189,7 +210,7 @@ class VoicePluginBridge:
         synthetic_announcement: bool = False,
         forwarded: tuple[str, ...] | list[str] = (),
     ) -> bool:
-        if not self._bus.has_subscribers():
+        if not self.has_subscribers():
             return False
         ctx_base = self._group_ctx_base(
             system_name=system_name,
@@ -211,7 +232,11 @@ class VoicePluginBridge:
         key = (ctx_base["origin_system"], ctx_base["stream_id"])
         if key in self._plugin_ended:
             return False
-        self._plugin_ended.add(key)
+        self._plugin_ended[key] = None
+        self._plugin_started.discard(key)
+        self._forget_stream(system_name, stream_id)
+        if len(self._plugin_ended) > _ENDED_KEEP:
+            del self._plugin_ended[next(iter(self._plugin_ended))]
         end_extra = self._end_extra(
             origin_system=ctx_base["origin_system"],
             stream_id=ctx_base["stream_id"],
@@ -248,9 +273,8 @@ class VoicePluginBridge:
         synthetic_announcement: bool,
         forwarded: list[str],
     ) -> None:
-        if not self._bus.has_subscribers():
-            return
-        if frame_type not in (HBPF_VOICE, HBPF_VOICE_SYNC):
+        # Once per voice frame: skip building the event unless someone takes it.
+        if frame_type not in (HBPF_VOICE, HBPF_VOICE_SYNC) or not self._bus.wants(VoiceCallFrame):
             return
         ctx_base = self._group_ctx_base(
             system_name=system_name,
@@ -296,7 +320,8 @@ class VoicePluginBridge:
         phase: str,
         duration_s: float = 0.0,
     ) -> None:
-        if not self._bus.has_subscribers():
+        wanted = self._bus.wants(VoiceCallFrame) if phase == "FRAME" else self.has_subscribers()
+        if not wanted:
             return
         systems_cfg = self._config.get("SYSTEMS", {})
         mode = systems_cfg.get(system_name, {}).get("MODE", "MASTER")

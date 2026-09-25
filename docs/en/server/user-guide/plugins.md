@@ -68,6 +68,7 @@ Defined in `src/adn_server/application/plugins/domain/protocol.py`:
 | Method | Thread | Role |
 |--------|--------|------|
 | `name: str` | — | Plugin identifier (directory name) |
+| `events` *(optional)* | — | Event classes the plugin handles, e.g. `(VoiceCallFrame, VoiceCallEnd)`. The server then skips building the others — see [Declaring the events you need](#declaring-the-events-you-need). Without it, every event is delivered |
 | `on_load(bus, config, server_ctx)` | reactor | Read config; subscribe to bus if needed |
 | `on_event(event)` | **reactor** | Handle bus events — **O(1), no blocking I/O** |
 | `on_reload(config)` | reactor | Optional hot-reload after `config.yaml` change |
@@ -144,6 +145,28 @@ Pacing (about 60 ms per burst) is the plugin's job, e.g. with `call_later`.
 - Events are emitted **after voice/data has been forwarded** (`emit_deferred` — next reactor tick).
 - Uncaught exceptions increment a per-plugin trip counter; after repeated failures the plugin is **disabled** and `on_shutdown()` is called (circuit breaker).
 - `bus.subscribe(handler)` is available for internal handlers; plugins normally implement `on_event` only.
+- Deferred events are batched: all those of one reactor tick are delivered by a single `call_later`.
+
+### Declaring the events you need
+
+Building an event costs the server work on every frame (a voice call is ~17 frames per second, per stream), whether or not a plugin looks at it. A plugin that lists the events it handles lets the server skip the rest:
+
+```python
+from adn_server.application.plugins.domain.events import UnitDataFrame
+
+class DAprsPlugin:
+    name = "d-aprs"
+    events = (UnitDataFrame,)   # no voice events are built for this plugin
+```
+
+Measured on a Raspberry Pi 5, group voice routed to 6 OpenBridges and a MASTER (48 µs per frame with no plugin):
+
+| Plugins loaded | Cost per voice frame |
+|---|---|
+| One that declares only unit data events | +1.4 µs |
+| One that declares voice events, or declares nothing | +11 µs |
+
+`events` is read when the plugin is registered (after `on_load`). Internal handlers added with `bus.subscribe` receive every event.
 
 ---
 
