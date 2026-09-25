@@ -198,7 +198,7 @@ def reload_server_config(
     protocols: dict[str, Any],
     transports: dict[str, Any],
     *,
-    create_protocol: Callable[[str], Any],
+    create_protocol: Callable[[str, dict[str, Any]], Any],
     listen_udp: Callable[[str, BindSpec, Any], Any],
     stop_listener: Callable[[Any], None],
     on_systems_changed: Callable[[], None] | None = None,
@@ -212,6 +212,11 @@ def reload_server_config(
     Preserves PEERS / STATS and protocol STATUS for systems that stay up with the
     same bind address. Returns a Deferred that fires on the reactor thread when
     listeners are rebound (waits for ``stopListening`` before re-bind).
+
+    ``create_protocol(name, config)`` gets the config being reloaded: a new
+    system exists only there until the caller swaps it in, so a protocol built
+    from the live config would see no system block at all (no MODE: a MASTER
+    that answers nothing).
     """
     log = log or logger
     try:
@@ -273,7 +278,7 @@ def reload_server_config(
     for name in sorted(new_enabled - mapped_old_enabled):
         sys_cfg = copy.deepcopy(new_systems[name])
         config.setdefault("SYSTEMS", {})[name] = sys_cfg
-        proto = create_protocol(name)
+        proto = create_protocol(name, config)
         protocols[name] = proto
         if should_bind_udp is None or should_bind_udp(name, sys_cfg):
             _schedule_start(name, sys_cfg, proto, bind_spec(sys_cfg))
@@ -297,7 +302,7 @@ def reload_server_config(
         inject_only = should_bind_udp is not None and not should_bind_udp(name, merged)
         was_inject_only = should_bind_udp is not None and not should_bind_udp(name, old_cfg)
         if proto is None:
-            proto = create_protocol(name)
+            proto = create_protocol(name, config)
             protocols[name] = proto
             if inject_only:
                 transports.pop(name, None)

@@ -716,10 +716,11 @@ def run_peer_server(
         n = reopen_file_handlers()
         logger.info("(LOGGER) Reopened %s file log handler(s) after SIGUSR2", n)
 
-    def _create_hbp_protocol(system_name: str) -> Any:
+    def _create_hbp_protocol(system_name: str, system_config: dict[str, Any] | None = None) -> Any:
+        # Reload passes the config it is building: a system added there is not in the live one yet.
         return HBPProtocolFactory(
             system_name,
-            config,
+            config if system_config is None else system_config,
             report_sender,
             router=acl_router,
             dmrd_received=routing_use_cases.dmrd_received,
