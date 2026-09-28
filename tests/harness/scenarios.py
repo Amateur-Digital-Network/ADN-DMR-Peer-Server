@@ -53,7 +53,7 @@ def talker_alias_config() -> dict[str, Any]:
     config["GLOBAL"]["TALKER_ALIAS_SEND_DMRA"] = True
     rid = 3120001
     config["_SUB_PROFILES"] = {
-        rid: {"callsign": "CE5RPY", "fname": "Rodrigo", "surname": "Perez"},
+        rid: ("CE5RPY", "Rodrigo", "Perez", ""),
     }
     config["_SUB_IDS"] = {rid: "CE5RPY"}
     return config

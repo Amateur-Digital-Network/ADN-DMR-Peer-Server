@@ -32,6 +32,7 @@ import logging
 import os
 import shutil
 import ssl
+import sys
 import threading
 import time
 from collections.abc import Callable
@@ -40,6 +41,7 @@ from typing import Any
 from urllib.request import urlopen
 
 from ...application.ports import AliasLoader
+from ...domain.value_objects import SubscriberProfile
 
 logger = logging.getLogger(__name__)
 
@@ -213,14 +215,16 @@ class DefaultAliasLoader(AliasLoader):
         peer_ids = self._load_with_backup(
             path, peer_file, checksums.get("peer_ids"), "peer_ids", self._load_id_json,
         )
-        subscriber_ids = self._load_with_backup(
-            path, sub_file, checksums.get("subscriber_ids"), "subscriber_ids", self._load_id_json,
-        )
+        subscriber_ids = self._subscriber_ids(self._load_with_backup(
+            path, sub_file, checksums.get("subscriber_ids"), "subscriber_ids", self._load_subscriber_json,
+        ))
         talkgroup_ids = self._load_with_backup(
             path, tgid_file, checksums.get("talkgroup_ids"), "talkgroup_ids", self._load_id_json,
         )
-        local_subscriber_ids = self._load_id_json(
-            path / aliases.get("LOCAL_SUBSCRIBER_FILE", "subscriber_ids.json")
+        local_file = aliases.get("LOCAL_SUBSCRIBER_FILE", "subscriber_ids.json")
+        # The default points at the subscriber file itself: don't parse 300k records twice.
+        local_subscriber_ids = (
+            subscriber_ids if local_file == sub_file else self._load_id_json(path / local_file)
         )
         server_ids = self._load_with_backup(
             path, server_file, checksums.get("server_ids"), "server_ids",
@@ -257,10 +261,10 @@ class DefaultAliasLoader(AliasLoader):
 
         _keep("_PEER_IDS", peer_ids, "peer_ids")
         if subscriber_ids:
-            sub = dict(subscriber_ids)
-            sub[900999] = "D-APRS"
-            sub[4294967295] = "SC"
-            config["_SUB_IDS"] = sub
+            # In place: a copy would keep a second 300k-entry table alive.
+            subscriber_ids[900999] = "D-APRS"
+            subscriber_ids[4294967295] = "SC"
+            config["_SUB_IDS"] = subscriber_ids
             if profiles is not None:
                 config["_SUB_PROFILES"] = profiles
             elif isinstance(alias_loader, DefaultAliasLoader):
@@ -407,55 +411,59 @@ class DefaultAliasLoader(AliasLoader):
                                 pass
         return out
 
-    def load_subscriber_profiles(self, config: dict[str, Any]) -> dict[int, dict[str, str]]:
-        """Load {id: {callsign, fname, surname, talker_alias?}} from subscriber JSON files."""
+    def load_subscriber_profiles(self, config: dict[str, Any]) -> dict[int, SubscriberProfile]:
+        """{id: profile} from the subscriber file, overlaid with the local subscriber file."""
         aliases = config.get("ALIASES", {})
         path = Path(aliases.get("PATH", "./data/")).resolve()
         sub_file = aliases.get("SUBSCRIBER_FILE", "subscriber_ids.json")
         local_file = aliases.get("LOCAL_SUBSCRIBER_FILE", "subscriber_ids.json")
-        files = [path / sub_file, path / local_file]
-        stamps = [_file_stamp(f) for f in files]
+        # load_aliases has just parsed this file: this is a cache hit, not a second parse.
+        main = self._load_with_backup(path, sub_file, None, "subscriber_ids", self._load_subscriber_json)
+        if local_file == sub_file:
+            return main
+        stamp = _file_stamp(path / local_file)
         remembered = self._parsed.get("_profiles")
-        if remembered is not None and remembered[0] == stamps:
-            return remembered[1]
-        profiles: dict[int, dict[str, str]] = {}
-        for file_path in files:
-            self._merge_subscriber_profiles(file_path, profiles)
-        self._parsed["_profiles"] = (stamps, profiles)
+        if remembered is not None and remembered[0] is main and remembered[1] == stamp:
+            return remembered[2]
+        local = self._load_subscriber_json(path / local_file)
+        profiles = {**main, **local} if local else main
+        self._parsed["_profiles"] = (main, stamp, profiles)
         return profiles
 
-    def _merge_subscriber_profiles(self, file_path: Path, out: dict[int, dict[str, str]]) -> None:
+    def _subscriber_ids(self, profiles: dict[int, SubscriberProfile]) -> dict[int, str]:
+        remembered = self._parsed.get("_sub_ids")
+        if remembered is not None and remembered[0] is profiles:
+            return remembered[1]
+        ids = {rid: p[0] for rid, p in profiles.items() if p[0] is not None}
+        self._parsed["_sub_ids"] = (profiles, ids)
+        return ids
+
+    def _load_subscriber_json(self, file_path: Path) -> dict[int, SubscriberProfile]:
         if not file_path.is_file():
-            return
+            return {}
+        out: dict[int, SubscriberProfile] = {}
+
+        # Each record becomes a profile as soon as the decoder finishes it, so the
+        # file's whole tree (eight strings per subscriber) never exists at once.
+        def record(obj: dict[str, Any]) -> Any:
+            if "id" not in obj:
+                return obj
+            try:
+                rid = int(obj["id"])
+            except (TypeError, ValueError):
+                return None
+            callsign = obj.get("callsign")
+            out[rid] = (
+                None if callsign is None else str(callsign),
+                sys.intern(str(obj.get("fname") or "")),
+                sys.intern(str(obj.get("surname") or "")),
+                str(obj.get("talker_alias") or ""),
+            )
+            return None
+
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                json.load(f, object_hook=record)
         except (json.JSONDecodeError, OSError):
-            return
-        if not isinstance(data, dict):
-            return
-        if "count" in data:
-            data = {k: v for k, v in data.items() if k != "count"}
-        for _key, val in data.items():
-            if not isinstance(val, list):
-                continue
-            for record in val:
-                if not isinstance(record, dict) or "id" not in record:
-                    continue
-                try:
-                    rid = int(record["id"])
-                except (ValueError, TypeError):
-                    continue
-                entry: dict[str, str] = {}
-                if record.get("callsign"):
-                    entry["callsign"] = str(record["callsign"])
-                if record.get("fname"):
-                    entry["fname"] = str(record["fname"])
-                if record.get("surname"):
-                    entry["surname"] = str(record["surname"])
-                if record.get("talker_alias"):
-                    entry["talker_alias"] = str(record["talker_alias"])
-                if entry:
-                    prev = out.get(rid, {})
-                    prev.update(entry)
-                    out[rid] = prev
+            return {}
+        return out
