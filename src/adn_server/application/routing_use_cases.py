@@ -661,6 +661,8 @@ class RoutingUseCases(
                                     entry["SYSTEM"], int_id(stream_id), _tx_report_peer, int_id(rf_src), entry.get("TS", 1), int_id(target_tgid), call_duration, int(synthetic_announcement)
                                 )
                             )
+                            # Leg is over: let the stream trimmer age it out (and not re-emit END,TX).
+                            _target_status[stream_id]["_end_tx_sent"] = True
                         elif dtype_vseq in (1, 2, 3, 4):
                             self._rewrite_embed_lc(
                                 dmrbits, _target_status[stream_id], dtype_vseq, "EMB_LC",

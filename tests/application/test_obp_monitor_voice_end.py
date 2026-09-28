@@ -252,3 +252,28 @@ def test_bcsq_end_tx_not_duplicated() -> None:
         routing.on_obp_bcsq_received("OBP-ES", tgid, stream_id)
 
     assert factory.events == []
+
+
+def test_idle_forward_leg_without_end_tx_is_trimmed() -> None:
+    """A forward leg whose VTERM/BCSQ never flagged it must still age out (was leaking one row per call)."""
+    routing, factory, clock, protocols = _obp_stack(("OBP-ES",))
+    stream_id = bytes_4(0x01020304)
+    tgid = bytes_3(213)
+    now = clock.time()
+    protocols["OBP-ES"].STATUS[stream_id] = _forward_leg(
+        peer_id=bytes_4(71411),
+        rf_src=bytes_3(2130035),
+        tgid=tgid,
+        start=now - 6,
+        last=now - 6,
+    )
+
+    with _patch_wall_time(clock):
+        routing.stream_trimmer_loop()
+        assert protocols["OBP-ES"].STATUS[stream_id].get("_to") is True
+        assert _end_tx_for(factory.events, "OBP-ES") == []
+        clock.advance(181)
+        routing.stream_trimmer_loop()
+
+    assert stream_id not in protocols["OBP-ES"].STATUS
+    assert len(_end_tx_for(factory.events, "OBP-ES")) == 1

@@ -283,8 +283,9 @@ class RoutingTimerMixin:
                         # Forward legs (H_LC): no END,RX and no cross-leg END,TX cascade.
                         if "_to" not in st and "_fin" not in st and last < now - 5:
                             if _obp_status_is_forward_leg(st):
-                                if st.get("_end_tx_sent") or st.get("_bcsq_quenched"):
-                                    st["_to"] = True
+                                # Idle forward leg: mark for removal even if VTERM never arrived,
+                                # otherwise one row per forwarded call stays here forever.
+                                st["_to"] = True
                                 continue
                             rfs = st.get("RFS", b"\x00\x00\x00")
                             peer = st.get("RX_PEER", b"\x00\x00\x00\x00")
