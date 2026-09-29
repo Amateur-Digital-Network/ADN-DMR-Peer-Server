@@ -133,13 +133,12 @@ def test_subscriber_profiles_are_not_rebuilt_for_unchanged_files(tmp_path: Path)
     first = loader.load_subscriber_profiles(cfg)
     assert 7300391 in first
 
-    merges = []
-    original = loader._merge_subscriber_profiles
-    loader._merge_subscriber_profiles = lambda p, out: merges.append(p)  # type: ignore[assignment]
+    parses = []
+    original = loader._load_subscriber_json
+    loader._load_subscriber_json = lambda p: (parses.append(p), original(p))[1]  # type: ignore[assignment]
     assert loader.load_subscriber_profiles(cfg) is first
-    assert merges == []
+    assert parses == []
 
-    loader._merge_subscriber_profiles = original  # type: ignore[assignment]
     _write(tmp_path, "subscriber_ids.json", 7300392, "CE5ABC")
     os.utime(tmp_path / "subscriber_ids.json", (2_000_000_000, 2_000_000_000))
     assert 7300392 in loader.load_subscriber_profiles(cfg)
