@@ -322,6 +322,13 @@ class RoutingTimerMixin:
                         elif isinstance(st_rem, dict) and _obp_status_is_ingress(st_rem):
                             self._obp_emit_end_tx_for_forward_legs(stream_id, system_name, now)
                         obp_status.pop(stream_id, None)
+                        # Per-stream TA state (DMRA/embedded buffers, relay dedupe) is only
+                        # released on HBP VTERM; OBP streams must be freed here.
+                        self.clear_talker_alias_stream(system_name, stream_id)
+                    if to_remove:
+                        self._forget_ingress_drop_logs(system_name, to_remove)
+                if hasattr(protocol, "trim_dmra_streams"):
+                    protocol.trim_dmra_streams()
                 continue
             for slot in (1, 2):
                 _slot = protocol.STATUS.get(slot)

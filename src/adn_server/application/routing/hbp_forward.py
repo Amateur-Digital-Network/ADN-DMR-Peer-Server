@@ -133,6 +133,15 @@ class HbpForwardMixin:
             self._silent_activation_log_key(system_name, peer_id, dst_id),
         )
 
+    def _forget_ingress_drop_logs(self, system_name: str, stream_ids: list[bytes]) -> None:
+        """Drop log-once keys of streams the trimmer removed (OBP has no per-slot VTERM hook)."""
+        cache = getattr(self, "_ingress_drop_logged", None)
+        if not cache:
+            return
+        gone = set(stream_ids)
+        for key in [k for k in cache if len(k) > 4 and k[1] == system_name and k[4] in gone]:
+            cache.discard(key)
+
     def _clear_ingress_drop_log(
         self,
         system_name: str,
