@@ -79,6 +79,10 @@ def process_acls(config: dict[str, Any]) -> None:
             sys_cfg["REG_ACL"] = acl_build(sys_cfg.get("REG_ACL", "PERMIT:ALL"), PEER_MAX)
         for key in ("SUB_ACL", "TG1_ACL", "TG2_ACL"):
             acl_key = "TGID_TS1_ACL" if key == "TG1_ACL" else ("TGID_TS2_ACL" if key == "TG2_ACL" else key)
+            # OpenBridge has one TG ACL, TGID_ACL, checked on ingress and egress (legacy
+            # FreeDMR); TGID_TS1_ACL belongs to MASTER/PEER slots and does not apply there.
+            if key == "TG1_ACL" and sys_cfg.get("MODE") == "OPENBRIDGE" and "TGID_ACL" in sys_cfg:
+                acl_key = "TGID_ACL"
             sys_cfg[key] = acl_build(sys_cfg.get(acl_key, sys_cfg.get(key, "PERMIT:ALL")), ID_MAX)
 
 
