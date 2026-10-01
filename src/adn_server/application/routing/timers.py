@@ -283,8 +283,9 @@ class RoutingTimerMixin:
                         # Forward legs (H_LC): no END,RX and no cross-leg END,TX cascade.
                         if "_to" not in st and "_fin" not in st and last < now - 5:
                             if _obp_status_is_forward_leg(st):
-                                if st.get("_end_tx_sent") or st.get("_bcsq_quenched"):
-                                    st["_to"] = True
+                                # Idle forward leg: mark for removal even if VTERM never arrived,
+                                # otherwise one row per forwarded call stays here forever.
+                                st["_to"] = True
                                 continue
                             rfs = st.get("RFS", b"\x00\x00\x00")
                             peer = st.get("RX_PEER", b"\x00\x00\x00\x00")
@@ -321,6 +322,13 @@ class RoutingTimerMixin:
                         elif isinstance(st_rem, dict) and _obp_status_is_ingress(st_rem):
                             self._obp_emit_end_tx_for_forward_legs(stream_id, system_name, now)
                         obp_status.pop(stream_id, None)
+                        # Per-stream TA state (DMRA/embedded buffers, relay dedupe) is only
+                        # released on HBP VTERM; OBP streams must be freed here.
+                        self.clear_talker_alias_stream(system_name, stream_id)
+                    if to_remove:
+                        self._forget_ingress_drop_logs(system_name, to_remove)
+                if hasattr(protocol, "trim_dmra_streams"):
+                    protocol.trim_dmra_streams()
                 continue
             for slot in (1, 2):
                 _slot = protocol.STATUS.get(slot)
