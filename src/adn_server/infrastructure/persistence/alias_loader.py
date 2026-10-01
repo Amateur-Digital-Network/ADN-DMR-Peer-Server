@@ -57,8 +57,14 @@ def try_download(
     retry_timeout: float = 10,
     retry_delay_sec: float = 3,
     expected_checksum: str | None = None,
+    current_checksum: str | None = None,
 ) -> str:
     """Legacy try_download: download file from url if missing or older than stale_sec.
+
+    When both the checksum the server publishes (`expected_checksum`) and the one of
+    the file on disk (`current_checksum`) are known, they decide instead of the age:
+    equal means the file is what the server has, however old; different means the
+    server has published a new list, however recent ours is.
 
     Retries up to `max_attempts` times on network failure (timeout, connection refused,
     DNS failure, etc). The first attempt uses `first_timeout`; retries use the shorter
@@ -71,12 +77,16 @@ def try_download(
     full = path / file_name
     now = time.time()
     file_exists = full.is_file()
-    if file_exists:
-        file_old = (full.stat().st_mtime + stale_sec) < now
+    if file_exists and expected_checksum and current_checksum:
+        if current_checksum == expected_checksum:
+            return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
     else:
-        file_old = True
-    if not file_old and file_exists:
-        return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
+        if file_exists:
+            file_old = (full.stat().st_mtime + stale_sec) < now
+        else:
+            file_old = True
+        if not file_old and file_exists:
+            return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
 
     data: bytes | None = None
     last_error: Exception | None = None
@@ -163,6 +173,9 @@ def _file_stamp(file_path: Path) -> tuple[int, int, int] | None:
     return (stat.st_mtime_ns, stat.st_size, stat.st_ino)
 
 
+_BAD_CHECKSUM_RETRY_SEC = 3600
+
+
 class DefaultAliasLoader(AliasLoader):
     """Load aliases from JSON files and optional downloads. Legacy mk_aliases.
 
@@ -172,6 +185,25 @@ class DefaultAliasLoader(AliasLoader):
 
     def __init__(self) -> None:
         self._parsed: dict[str, tuple[Any, Any]] = {}
+        # path -> (stamp, blake2b): a 44MB subscriber file takes ~0.1s to hash.
+        self._digests: dict[str, tuple[tuple[int, int, int], str]] = {}
+        # file -> checksum the server published that the download didn't match.
+        self._bad_downloads: dict[str, tuple[str, float]] = {}
+
+    def _digest(self, file_path: Path) -> str | None:
+        stamp = _file_stamp(file_path)
+        if stamp is None:
+            return None
+        key = str(file_path)
+        known = self._digests.get(key)
+        if known is not None and known[0] == stamp:
+            return known[1]
+        try:
+            digest = _blake2bsum(file_path)
+        except OSError:
+            return None
+        self._digests[key] = (stamp, digest)
+        return digest
 
     def load_aliases(
         self,
@@ -184,13 +216,20 @@ class DefaultAliasLoader(AliasLoader):
         dict[str, str],
         dict[str, str],
     ]:
-        """Build alias dicts. Same order as legacy mk_aliases."""
+        """Build alias dicts. Same order as legacy mk_aliases.
+
+        With a checksum file configured, it is fetched on every tick (a few hundred
+        bytes) and the lists are downloaded only when their published checksum no
+        longer matches the file on disk: a DMR ID issued today is known within one
+        poll of the server publishing it, and an unchanged 44MB list is never fetched
+        again. Without one, STALE_DAYS decides as before.
+        """
         aliases = config.get("ALIASES", {})
         path = Path(aliases.get("PATH", "./data/")).resolve()
         stale_sec = float(aliases.get("STALE_TIME", aliases.get("STALE_DAYS", 1) * 86400))
         if aliases.get("TRY_DOWNLOAD"):
             if aliases.get("CHECKSUM_FILE") and aliases.get("CHECKSUM_URL"):
-                result = try_download(path, aliases["CHECKSUM_FILE"], aliases.get("CHECKSUM_URL", ""), stale_sec)
+                result = try_download(path, aliases["CHECKSUM_FILE"], aliases.get("CHECKSUM_URL", ""), 0)
                 _log_download_result(result)
             checksums = self._load_checksums(path, aliases.get("CHECKSUM_FILE"))
             for key, url_key, checksum_key in [
@@ -201,11 +240,7 @@ class DefaultAliasLoader(AliasLoader):
             ]:
                 url = aliases.get(url_key)
                 if url and aliases.get(key):
-                    result = try_download(
-                        path, aliases[key], url, stale_sec,
-                        expected_checksum=checksums.get(checksum_key),
-                    )
-                    _log_download_result(result)
+                    self._download(path, aliases[key], url, stale_sec, checksums.get(checksum_key))
         else:
             checksums = self._load_checksums(path, aliases.get("CHECKSUM_FILE"))
         peer_file = aliases.get("PEER_FILE", "peer_ids.json")
@@ -280,6 +315,33 @@ class DefaultAliasLoader(AliasLoader):
         if checksums:
             config["CHECKSUMS"] = checksums
 
+    def _download(
+        self, path: Path, file_name: str, url: str, stale_sec: float, expected: str | None,
+    ) -> None:
+        """try_download driven by the published checksum, with a retry limit for it.
+
+        If the server publishes a checksum its own list doesn't match, every tick
+        would fetch 44MB to throw it away; one attempt an hour per such checksum.
+        """
+        full = path / file_name
+        current = self._digest(full) if expected else None
+        bad = self._bad_downloads.get(file_name)
+        if (
+            bad is not None and expected == bad[0] and current != expected
+            and time.time() - bad[1] < _BAD_CHECKSUM_RETRY_SEC
+        ):
+            logger.debug("(ALIAS) '%s': published checksum still unmatched, retry later", file_name)
+            return
+        result = try_download(
+            path, file_name, url, stale_sec,
+            expected_checksum=expected, current_checksum=current,
+        )
+        if expected and "checksum mismatch" in result:
+            self._bad_downloads[file_name] = (expected, time.time())
+        else:
+            self._bad_downloads.pop(file_name, None)
+        _log_download_result(result)
+
     def _load_checksums(self, path: Path, file_name: str | None) -> dict[str, str]:
         """Load checksum JSON (legacy load_json of CHECKSUM_FILE). Keys e.g. peer_ids, subscriber_ids, talkgroup_ids, server_ids."""
         if not file_name:
@@ -339,7 +401,7 @@ class DefaultAliasLoader(AliasLoader):
                 # simply missing (e.g. first boot with the download still failing).
                 raise FileNotFoundError(f"'{target.name}' file does not exist")
             if expected_checksum:
-                if _blake2bsum(target) != expected_checksum:
+                if self._digest(target) != expected_checksum:
                     raise ValueError("bad checksum")
             loaded = parse(target)
             if not loaded:
