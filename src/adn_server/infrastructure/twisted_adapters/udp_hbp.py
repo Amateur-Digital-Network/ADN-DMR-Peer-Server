@@ -1446,6 +1446,9 @@ class HBPProtocol(DatagramProtocol):
                             and _dtype_vseq == HBPF_SLT_VTERM
                         ),
                         system_cfg=self._config,
+                        config=self._CONFIG,
+                        system_name=self._system,
+                        slot=_slot,
                     )
                 )
                 if (

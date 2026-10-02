@@ -193,6 +193,9 @@ SYSTEMS:
     # The parrot plays calls back with the caller's own ID: keep it from becoming
     # where that caller is reached for private calls and unit data.
     SUB_MAP_LEARN: false
+    # The replay starts 2.0 s after the over, beyond GLOBAL.LOOP_GUARD_HOLD, so the
+    # loop guard never takes it for a bridge loop; this only makes it explicit.
+    LOOP_GUARD: false
 
   # OpenBridge: use DMRE embedded version 5 ("OpenBridge v5") + ENHANCED_OBP on all ADN Systems peers.
   OBP-TEST:

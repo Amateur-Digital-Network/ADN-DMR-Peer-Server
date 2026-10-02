@@ -55,6 +55,7 @@ from .helpers import (
     tg_has_active_conversation,
     unit_data_reportable,
 )
+from .loop_guard import loop_guard_drops
 from .peer_downlink_index import count_connected_peers
 
 logger = logging.getLogger(__name__)
@@ -170,11 +171,14 @@ class HbpForwardMixin:
         stream_id: bytes,
         data: bytes,
         pkt_time: float,
+        *,
+        loop_guard_check: bool = True,
     ) -> bool:
         """Legacy routerHBP group/vcsbk packet control (~3270-3399).
 
         Returns True when the packet may proceed to bridge routing; False when dropped.
         Uses ingress ``pkt_time`` (UDP receive time) for rate/timeout parity with legacy.
+        ``loop_guard_check`` is False for plugin / server announcement frames.
         """
         protocols = self._get_protocols() if self._get_protocols else {}
         src_proto = protocols.get(system_name)
@@ -186,6 +190,14 @@ class HbpForwardMixin:
         if _is_new_stream:
             _slot_st.pop("_suppress_uplink", None)
             _slot_st.pop("_silent_activation_tg", None)
+            # Echo of the same caller on the same TG from another ingress (transcoding
+            # bridge loop): stream-ID loop control below cannot see it.
+            if loop_guard_check and loop_guard_drops(
+                self._config, protocols,
+                system_name=system_name, peer_id=peer_id, slot=slot, rf_src=rf_src,
+                dst_id=dst_id, stream_id=stream_id, pkt_time=pkt_time,
+            ):
+                return False
             sys_cfg = systems_cfg.get(system_name, {})
             peers = getattr(src_proto, "_peers", None) or sys_cfg.get("PEERS", {})
             connected = count_connected_peers(peers) if isinstance(peers, dict) else 0

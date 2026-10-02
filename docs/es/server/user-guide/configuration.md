@@ -71,6 +71,7 @@ Valores por defecto de todo el servidor. Muchas claves pueden sobrescribirse por
 | **GEN_STAT_BRIDGES** | Si es true, OpenBridge puede disparar filas de bridges **estáticos** para ciertas TG (ver [Bridges y talkgroups](bridges-and-talkgroups.md)). |
 | **SERVER_ID** | ID numérico del servidor; valor de 4 bytes para OpenBridge / metadatos de voz. |
 | **VALIDATE_SERVER_IDS** | Si es true (ruta DMRE), los IDs de **servidor de origen** pueden comprobarse contra una lista descargada (`ALIASES` **SERVER_ID_**\*). |
+| **LOOP_GUARD_HOLD** | Segundos tras el fin de una pasada durante los que la misma persona en el mismo TG desde otra entrada sigue contando como eco de un bucle (por defecto `1.0`; tiene que ser menor que `2.0`, el retardo del loro). Ver [Loop guard](../development/behaviour-and-timers.md#loop-guard). |
 | **URL_SECURITY** / **PORT_SECURITY** / **PASS_SECURITY** | Si están definidos, habilitan descarga de claves/contraseñas desde el endpoint de seguridad (ver comentarios del ejemplo). Vacío = desactivado. |
 | **USERS_PASS** | Nombre de fichero JSON de contraseñas por radio (opcional). |
 | **HASH_ENCRYPT** | Ruta a la clave de cifrado para el manejo del fichero de contraseñas. |
@@ -105,6 +106,7 @@ Aparecen principalmente en **MASTER** (y a menudo en **PEER**). OpenBridge usa u
 | **ANNOUNCEMENT_LANGUAGE** | Carpeta de idioma por defecto bajo `Audio/<lang>/` para mensajes en este sistema. |
 | **ALLOW_UNREG_ID** | Si se permiten IDs de suscriptor no registrados (MASTER). |
 | **SUB_MAP_LEARN** | Por defecto `true`. Con `false`, el tráfico que entra por este sistema nunca actualiza **SUB_MAP**, así que nunca pasa a ser donde se localiza a un suscriptor para llamadas privadas y datos unitarios. Para sistemas de servicio que transmiten con el ID de otra persona o con un ID de servicio compartido: balizas, puentes ASL / EchoLink / DVSwitch, el loro **ECHO**. Solo MASTER y PEER; en OPENBRIDGE se rechaza. Ver [Llamadas privadas](private-calls.md#service-systems-sub_map_learn). |
+| **LOOP_GUARD** | `log` (por defecto), `true` o `false`. Protección contra bucles de la voz que vuelve por un puente que transcodifica (YSF2DMR, DVSwitch, pasarelas ASL/EchoLink): la misma persona en el mismo TG desde otra entrada mientras su pasada original sigue activa o dentro de `GLOBAL.LOOP_GUARD_HOLD`. `log` escribe una línea `*LoopGuard*` por eco y lo deja pasar; `true` lo descarta; `false` ni comprueba ni registra los streams que entran por este sistema. El loro **ECHO** repite cada pasada con el ID de quien llama 2,0 s después, fuera de la ventana, así que nunca se detecta; `false` es una opción extra para él. También se aplica a OPENBRIDGE. Ver [Loop guard](../development/behaviour-and-timers.md#loop-guard). |
 
 ---
 

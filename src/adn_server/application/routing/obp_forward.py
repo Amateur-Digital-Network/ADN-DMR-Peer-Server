@@ -55,6 +55,7 @@ from ...domain.dmr.const import LC_OPT
 from ..subscription.obp_source_ops import ensure_obp_source_for_tg_store, obp_source_needs_ensure
 from ..subscription.subscription_queries import store_has_table
 from .helpers import group_voice_tg_ingress_collision, obp_is_canonical_ingress, unit_data_reportable
+from .loop_guard import loop_guard_drops
 
 logger = logging.getLogger(__name__)
 
@@ -189,6 +190,13 @@ class ObpForwardMixin:
                 del status[stream_id]
 
         if stream_id not in status:
+            # Echo of the same caller on the same TG from another ingress: see loop_guard.
+            if not synthetic_announcement and loop_guard_drops(
+                self._config, protocols,
+                system_name=system_name, peer_id=peer_id, slot=slot, rf_src=rf_src,
+                dst_id=dst_id, stream_id=stream_id, pkt_time=pkt_time,
+            ):
+                return False
             if group_voice_tg_ingress_collision(
                 protocols, systems_cfg, dst_id, stream_id, rf_src, pkt_time,
             ):

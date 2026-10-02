@@ -49,6 +49,7 @@ from typing import Any
 
 from ...domain import HBPF_SLT_VTERM, int_id
 from .helpers import obp_clear_deferred_bridge_tx_leg
+from .loop_guard import loop_guard
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +252,7 @@ class RoutingTimerMixin:
         protocols = self._get_protocols() if self._get_protocols else {}
         systems_cfg = self._config.get("SYSTEMS", {})
         now = time.time()
+        loop_guard(self._config).trim(now)
         for system_name, protocol in protocols.items():
             if not getattr(protocol, "STATUS", None):
                 continue
