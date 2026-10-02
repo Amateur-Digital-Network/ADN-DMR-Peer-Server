@@ -75,6 +75,7 @@ from ...application.routing.peer_downlink_index import (
     count_connected_peers,
     invalidate_peer_options_cache,
 )
+from ...application.routing.sub_map_learning import learn_sub_map
 from ...application.server_voice import all_server_voice_ids
 from ...domain import bytes_3, bytes_4, int_id
 from ...domain.dmr import decode
@@ -1362,9 +1363,8 @@ class HBPProtocol(DatagramProtocol):
                 # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
                 # (peer_id) is new — lets same-system private-call repeat target
                 # the exact hotspot instead of broadcasting to every peer.
-                sub_map = self._CONFIG.get("_SUB_MAP")
-                if sub_map is not None:
-                    sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
+                # Skipped on systems with SUB_MAP_LEARN: false.
+                learn_sub_map(self._CONFIG, self._system, _rf_src, _slot, pkt_time, _peer_id)
                 self.note_dmrd_stream(_peer_id, _rf_src, _stream_id)
                 if (
                     _call_type in ("group", "vcsbk")
@@ -1937,9 +1937,7 @@ class HBPProtocol(DatagramProtocol):
                     return
                 # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
                 # (peer_id) is new — see the MASTER-mode write site for why.
-                sub_map = self._CONFIG.get("_SUB_MAP")
-                if sub_map is not None:
-                    sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
+                learn_sub_map(self._CONFIG, self._system, _rf_src, _slot, pkt_time, _peer_id)
                 # TG 4000: reset after ACL/SUB_MAP (legacy order — routerHBP.dmrd_received)
                 if self._handle_tg4000_packet(
                     _peer_id, _slot, _int_dst_id, _call_type, _frame_type, _dtype_vseq,

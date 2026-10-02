@@ -83,3 +83,34 @@ def test_collects_multiple_errors() -> None:
     msg = str(exc.value)
     assert "bad.yaml" in msg
     assert msg.count("  - ") >= 4
+
+
+def test_accepts_sub_map_learn_bool_on_peer() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"BRIDGE": {"MODE": "PEER", "SUB_MAP_LEARN": False}}
+    validate_config(config)
+
+
+def test_rejects_non_bool_sub_map_learn() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"BEACON": {"MODE": "MASTER", "SUB_MAP_LEARN": "no"}}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "SYSTEMS.BEACON.SUB_MAP_LEARN: expected boolean" in str(exc.value)
+
+
+def test_rejects_sub_map_learn_on_openbridge() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {
+        "OBP1": {
+            "MODE": "OPENBRIDGE",
+            "NETWORK_ID": 73044,
+            "PASSPHRASE": "x",
+            "TARGET_IP": "127.0.0.1",
+            "TARGET_PORT": 62044,
+            "SUB_MAP_LEARN": False,
+        },
+    }
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "SYSTEMS.OBP1.SUB_MAP_LEARN: not supported on OPENBRIDGE" in str(exc.value)

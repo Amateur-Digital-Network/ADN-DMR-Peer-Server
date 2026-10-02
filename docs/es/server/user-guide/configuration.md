@@ -104,6 +104,7 @@ Aparecen principalmente en **MASTER** (y a menudo en **PEER**). OpenBridge usa u
 | **DEFAULT_UA_TIMER** | Tiempo de espera por defecto (minutos en muchos sitios) para bridges **activados por usuario**. |
 | **ANNOUNCEMENT_LANGUAGE** | Carpeta de idioma por defecto bajo `Audio/<lang>/` para mensajes en este sistema. |
 | **ALLOW_UNREG_ID** | Si se permiten IDs de suscriptor no registrados (MASTER). |
+| **SUB_MAP_LEARN** | Por defecto `true`. Con `false`, el tráfico que entra por este sistema nunca actualiza **SUB_MAP**, así que nunca pasa a ser donde se localiza a un suscriptor para llamadas privadas y datos unitarios. Para sistemas de servicio que transmiten con el ID de otra persona o con un ID de servicio compartido: balizas, puentes ASL / EchoLink / DVSwitch, el loro **ECHO**. Solo MASTER y PEER; en OPENBRIDGE se rechaza. Ver [Llamadas privadas](private-calls.md#service-systems-sub_map_learn). |
 
 ---
 

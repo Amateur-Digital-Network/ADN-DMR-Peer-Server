@@ -55,6 +55,7 @@ from adn_server.application.proxy.deployment import (
     proxy_target_system,
 )
 from adn_server.application.report.queue import BoundedReportQueue, QueuedReportSender
+from adn_server.application.routing.sub_map_learning import purge_non_learning_systems
 from adn_server.application.runtime_context import (
     ConfigProxy,
     RuntimeContext,
@@ -209,6 +210,13 @@ def _resolve_alias_poll_interval(aliases_cfg: dict[str, Any], logger: logging.Lo
     return value
 
 
+def _purge_sub_map_of_quiet_systems(config: Any, logger: logging.Logger) -> None:
+    """Forget subscribers last heard on a system with SUB_MAP_LEARN: false (persisted SUB_MAP)."""
+    dropped = purge_non_learning_systems(config)
+    if dropped:
+        logger.info("(SUBSCRIBER) Dropped %s SUB_MAP entries of systems with SUB_MAP_LEARN: false", dropped)
+
+
 def _log_alias_health(config: Any, systems_cfg: dict[str, Any], logger: logging.Logger) -> None:
     """Warn loudly when peer/subscriber/server ID tables are empty and would fail-closed.
 
@@ -307,6 +315,7 @@ def run_peer_server(
     _normalize_peer_config(config)
     _normalize_obp_config(config)
     normalize_obp_proxy_targets(config)
+    _purge_sub_map_of_quiet_systems(config, logger)
 
     runtime_holder = RuntimeContextHolder(RuntimeContext(config=config, config_path=config_path))
     config = ConfigProxy(runtime_holder)
@@ -740,6 +749,8 @@ def run_peer_server(
         normalize_obp_proxy_targets(config)
         # Follow the new YAML: refresh configured peers, drop sessions of dead links.
         mesh_sessions(config).sync(config)
+        # A system switched to SUB_MAP_LEARN: false keeps no stale entries.
+        _purge_sub_map_of_quiet_systems(config, logger)
         report_factory.set_config(config)
         mqtt_after = mqtt_settings_from_config(config)
         report_mqtt = reconcile_mqtt_publisher(

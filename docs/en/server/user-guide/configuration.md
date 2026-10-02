@@ -104,6 +104,7 @@ These appear mainly on **MASTER** (and often on **PEER**). OpenBridge uses a dif
 | **DEFAULT_UA_TIMER** | Default timeout (minutes in many places) for **user-activated** bridges. |
 | **ANNOUNCEMENT_LANGUAGE** | Default language folder under `Audio/<lang>/` for prompts on this system. |
 | **ALLOW_UNREG_ID** | Whether unregistered subscriber IDs are allowed (MASTER). |
+| **SUB_MAP_LEARN** | Default `true`. With `false`, traffic entering through this system never updates **SUB_MAP**, so it never becomes where a subscriber is reached for private calls and unit data. For service systems that transmit with someone else's ID or a shared service ID: beacons, ASL / EchoLink / DVSwitch bridges, the **ECHO** parrot. MASTER and PEER only; rejected on OPENBRIDGE. See [Private calls](private-calls.md#service-systems-sub_map_learn). |
 
 ---
 
