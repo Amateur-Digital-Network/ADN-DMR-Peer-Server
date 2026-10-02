@@ -35,8 +35,8 @@ Bridges that relay to another TG are not loops and are left alone.
 
 A bridge echo starts while the original is still on air (bridge delay under
 ~1 s), so the hold only has to cover very short overs. It stays below the
-parrot's fixed 2.0 s replay delay, so the parrot is never taken for a loop
-whatever its system or TG is called.
+parrot's fixed replay delay (``PLAYBACK_DELAY_S``, 2.0 s), so the parrot is
+never taken for a loop whatever its system or TG is called.
 
 Per system ``LOOP_GUARD``: ``log`` (default) writes one ``*LoopGuard*`` line per
 echo and lets it through, ``true`` drops it, ``false`` neither checks nor
@@ -55,6 +55,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from ...domain import int_id
+from ..playback_use_cases import PLAYBACK_DELAY_S
 from ..server_voice import all_server_voice_ids
 
 logger = logging.getLogger(__name__)
@@ -64,9 +65,9 @@ LOOP_GUARD_LOG = "log"
 LOOP_GUARD_DROP = "drop"
 
 DEFAULT_LOOP_GUARD_HOLD_S = 1.0
-# Exclusive upper bound: the parrot replays an over 2.0 s after it ends
-# (``playback_use_cases._PLAYBACK_DELAY_S``); a hold reaching it would take the replay for a loop.
-MAX_LOOP_GUARD_HOLD_S = 2.0
+# Exclusive upper bound: the parrot replays an over PLAYBACK_DELAY_S after it ends;
+# a hold reaching it would take the replay for a loop.
+MAX_LOOP_GUARD_HOLD_S = PLAYBACK_DELAY_S
 # Verdicts and legs older than this are forgotten by trim(): longer than the
 # 180 s source timeout plus the hold, so a live over is never forgotten.
 _FORGET_AFTER_S = 300.0
