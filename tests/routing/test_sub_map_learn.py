@@ -82,6 +82,7 @@ def test_master_ingress_learns_by_default() -> None:
 def test_master_ingress_skips_learning_when_disabled() -> None:
     stack = build_hbp_repeat_stack()
     stack.config["SYSTEMS"][stack.system_name]["SUB_MAP_LEARN"] = False
+    stack.hbp.apply_system_config(stack.config)  # as a SIGHUP reload does
     elsewhere = ("MASTER-HOTSPOTS", 2, 1000.0, bytes_4(2130099))
     stack.config["_SUB_MAP"] = {bytes_3(_RF_SRC): elsewhere}
     stack.register_peer(_PEER, _ADDR)
@@ -89,8 +90,9 @@ def test_master_ingress_skips_learning_when_disabled() -> None:
     # the subscriber stays where they were really last heard
     assert stack.config["_SUB_MAP"][bytes_3(_RF_SRC)] == elsewhere
 
-    # same frame path, flag back on: now it is learned (the frame did get that far)
+    # same frame path, flag back on by reload: now it is learned (the frame did get that far)
     stack.config["SYSTEMS"][stack.system_name]["SUB_MAP_LEARN"] = True
+    stack.hbp.apply_system_config(stack.config)
     stack.hbp.datagramReceived(_voice_head(213, 0x51000003), _ADDR)
     assert stack.config["_SUB_MAP"][bytes_3(_RF_SRC)][0] == stack.system_name
 
@@ -120,6 +122,7 @@ def test_peer_ingress_skips_learning_when_disabled() -> None:
     assert config["_SUB_MAP"] == {}
 
     config["SYSTEMS"]["BRIDGE-PEER"]["SUB_MAP_LEARN"] = True
+    hbp.apply_system_config(config)
     hbp._peer_datagram_received(_voice_head(214, 0x51000004), master_sockaddr)
     assert config["_SUB_MAP"][bytes_3(_RF_SRC)][0] == "BRIDGE-PEER"
 

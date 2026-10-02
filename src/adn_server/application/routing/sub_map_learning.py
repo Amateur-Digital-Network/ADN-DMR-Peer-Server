@@ -18,7 +18,7 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 ###############################################################################
 
-"""Where a subscriber was last heard: the one place that decides whether to learn it.
+"""Where a subscriber was last heard: ``system_learns_sub_map`` is the one place that decides.
 
 Every DMRD on a MASTER/PEER system moves its ``rf_src`` to that system in
 ``SUB_MAP``, so private calls and unit data addressed to that subscriber are
@@ -52,8 +52,9 @@ def learn_sub_map(
 ) -> bool:
     """Record that ``rf_src`` was last heard on ``system_name`` / ``peer_id``.
 
-    Every SUB_MAP write site goes through here. Returns False when the system
-    does not learn (or there is no SUB_MAP).
+    Used by the private-call path. The HBP ingress paths (``udp_hbp.py``) cache
+    ``system_learns_sub_map`` on the protocol instead, since they run on every
+    frame. Returns False when the system does not learn (or there is no SUB_MAP).
     """
     sub_map = config.get("_SUB_MAP")
     if sub_map is None:
