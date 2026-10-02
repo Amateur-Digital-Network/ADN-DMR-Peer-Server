@@ -71,7 +71,7 @@ Server-wide defaults. Many keys can be overridden per system if `USE_ACL` (or si
 | **GEN_STAT_BRIDGES** | If true, OpenBridge can trigger creation of **static** bridge rows for certain TGs (see [Bridges and talkgroups](bridges-and-talkgroups.md)). |
 | **SERVER_ID** | Numeric server ID; stored as 4-byte value for OpenBridge / voice metadata. |
 | **VALIDATE_SERVER_IDS** | If true (DMRE path), **source server** IDs may be checked against a downloaded list (`ALIASES` **SERVER_ID_**\*). |
-| **LOOP_GUARD_HOLD** | Seconds after an over ends during which the same caller on the same TG from another ingress still counts as a loop echo (default `2.0`). See [Loop guard](../development/behaviour-and-timers.md#loop-guard). |
+| **LOOP_GUARD_HOLD** | Seconds after an over ends during which the same caller on the same TG from another ingress still counts as a loop echo (default `1.0`; must be under `2.0`, the parrot's replay delay). See [Loop guard](../development/behaviour-and-timers.md#loop-guard). |
 | **URL_SECURITY** / **PORT_SECURITY** / **PASS_SECURITY** | If set, enables download of keys/password material from the security endpoint (see example comments). Empty = disabled. |
 | **USERS_PASS** | Filename for per-radio password JSON (optional). |
 | **HASH_ENCRYPT** | Path to encryption key for password file handling. |
@@ -106,7 +106,7 @@ These appear mainly on **MASTER** (and often on **PEER**). OpenBridge uses a dif
 | **ANNOUNCEMENT_LANGUAGE** | Default language folder under `Audio/<lang>/` for prompts on this system. |
 | **ALLOW_UNREG_ID** | Whether unregistered subscriber IDs are allowed (MASTER). |
 | **SUB_MAP_LEARN** | Default `true`. With `false`, traffic entering through this system never updates **SUB_MAP**, so it never becomes where a subscriber is reached for private calls and unit data. For service systems that transmit with someone else's ID or a shared service ID: beacons, ASL / EchoLink / DVSwitch bridges, the **ECHO** parrot. MASTER and PEER only; rejected on OPENBRIDGE. See [Private calls](private-calls.md#service-systems-sub_map_learn). |
-| **LOOP_GUARD** | `log` (default), `true` or `false`. Loop guard for voice that comes back through a transcoding bridge (YSF2DMR, DVSwitch, ASL/EchoLink gateways): the same caller on the same TG from another ingress, while the original over is active or within `GLOBAL.LOOP_GUARD_HOLD`. `log` writes one `*LoopGuard*` line per echo and lets it through; `true` drops it; `false` neither checks nor records streams entering this system. Set `false` on the **ECHO** parrot, which replays each over with the caller's ID about 2 s after it ends. Applies to OPENBRIDGE too. See [Loop guard](../development/behaviour-and-timers.md#loop-guard). |
+| **LOOP_GUARD** | `log` (default), `true` or `false`. Loop guard for voice that comes back through a transcoding bridge (YSF2DMR, DVSwitch, ASL/EchoLink gateways): the same caller on the same TG from another ingress, while the original over is active or within `GLOBAL.LOOP_GUARD_HOLD`. `log` writes one `*LoopGuard*` line per echo and lets it through; `true` drops it; `false` neither checks nor records streams entering this system. The **ECHO** parrot replays each over with the caller's ID 2.0 s after it ends, beyond the hold, so it is never matched; `false` is an extra option for it. Applies to OPENBRIDGE too. See [Loop guard](../development/behaviour-and-timers.md#loop-guard). |
 
 ---
 

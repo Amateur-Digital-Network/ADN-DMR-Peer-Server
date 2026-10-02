@@ -146,7 +146,7 @@ def test_next_over_from_the_same_ingress_is_not_an_echo(caplog: pytest.LogCaptur
     assert _loop_lines(caplog) == []
 
 
-@pytest.mark.parametrize(("gap", "echo"), [(1.5, True), (2.5, False)])
+@pytest.mark.parametrize(("gap", "echo"), [(0.5, True), (1.5, False)])
 def test_hold_window_after_the_original_ends(caplog: pytest.LogCaptureFixture, gap: float, echo: bool) -> None:
     scenario = _scenario(guard=True)
     t0 = scenario.clock.time()
@@ -156,6 +156,19 @@ def test_hold_window_after_the_original_ends(caplog: pytest.LogCaptureFixture, g
 
     assert bool(_loop_lines(caplog)) is echo
     assert (_ECHO in _routed(scenario)) is not echo
+
+
+def test_parrot_replay_is_never_an_echo_whatever_its_name(caplog: pytest.LogCaptureFixture) -> None:
+    """The parrot replays 2.0 s after the over ends; the hold (< 2 s) keeps it out on its own,
+    even with the guard dropping on that system and no LOOP_GUARD: false."""
+    scenario = _scenario(guard=True)  # BRIDGE-B plays the parrot here, under any name
+    t0 = scenario.clock.time()
+    with caplog.at_level(logging.WARNING):
+        _over(scenario, "MASTER-A", _ORIGINAL, t0)  # last frame at t0 + 0.06
+        _over(scenario, "BRIDGE-B", _ECHO, t0 + 0.06 + 2.0)
+
+    assert _loop_lines(caplog) == []
+    assert _ECHO in _routed(scenario)
 
 
 def test_server_voice_ids_are_exempt(caplog: pytest.LogCaptureFixture) -> None:
@@ -177,9 +190,9 @@ def test_loop_guard_false_neither_checks_nor_records(caplog: pytest.LogCaptureFi
     t0 = scenario.clock.time()
     with caplog.at_level(logging.WARNING):
         _over(scenario, "MASTER-A", _ORIGINAL, t0)
-        _over(scenario, "MASTER-C", _ECHO, t0 + 2.0)  # replay: not checked
+        _over(scenario, "MASTER-C", _ECHO, t0 + 0.5)  # inside the hold: not checked either
         # the caller keys up again while the replay is still on: not an echo of the replay
-        _over(scenario, "MASTER-A", 0x0C000003, t0 + 2.5)
+        _over(scenario, "MASTER-A", 0x0C000003, t0 + 0.7)
 
     assert _loop_lines(caplog) == []
 

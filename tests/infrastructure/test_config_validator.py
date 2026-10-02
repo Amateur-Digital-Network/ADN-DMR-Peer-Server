@@ -118,7 +118,7 @@ def test_rejects_sub_map_learn_on_openbridge() -> None:
 
 @pytest.mark.parametrize("value", [True, False, "log"])
 def test_accepts_loop_guard_values(value) -> None:
-    config = _minimal_config(LOOP_GUARD_HOLD=2.5)
+    config = _minimal_config(LOOP_GUARD_HOLD=1.5)
     config["SYSTEMS"] = {"BRIDGE": {"MODE": "PEER", "LOOP_GUARD": value}}
     validate_config(config)
 
@@ -132,7 +132,7 @@ def test_rejects_other_loop_guard_values(value) -> None:
     assert "SYSTEMS.BRIDGE.LOOP_GUARD: expected true, false or \"log\"" in str(exc.value)
 
 
-@pytest.mark.parametrize("hold", [0, -1, "2"])
+@pytest.mark.parametrize("hold", [0, -1, 2, 2.0, 3.5, "1"])
 def test_rejects_bad_loop_guard_hold(hold) -> None:
     with pytest.raises(ConfigError) as exc:
         validate_config(_minimal_config(LOOP_GUARD_HOLD=hold))

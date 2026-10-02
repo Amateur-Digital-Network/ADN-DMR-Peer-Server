@@ -30,13 +30,19 @@ points at once: such a stream is an echo.
 A stream is an echo when, at its start, the same ``rf_src`` has another stream
 (different stream ID) on the **same TG** from **another ingress** (system and
 peer; an OPENBRIDGE system counts as one ingress) that is active or ended less
-than ``GLOBAL.LOOP_GUARD_HOLD`` seconds ago. Bridges that relay to another TG
-are not loops and are left alone.
+than ``GLOBAL.LOOP_GUARD_HOLD`` seconds ago (default 1 s, always under 2 s).
+Bridges that relay to another TG are not loops and are left alone.
+
+A bridge echo starts while the original is still on air (bridge delay under
+~1 s), so the hold only has to cover very short overs. It stays below the
+parrot's fixed 2.0 s replay delay, so the parrot is never taken for a loop
+whatever its system or TG is called.
 
 Per system ``LOOP_GUARD``: ``log`` (default) writes one ``*LoopGuard*`` line per
 echo and lets it through, ``true`` drops it, ``false`` neither checks nor
 records streams entering there (the parrot replays each over with the caller's
-ID ~2 s after it ends). Server voice IDs and plugin frames are exempt.
+ID 2 s after it ends; the hold already keeps it out, ``false`` is an extra
+option). Server voice IDs and plugin frames are exempt.
 
 Cost: one verdict per stream, cached by stream ID; frames of a stream already
 bound to its slot never get here.
@@ -57,7 +63,10 @@ LOOP_GUARD_OFF = "off"
 LOOP_GUARD_LOG = "log"
 LOOP_GUARD_DROP = "drop"
 
-DEFAULT_LOOP_GUARD_HOLD_S = 2.0
+DEFAULT_LOOP_GUARD_HOLD_S = 1.0
+# Exclusive upper bound: the parrot replays an over 2.0 s after it ends
+# (``playback_use_cases._PLAYBACK_DELAY_S``); a hold reaching it would take the replay for a loop.
+MAX_LOOP_GUARD_HOLD_S = 2.0
 # Verdicts and legs older than this are forgotten by trim(): longer than the
 # 180 s source timeout plus the hold, so a live over is never forgotten.
 _FORGET_AFTER_S = 300.0
@@ -79,7 +88,7 @@ def loop_guard_hold(config: dict[str, Any]) -> float:
         hold = float(value)
     except (TypeError, ValueError):
         return DEFAULT_LOOP_GUARD_HOLD_S
-    return hold if hold > 0 else DEFAULT_LOOP_GUARD_HOLD_S
+    return hold if 0 < hold < MAX_LOOP_GUARD_HOLD_S else DEFAULT_LOOP_GUARD_HOLD_S
 
 
 @dataclass(slots=True)

@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 from adn_server.application.proxy.deployment import config_has_enabled_openbridge
+from adn_server.application.routing.loop_guard import MAX_LOOP_GUARD_HOLD_S
 
 from ..domain.errors import ConfigError
 
@@ -152,8 +153,11 @@ def _validate_global(global_cfg: dict[str, Any], errors: list[str]) -> None:
     if "LOOP_GUARD_HOLD" in global_cfg:
         hold = global_cfg["LOOP_GUARD_HOLD"]
         _expect_number("GLOBAL.LOOP_GUARD_HOLD", hold, errors)
-        if isinstance(hold, (int, float)) and not isinstance(hold, bool) and hold <= 0:
-            errors.append(f"GLOBAL.LOOP_GUARD_HOLD: must be greater than 0 seconds, got {hold!r}.")
+        if isinstance(hold, (int, float)) and not isinstance(hold, bool) and not 0 < hold < MAX_LOOP_GUARD_HOLD_S:
+            errors.append(
+                f"GLOBAL.LOOP_GUARD_HOLD: must be more than 0 and less than {MAX_LOOP_GUARD_HOLD_S:g} "
+                f"seconds (the parrot replays {MAX_LOOP_GUARD_HOLD_S:g} s after an over), got {hold!r}."
+            )
 
     url = global_cfg.get("URL_SECURITY")
     port = global_cfg.get("PORT_SECURITY")
