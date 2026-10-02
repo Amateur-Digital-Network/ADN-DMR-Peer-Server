@@ -149,6 +149,11 @@ def _validate_global(global_cfg: dict[str, Any], errors: list[str]) -> None:
     ):
         if key in global_cfg:
             _expect_bool(f"GLOBAL.{key}", global_cfg[key], errors)
+    if "LOOP_GUARD_HOLD" in global_cfg:
+        hold = global_cfg["LOOP_GUARD_HOLD"]
+        _expect_number("GLOBAL.LOOP_GUARD_HOLD", hold, errors)
+        if isinstance(hold, (int, float)) and not isinstance(hold, bool) and hold <= 0:
+            errors.append(f"GLOBAL.LOOP_GUARD_HOLD: must be greater than 0 seconds, got {hold!r}.")
 
     url = global_cfg.get("URL_SECURITY")
     port = global_cfg.get("PORT_SECURITY")
@@ -380,6 +385,12 @@ def _validate_system(name: str, sys_cfg: dict[str, Any], errors: list[str]) -> N
         errors.append(
             f"{prefix}.SUB_MAP_LEARN: not supported on OPENBRIDGE (an OpenBridge link always "
             "updates SUB_MAP); remove it."
+        )
+    if "LOOP_GUARD" in sys_cfg and not (
+        isinstance(sys_cfg["LOOP_GUARD"], bool) or sys_cfg["LOOP_GUARD"] == "log"
+    ):
+        errors.append(
+            f"{prefix}.LOOP_GUARD: expected true, false or \"log\", got {sys_cfg['LOOP_GUARD']!r}."
         )
     for key in (
         "PORT",

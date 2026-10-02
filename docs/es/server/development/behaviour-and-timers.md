@@ -54,3 +54,17 @@ Comportamiento actual para deduplicación y orden de streams:
 - La deduplicación por hash en OBP se evalúa con guardia **`seq > 0`**.
 - En HBP se calcula/guarda CRC también para `seq == 0`, pero la caída por duplicado por CRC sigue guardada por **`seq > 0`**.
 - Esto evita sobre-descartar casos de primer paquete y mantiene protección de duplicados de stream.
+
+<a id="loop-guard"></a>
+## Loop guard (protección contra bucles)
+
+El control de bucles por stream ID (`*LoopControl*`) solo detecta un stream que vuelve con su propio stream ID. Un puente que transcodifica (YSF2DMR, DVSwitch, pasarelas ASL/EchoLink) vuelve a codificar el audio y abre un stream ID **nuevo**, y cada vuelta reinicia el límite de 180 s. La comprobación de TG ocupado deja pasar a propósito a la misma persona. Así que un bucle a través de puentes (TG A → YSF → TG B → … → TG A) daría vueltas sin fin.
+
+Esos puentes conservan el ID de quien habla, y una persona no puede transmitir desde dos entradas a la vez. Al empezar un stream de voz de grupo, `application/routing/loop_guard.py` lo considera **eco** cuando el mismo `rf_src` tiene otro stream (con otro stream ID) en el **mismo TG** desde **otra entrada** (sistema y peer; un enlace OPENBRIDGE cuenta como una sola entrada) que sigue activo o terminó hace menos de `GLOBAL.LOOP_GUARD_HOLD` segundos (2 s por defecto). Un puente que pasa a **otro** TG no es un bucle y no se toca; un bucle siempre vuelve al TG donde empezó.
+
+- `LOOP_GUARD` por sistema: `log` (por defecto) escribe un aviso `*LoopGuard*` por stream eco y lo deja pasar; `true` lo descarta (en el enrutado y en la reemisión local del MASTER a sus otros peers); `false` ni comprueba ni registra los streams que entran por ahí (el loro **ECHO**).
+- Exentos: los IDs de voz del servidor (`all_server_voice_ids`, p. ej. 1000001; varios servidores emiten balizas con ellos a la vez) y las tramas de plugins y anuncios.
+- Coste: un veredicto por stream, en su primera trama, cacheado por stream ID. Las tramas de un stream ya asignado a su slot no llegan aquí. El trimmer de streams olvida las entradas a los 300 s.
+- El multipath OBP (la misma llamada por dos caminos OpenBridge) conserva el stream ID y no es eco.
+
+No cubre: un puente que transmite con **su propio** ID en vez del de quien habla.

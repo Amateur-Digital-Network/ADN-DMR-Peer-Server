@@ -50,6 +50,7 @@ from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, bytes_3, bytes_4, int_id
 from ...domain.hbp_protocol import HBPF_SLT_VTERM, STREAM_TO
 from ...domain.mesh_session import obp_session
 from ..server_voice import DEFAULT_SERVER_VOICE_ID
+from .loop_guard import loop_guard_drops
 
 PeerVoiceSlotRow = dict[str, Any]
 PeerVoiceSlotMap = dict[int, PeerVoiceSlotRow]
@@ -1042,6 +1043,9 @@ def hbp_master_ingress_repeat_allowed(
     systems_cfg: dict[str, Any] | None = None,
     is_vterm: bool = False,
     system_cfg: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
+    system_name: str = "",
+    slot: int = 0,
 ) -> bool:
     """True when MASTER REPEAT may fan this ingress packet to other peers.
 
@@ -1064,6 +1068,14 @@ def hbp_master_ingress_repeat_allowed(
     # (multi-hotspot MASTER). Blocking it leaves per-peer sessions open forever.
     if is_vterm:
         return True
+    # A loop echo dropped by the loop guard must not reach this MASTER's other peers
+    # either (``config`` is the full server config; the verdict is shared with routing).
+    if config is not None and protocols is not None and loop_guard_drops(
+        config, protocols,
+        system_name=system_name, peer_id=peer_id, slot=slot, rf_src=rf_src,
+        dst_id=dst_id, stream_id=stream_id, pkt_time=pkt_time,
+    ):
+        return False
     per_peer = bool(system_cfg and master_per_peer_slot_contention(
         systems_cfg or {}, "", system_cfg, connected_count=0,
     ))

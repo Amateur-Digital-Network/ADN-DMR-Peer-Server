@@ -46,6 +46,7 @@ logger = logging.getLogger(__name__)
 
 _RUNTIME_TOP_KEYS = frozenset({
     "_MESH_SESSIONS",
+    "_LOOP_GUARD",
     "_SUB_MAP",
     "_SUB_IDS",
     "_SUB_PROFILES",
