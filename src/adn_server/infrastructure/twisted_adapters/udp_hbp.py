@@ -75,6 +75,7 @@ from ...application.routing.peer_downlink_index import (
     count_connected_peers,
     invalidate_peer_options_cache,
 )
+from ...application.routing.sub_map_learning import system_learns_sub_map
 from ...application.server_voice import all_server_voice_ids
 from ...domain import bytes_3, bytes_4, int_id
 from ...domain.dmr import decode
@@ -265,6 +266,8 @@ class HBPProtocol(DatagramProtocol):
         self._mesh_registry = mesh_registry if mesh_registry is not None else _DEFAULT_MESH_REGISTRY
         self._dynamic_tg_uc = dynamic_tg_uc
         self._config = config.get("SYSTEMS", {}).get(system_name, {})
+        # SUB_MAP_LEARN, decided once per config (ingress checks it on every frame)
+        self._learns_sub_map = system_learns_sub_map(self._config)
         self._obp_policy_cache: tuple[Any, BridgePolicy] | None = None
         self._peer_mesh_config_cache: PeerMeshConfig | None = None
         if self._config.get("MODE") == "OPENBRIDGE":
@@ -354,6 +357,7 @@ class HBPProtocol(DatagramProtocol):
         self._CONFIG = config
         sys_cfg = config.get("SYSTEMS", {}).get(self._system, {})
         self._config = sys_cfg
+        self._learns_sub_map = system_learns_sub_map(sys_cfg)
         self._obp_policy_cache = None
         self._peer_mesh_config_cache = None
         if sys_cfg.get("MODE") == "MASTER":
@@ -1362,9 +1366,11 @@ class HBPProtocol(DatagramProtocol):
                 # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
                 # (peer_id) is new — lets same-system private-call repeat target
                 # the exact hotspot instead of broadcasting to every peer.
-                sub_map = self._CONFIG.get("_SUB_MAP")
-                if sub_map is not None:
-                    sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
+                # Skipped on systems with SUB_MAP_LEARN: false.
+                if self._learns_sub_map:
+                    sub_map = self._CONFIG.get("_SUB_MAP")
+                    if sub_map is not None:
+                        sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
                 self.note_dmrd_stream(_peer_id, _rf_src, _stream_id)
                 if (
                     _call_type in ("group", "vcsbk")
@@ -1937,9 +1943,10 @@ class HBPProtocol(DatagramProtocol):
                     return
                 # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
                 # (peer_id) is new — see the MASTER-mode write site for why.
-                sub_map = self._CONFIG.get("_SUB_MAP")
-                if sub_map is not None:
-                    sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
+                if self._learns_sub_map:
+                    sub_map = self._CONFIG.get("_SUB_MAP")
+                    if sub_map is not None:
+                        sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
                 # TG 4000: reset after ACL/SUB_MAP (legacy order — routerHBP.dmrd_received)
                 if self._handle_tg4000_packet(
                     _peer_id, _slot, _int_dst_id, _call_type, _frame_type, _dtype_vseq,

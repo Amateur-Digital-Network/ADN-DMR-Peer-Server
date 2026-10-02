@@ -372,9 +372,15 @@ def _validate_system(name: str, sys_cfg: dict[str, Any], errors: list[str]) -> N
     mode = sys_cfg.get("MODE")
     if mode is not None and not _is_empty(mode) and not isinstance(mode, str):
         errors.append(f"{prefix}.MODE: expected string, got {type(mode).__name__} ({mode!r}).")
-    for key in ("ENABLED", "REPEAT", "USE_ACL", "SINGLE_MODE", "VOICE_IDENT", "ALLOW_UNREG_ID", "PROXY_CONTROL", "EXPORT_AMBE", "LOOSE", "RELAX_CHECKS", "ENHANCED_OBP", "BOTH_SLOTS"):
+    for key in ("ENABLED", "REPEAT", "USE_ACL", "SINGLE_MODE", "VOICE_IDENT", "ALLOW_UNREG_ID", "PROXY_CONTROL", "EXPORT_AMBE", "LOOSE", "RELAX_CHECKS", "ENHANCED_OBP", "BOTH_SLOTS", "SUB_MAP_LEARN"):
         if key in sys_cfg:
             _expect_bool(f"{prefix}.{key}", sys_cfg[key], errors)
+    # OpenBridge always learns SUB_MAP: whoever is behind the link must stay reachable.
+    if mode == "OPENBRIDGE" and "SUB_MAP_LEARN" in sys_cfg:
+        errors.append(
+            f"{prefix}.SUB_MAP_LEARN: not supported on OPENBRIDGE (an OpenBridge link always "
+            "updates SUB_MAP); remove it."
+        )
     for key in (
         "PORT",
         "MASTER_PORT",

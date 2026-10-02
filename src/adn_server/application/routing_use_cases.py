@@ -74,6 +74,7 @@ from .routing.lc_ta import LcTaMixin
 from .routing.obp_forward import ObpForwardMixin
 from .routing.peer_downlink_index import count_connected_peers
 from .routing.store_authority_mixin import StoreAuthorityMixin
+from .routing.sub_map_learning import learn_sub_map
 from .routing.subscription_table import SubscriptionTableMixin
 from .routing.timers import RoutingTimerMixin
 from .routing.voice_subscription import VoiceSubscriptionMixin
@@ -1396,9 +1397,8 @@ class RoutingUseCases(
         pkt_time = time.time()
         dmrpkt = data[20:53] if len(data) >= 53 else b""
         _bits = data[15] if len(data) > 15 else 0
+        learn_sub_map(self._config, system_name, rf_src, slot, pkt_time, peer_id)
         sub_map = self._config.get("_SUB_MAP", {})
-        if sub_map is not None:
-            sub_map[rf_src] = (system_name, slot, pkt_time, peer_id)
         systems_cfg = self._config.get("SYSTEMS", {})
         protocols = self._get_protocols() if self._get_protocols else {}
         source_proto = protocols.get(system_name)
