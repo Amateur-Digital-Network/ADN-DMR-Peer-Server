@@ -8,6 +8,7 @@ Las llamadas **unitarias (privadas)** usan un camino distinto a la voz de **grup
 
 - Se rellena cuando las estaciones registran tráfico; persiste vía ruta pickle **`SUB_MAP`** configurada bajo **`ALIASES`**.
 - Sirve para resolver **ID de radio de destino** a un **sistema destino** y **slot** para el reenvío privado.
+- Los datos unitarios (SMS, ACK) cuyo destino se oyó por última vez en el mismo hotspot del que llegan no se devuelven a ese hotspot: las dos radios se oyen por RF y el eco transmitiría encima de su propio intercambio.
 
 ## OpenBridge frente a MASTER
 

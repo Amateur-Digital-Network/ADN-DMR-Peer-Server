@@ -8,6 +8,7 @@
 
 - Populated when stations register traffic; persisted via configured **`SUB_MAP`** pickle path under **`ALIASES`**.
 - Used to resolve **destination radio ID** to a **target system** and **slot** for private forwarding.
+- Unit data (SMS, ACKs) whose destination was last heard on the same hotspot it came from is not sent back to that hotspot: both radios hear each other on RF, and the echo would transmit over their own exchange.
 
 ## OpenBridge vs MASTER
 

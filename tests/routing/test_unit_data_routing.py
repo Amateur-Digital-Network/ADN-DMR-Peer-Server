@@ -425,3 +425,66 @@ def test_pvt_call_sub_map_with_peer_id_targets_only_that_peer() -> None:
     assert scenario.protocols["SYSTEM"].sent_to_peer, "must deliver directly to the known peer"
     assert scenario.protocols["SYSTEM"].sent_to_peer[0][0] == dst_peer
     assert_not_forwarded(scenario, "SYSTEM")
+
+
+@pytest.mark.behavior
+def test_unit_data_not_sent_back_to_the_source_peer() -> None:
+    """Two radios on one hotspot: they hear each other on RF, so the server must not
+    send the unit data back to that hotspot on top of their own exchange (#116)."""
+    dst_sub = 712345
+    src_peer = bytes_4(730039101)
+    config = minimal_config(("MASTER-A", "MASTER-B"))
+    config["_SUB_MAP"] = {bytes_3(dst_sub): ("MASTER-A", 2, 1000.0, src_peer)}
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["MASTER-A"].STATUS[2] = idle_hbp_slot()
+    scenario.protocols["MASTER-A"]._peers[src_peer] = {}
+    base = PacketSpec(
+        call_type="unit", peer_id=730039101, dst_id=dst_sub, stream_id=0x52525255, slot=2,
+    )
+
+    scenario.inject_unit("MASTER-A", DeterministicScenario.unit_data_header_spec(base))
+
+    assert not scenario.protocols["MASTER-A"].sent_to_peer
+    assert_not_forwarded(scenario, "MASTER-A")
+
+
+@pytest.mark.behavior
+def test_unit_data_to_another_peer_of_the_same_system_is_delivered() -> None:
+    dst_sub = 712345
+    src_peer = bytes_4(730039101)
+    dst_peer = bytes_4(730039102)
+    config = minimal_config(("MASTER-A", "MASTER-B"))
+    config["_SUB_MAP"] = {bytes_3(dst_sub): ("MASTER-A", 2, 1000.0, dst_peer)}
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["MASTER-A"].STATUS[2] = idle_hbp_slot()
+    scenario.protocols["MASTER-A"]._peers[src_peer] = {}
+    scenario.protocols["MASTER-A"]._peers[dst_peer] = {}
+    base = PacketSpec(
+        call_type="unit", peer_id=730039101, dst_id=dst_sub, stream_id=0x52525256, slot=2,
+    )
+
+    scenario.inject_unit("MASTER-A", DeterministicScenario.unit_data_header_spec(base))
+
+    assert [peer for peer, _pkt in scenario.protocols["MASTER-A"].sent_to_peer] == [dst_peer]
+
+
+@pytest.mark.behavior
+@pytest.mark.parametrize(("dst_id", "stream_id"), [(123456, 0x54545455), (1234567, 0x54545456)])
+def test_unit_data_hotspot_id_match_on_the_source_peer_is_not_sent_back(dst_id: int, stream_id: int) -> None:
+    """The 6/7-digit hotspot-ID fallback must not pick the hotspot the frame came from."""
+    config = minimal_config(("MASTER-A", "MASTER-B"))
+    config["SYSTEMS"]["MASTER-A"]["PEERS"] = {
+        # runtime PEERS keys are the 4-byte peer IDs, as HBP registers them
+        bytes_4(1234567890): {"CALLSIGN": "HS1", "IP": "127.0.0.1", "PORT": 62040},
+    }
+    config["SYSTEMS"]["MASTER-A"]["GROUP_HANGTIME"] = 0
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["MASTER-A"].STATUS[2] = idle_hbp_slot()
+    base = PacketSpec(
+        call_type="unit", peer_id=1234567890, rf_src=3120001, dst_id=dst_id, stream_id=stream_id, slot=2,
+    )
+
+    scenario.inject_unit("MASTER-A", DeterministicScenario.unit_data_header_spec(base))
+
+    assert not scenario.protocols["MASTER-A"].sent_to_peer
+    assert_not_forwarded(scenario, "MASTER-A")
