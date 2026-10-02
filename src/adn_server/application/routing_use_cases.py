@@ -88,6 +88,11 @@ logger = logging.getLogger(__name__)
 UNIT_DATA_LOCAL_SUB_MAX_AGE = 900.0
 
 
+def _is_origin_peer(system_name: str, peer_id: bytes, d_system: str, d_peer_id: bytes | None) -> bool:
+    """True when a unit-data target is the very hotspot the frame came from."""
+    return d_peer_id is not None and d_system == system_name and d_peer_id == peer_id
+
+
 class RoutingUseCases(
     RoutingTimerMixin,
     ObpForwardMixin,
@@ -1267,7 +1272,14 @@ class RoutingUseCases(
             _d_system, _d_slot, _d_time = _sub_map_entry[:3]
             _d_peer_id = _sub_map_entry[3] if len(_sub_map_entry) > 3 else None
             _d_proto = protocols.get(_d_system)
-            if _d_proto:
+            if _d_proto and _is_origin_peer(system_name, peer_id, _d_system, _d_peer_id):
+                # The destination was last heard on the very hotspot this came from: the
+                # radios hear each other on RF, sending it back would transmit over them.
+                logger.debug(
+                    "(%s) SUB_MAP matched the source peer %s, not sending unit data back",
+                    system_name, int_id(peer_id),
+                )
+            elif _d_proto:
                 _dst_slot = getattr(_d_proto, "STATUS", {}).get(_d_slot, {})
                 logger.info("(%s) SUB_MAP matched, System: %s Slot: %s, Time: %s", system_name, _d_system, _d_slot, _d_time)
                 _d_sys_cfg = systems_cfg.get(_d_system, {})
@@ -1296,6 +1308,13 @@ class RoutingUseCases(
                     _to_str = str(_int_to_peer)
                     if len(_dst_str) == 6:
                         if _to_str[:6] == _dst_str:
+                            if _is_origin_peer(system_name, peer_id, _d_system, _to_peer):
+                                logger.debug(
+                                    "(%s) User Peer Hotspot ID (6-digit) is the source peer %s, not sending unit data back",
+                                    system_name, _int_to_peer,
+                                )
+                                _matched = True
+                                break
                             _d_slot = 2
                             _dst_slot = getattr(_d_proto, "STATUS", {}).get(_d_slot, {})
                             logger.info("(%s) User Peer Hotspot ID (6-digit) matched, System: %s Slot: %s", system_name, _d_system, _d_slot)
@@ -1312,6 +1331,13 @@ class RoutingUseCases(
                             break
                     elif len(_dst_str) >= 7:
                         if _to_str[:7] == _dst_str[:7]:
+                            if _is_origin_peer(system_name, peer_id, _d_system, _to_peer):
+                                logger.debug(
+                                    "(%s) User Peer Hotspot ID (7-digit) is the source peer %s, not sending unit data back",
+                                    system_name, _int_to_peer,
+                                )
+                                _matched = True
+                                break
                             _d_slot = 2
                             _dst_slot = getattr(_d_proto, "STATUS", {}).get(_d_slot, {})
                             logger.info("(%s) User Peer Hotspot ID (7-digit) matched, System: %s Slot: %s", system_name, _d_system, _d_slot)
@@ -1407,7 +1433,7 @@ class RoutingUseCases(
                 else:
                     self._pvt_targets = []
                     self._pvt_target_peer_ids = {}
-                    logger.error("PRIVATE call to a subscriber on the same system, send nothing")
+                    logger.debug("PRIVATE call to a subscriber on the same system, send nothing")
                     # Delivery is already handled by the MASTER's own local REPEAT
                     # (_pvt_repeat_targets in udp_hbp.py) -- this branch only exists so the
                     # monitor also learns who is *receiving*, which nothing else reports.
