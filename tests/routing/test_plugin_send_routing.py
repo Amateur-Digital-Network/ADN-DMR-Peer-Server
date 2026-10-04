@@ -281,3 +281,32 @@ def test_a_beacon_on_a_slot_with_stale_rx_state_is_forwarded_whole_with_its_own_
         frags += decode.voice(by_vseq[vseq][20:53])["EMBED"]
     emb = bptc.decode_emblc(frags)
     assert emb[3:6] == bytes_3(TG) and emb[6:9] == bytes_3(BEACON_ID)
+
+
+def test_mesh_voice_for_another_tg_does_not_cut_a_beacon_on_its_master_slot() -> None:
+    """Regression: since announcements became a plugin, a call on another TG bridged to
+    the same MASTER slot (from OpenBridge, or with more than one hotspot connected) skips
+    the global slot contention and takes the slot's TX leg, so the next announcement
+    frame is refused and the playback stops after a few seconds. The core announcements
+    stamped the TX row, which re-applied the contention; plugin voice holds the RX leg."""
+    config = minimal_config(("SYSTEM", "SYSTEM-B"))
+    config["SYSTEMS"]["SYSTEM"]["PEERS"] = {b"\x00\x00\x03\xe9": {"CALLSIGN": "HOTSPOT", "CONNECTION": "YES"}}
+    add_openbridge_system(config, "OBP-1")
+    table = active_routing_table(TG, (("SYSTEM", 2), ("SYSTEM-B", 2)), timeout_minutes=10**6)
+    table.update(active_routing_table(214, (("SYSTEM-B", 2), ("OBP-1", 1)), timeout_minutes=10**6))
+    sc = DeterministicScenario(config=config, routing_table=table)
+    sc.routing.apply_startup_subscriptions()
+    for name in ("SYSTEM", "SYSTEM-B"):
+        sc.protocols[name].STATUS[2] = idle_hbp_slot()
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None, clock=sc.clock.time)
+    frames = _beacon()
+    assert _play(sc, ingress, frames[:3]) == [True] * 3
+    # a hotspot on SYSTEM listens to TG 214 on TS2; a call on it arrives from the mesh
+    sc.routing.ensure_dynamic_relay(bytes_3(214), "SYSTEM", 2, 300.0)
+    mesh = PacketSpec(rf_src=7140099, dst_id=214, peer_id=714009901, slot=1, stream_id=0x0D0D0D0D)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_obp("OBP-1", DeterministicScenario.voice_head_spec(mesh))
+    slot = sc.protocols["SYSTEM"].STATUS[2]
+    assert slot.get("TX_STREAM_ID") != bytes_4(0x0D0D0D0D)  # kept off the slot the beacon holds
+    assert _play(sc, ingress, frames[3:]) == [True] * (len(frames) - 3)
+    assert len(sc.capture.for_system("SYSTEM-B")) >= len(frames)  # 214 still reaches the rest of the mesh

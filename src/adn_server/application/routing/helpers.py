@@ -515,6 +515,26 @@ def inject_only_defer_obp_hbp_slot_contention(
 
 _SERVER_VOICE_RF_SRC_LEGACY = 5000
 
+# Slot key naming the plugin voice stream (announcement, beacon) a MASTER slot's RX leg
+# carries. Only plugin ingress writes it; a hotspot's frame replaces RX_STREAM_ID, so a
+# stale value never matches.
+PLUGIN_RX_STREAM_ID = "PLUGIN_RX_STREAM_ID"
+
+
+def master_slot_holds_plugin_voice(slot_st: dict[str, Any], pkt_time: float) -> bool:
+    """True while a plugin voice stream (announcement, beacon) holds the MASTER slot's RX leg.
+
+    Plugin voice enters as a synthetic RX on the MASTER, not as the TX row the core
+    announcements stamped, so ``master_slot_holds_server_broadcast`` does not see it.
+    """
+    stream_id = slot_st.get(PLUGIN_RX_STREAM_ID)
+    if not stream_id or stream_id != slot_st.get("RX_STREAM_ID"):
+        return False
+    rx_type = slot_st.get("RX_TYPE")
+    if rx_type is None or rx_type == HBPF_SLT_VTERM:
+        return False
+    return (pkt_time - float(slot_st.get("RX_TIME", 0) or 0)) < STREAM_TO
+
 
 def master_slot_holds_server_broadcast(
     slot_st: dict[str, Any],
