@@ -32,7 +32,7 @@ from ....domain.dmr.const import LC_OPT
 from ....domain.hbp_protocol import STREAM_TO
 from ....domain.mesh_engine import server_id_bytes
 from ...routing.announcement_ptt_inject import announcement_ptt_system, inject_plugin_dmrd
-from ...routing.helpers import master_dynamic_tg_slots, slot_voice_held_by_other_stream
+from ...routing.helpers import PLUGIN_RX_STREAM_ID, master_dynamic_tg_slots, slot_voice_held_by_other_stream
 from ..domain.send import GROUP_VOICE, UNIT_DATA, parse_dmrd_header, plugin_frame_kind
 
 logger = logging.getLogger(__name__)
@@ -228,3 +228,4 @@ def _record_rx(slot: dict[str, Any], header: Any, pkt: bytes, peer_id: bytes, no
     slot["RX_TGID"] = header.dst_id
     slot["RX_TIME"] = now
     slot["RX_STREAM_ID"] = header.stream_id
+    slot[PLUGIN_RX_STREAM_ID] = header.stream_id  # routed voice keeps off the slot while it plays
