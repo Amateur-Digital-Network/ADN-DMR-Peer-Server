@@ -225,6 +225,54 @@ def test_obp_echo_is_dropped_but_obp_multipath_is_not(caplog: pytest.LogCaptureF
     assert _ECHO not in _routed(scenario)
 
 
+def _obp_scenario() -> DeterministicScenario:
+    config = minimal_config(("MASTER-A", "BRIDGE-B"))
+    add_openbridge_system(config, "OBP-1")
+    add_openbridge_system(config, "OBP-2")
+    for name in ("OBP-1", "OBP-2", "BRIDGE-B"):
+        config["SYSTEMS"][name]["LOOP_GUARD"] = True
+    scenario = DeterministicScenario(config=config)
+    scenario.seed_routing_table(active_routing_table(_TG, (("MASTER-A", 2), ("BRIDGE-B", 2), ("OBP-1", 1))))
+    return scenario
+
+
+def _obp_over(scenario: DeterministicScenario, obp: str, stream: int, at: float) -> None:
+    scenario.clock.advance(max(0.0, at - scenario.clock.time()))
+    base = PacketSpec(dst_id=_TG, stream_id=stream, rf_src=_CALLER, slot=1)
+    with patch_routing_wall_time(scenario.clock):
+        scenario.inject_obp(obp, DeterministicScenario.voice_head_spec(base))
+        scenario.clock.advance(0.06)
+        scenario.inject_obp(obp, DeterministicScenario.voice_burst_spec(base, seq=1, dtype_vseq=1))
+
+
+def test_remote_caller_rekeying_over_another_obp_link_is_not_an_echo(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """All OPENBRIDGE links are one ingress (the mesh): seen on 2131, the next over of a remote
+    caller reached the server first over another link 0.0-0.8 s after the previous one ended."""
+    scenario = _obp_scenario()
+    t0 = scenario.clock.time()
+    with caplog.at_level(logging.WARNING):
+        _obp_over(scenario, "OBP-1", _ORIGINAL, t0)  # last frame at t0 + 0.06
+        _obp_over(scenario, "OBP-2", _ECHO, t0 + 0.06 + 0.3)
+
+    assert _loop_lines(caplog) == []
+    assert _ECHO in _routed(scenario)
+
+
+def test_local_bridge_peer_echoing_a_remote_caller_is_dropped(caplog: pytest.LogCaptureFixture) -> None:
+    """The mesh vs an HBP bridge peer (local YSF2DMR / DVSwitch) is still two ingresses."""
+    scenario = _obp_scenario()
+    t0 = scenario.clock.time()
+    with caplog.at_level(logging.WARNING):
+        _obp_over(scenario, "OBP-1", _ORIGINAL, t0)
+        _over(scenario, "BRIDGE-B", _ECHO, t0 + 0.5)
+
+    lines = _loop_lines(caplog)
+    assert len(lines) == 1 and "dropped" in lines[0] and "OBP-1" in lines[0]
+    assert _ECHO not in _routed(scenario)
+
+
 def test_master_repeat_does_not_fan_out_a_dropped_echo() -> None:
     """MASTER REPEAT decides before routing: it must follow the same verdict."""
     scenario = _scenario(guard=True)

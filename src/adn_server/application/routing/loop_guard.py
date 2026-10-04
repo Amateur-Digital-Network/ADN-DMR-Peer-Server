@@ -28,10 +28,16 @@ still active, or right after it. One person cannot transmit from two ingress
 points at once: such a stream is an echo.
 
 A stream is an echo when, at its start, the same ``rf_src`` has another stream
-(different stream ID) on the **same TG** from **another ingress** (system and
-peer; an OPENBRIDGE system counts as one ingress) that is active or ended less
-than ``GLOBAL.LOOP_GUARD_HOLD`` seconds ago (default 1 s, always under 2 s).
-Bridges that relay to another TG are not loops and are left alone.
+(different stream ID) on the **same TG** from **another ingress** that is
+active or ended less than ``GLOBAL.LOOP_GUARD_HOLD`` seconds ago (default 1 s,
+always under 2 s). Bridges that relay to another TG are not loops and are left
+alone.
+
+An ingress is a system and peer on HBP. All OPENBRIDGE links together are one
+ingress, the mesh: a remote caller's next over may reach this server first over
+another link, and that is a re-key, not an echo. A real loop is still caught
+where the caller is local (HBP vs a bridge peer, or HBP vs the mesh), and so is
+a local bridge peer echoing a remote caller (the mesh vs HBP).
 
 A bridge echo starts while the original is still on air (bridge delay under
 ~1 s), so the hold only has to cover very short overs. It stays below the
@@ -92,10 +98,15 @@ def loop_guard_hold(config: dict[str, Any]) -> float:
     return hold if 0 < hold < MAX_LOOP_GUARD_HOLD_S else DEFAULT_LOOP_GUARD_HOLD_S
 
 
+# Ingress of every OPENBRIDGE link: the whole mesh counts as one.
+_MESH_INGRESS: tuple[str | None, bytes | None] = (None, None)
+
+
 @dataclass(slots=True)
 class _Leg:
-    system: str
-    peer_id: bytes | None  # None on OPENBRIDGE: the whole link is one ingress
+    system: str  # where the stream's state lives (STATUS), even on the mesh
+    peer_id: bytes | None  # None on OPENBRIDGE
+    ingress: tuple[str | None, bytes | None]
     slot: int
     stream_id: bytes
     start: float
@@ -168,12 +179,15 @@ class LoopGuard:
             return None
         if (sys_cfg or {}).get("MODE") == "OPENBRIDGE":
             peer_id = None
+            ingress = _MESH_INGRESS
+        else:
+            ingress = (system_name, peer_id)
         key = (bytes(rf_src), bytes(dst_id))
         leg = self._legs.get(key)
         if (
             leg is not None
             and leg.stream_id != stream_id
-            and (leg.system, leg.peer_id) != (system_name, peer_id)
+            and leg.ingress != ingress
             and int_id(rf_src) not in all_server_voice_ids(config)
         ):
             last = _last_activity(leg, protocols, config)
@@ -183,7 +197,7 @@ class LoopGuard:
                     echo = LoopEcho(mode == LOOP_GUARD_DROP, leg.system, leg.peer_id, leg.stream_id, gap)
                     _log_echo(system_name, peer_id, rf_src, dst_id, stream_id, echo)
                     return echo
-        self._legs[key] = _Leg(system_name, peer_id, slot, stream_id, pkt_time)
+        self._legs[key] = _Leg(system_name, peer_id, ingress, slot, stream_id, pkt_time)
         return None
 
 
