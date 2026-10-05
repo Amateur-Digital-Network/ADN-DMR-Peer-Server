@@ -1360,6 +1360,8 @@ class HBPProtocol(DatagramProtocol):
                 pkt_time = time.time()
                 _int_dst_id = int_id(_dst_id)
                 _unit_service_dst = _call_type == "unit" and is_on_demand_service_dst(_int_dst_id)
+                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
+                _rx_type_before = self.STATUS.get(_slot, {}).get("RX_TYPE") if _unit_service_dst else None
                 # ACL (legacy order and _laststrid)
                 if self._acl_rejects_dmrd(_rf_src, _dst_id, _slot, _stream_id, _unit_service_dst):
                     return
@@ -1588,8 +1590,7 @@ class HBPProtocol(DatagramProtocol):
                     and not _unit_data
                     and _frame_type == HBPF_DATA_SYNC
                     and _dtype_vseq == HBPF_SLT_VTERM
-                    and _slot in self.STATUS
-                    and self.STATUS[_slot].get("RX_TYPE") != HBPF_SLT_VTERM
+                    and _rx_type_before not in (None, HBPF_SLT_VTERM)
                     and 9991 <= _int_dst_id <= 9999
                     and self._on_play_file_request
                 ):
@@ -1939,6 +1940,8 @@ class HBPProtocol(DatagramProtocol):
                 pkt_time = time.time()
                 _int_dst_id = int_id(_dst_id)
                 _unit_service_dst = _call_type == "unit" and is_on_demand_service_dst(_int_dst_id)
+                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
+                _rx_type_before = self.STATUS.get(_slot, {}).get("RX_TYPE") if _unit_service_dst else None
                 if self._acl_rejects_dmrd(_rf_src, _dst_id, _slot, _stream_id, _unit_service_dst):
                     return
                 # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
@@ -1995,8 +1998,7 @@ class HBPProtocol(DatagramProtocol):
                     and not _unit_data
                     and _frame_type == HBPF_DATA_SYNC
                     and _dtype_vseq == HBPF_SLT_VTERM
-                    and _slot in self.STATUS
-                    and self.STATUS[_slot].get("RX_TYPE") != HBPF_SLT_VTERM
+                    and _rx_type_before not in (None, HBPF_SLT_VTERM)
                     and 9991 <= _int_dst_id <= 9999
                     and self._on_play_file_request
                 ):
