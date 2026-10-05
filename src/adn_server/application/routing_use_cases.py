@@ -827,6 +827,7 @@ class RoutingUseCases(
                             _bridge_tx_leg["TX_STREAM_ID"] = stream_id
                             _bridge_tx_leg["TX_RFS"] = rf_src
                             _bridge_tx_leg["TX_PEER"] = peer_id
+                            _bridge_tx_leg["TX_FROM_MESH"] = source_is_obp
                             (
                                 _bridge_tx_leg["TX_H_LC"],
                                 _bridge_tx_leg["TX_T_LC"],
@@ -850,6 +851,7 @@ class RoutingUseCases(
                             _ts_st["TX_STREAM_ID"] = stream_id
                             _ts_st["TX_RFS"] = rf_src
                             _ts_st["TX_PEER"] = peer_id
+                            _ts_st["TX_FROM_MESH"] = source_is_obp
                             _ts_st["TX_H_LC"], _ts_st["TX_T_LC"], _ts_st["TX_EMB_LC"] = self._encode_lc_set(dst_lc)
                             self._dispatch_talker_alias_on_bridge_open(
                                 _ts_st,
