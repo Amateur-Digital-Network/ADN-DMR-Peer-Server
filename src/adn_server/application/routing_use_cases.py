@@ -58,7 +58,6 @@ from .routing.helpers import (
     inject_only_defer_obp_hbp_slot_contention,
     is_private_subscriber_dst,
     is_unit_data_ingress,
-    master_slot_holds_plugin_voice,
     master_slot_holds_server_broadcast,
     obp_clear_deferred_bridge_tx_leg,
     obp_deferred_bridge_tx_leg,
@@ -775,7 +774,6 @@ class RoutingUseCases(
                             pkt_time,
                             server_voice_rf_srcs=all_server_voice_ids(self._config),
                         )
-                        or master_slot_holds_plugin_voice(_ts_st, pkt_time)
                     )
                     if (
                         _apply_master_slot_contention

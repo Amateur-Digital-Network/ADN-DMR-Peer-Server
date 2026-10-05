@@ -283,12 +283,11 @@ def test_a_beacon_on_a_slot_with_stale_rx_state_is_forwarded_whole_with_its_own_
     assert emb[3:6] == bytes_3(TG) and emb[6:9] == bytes_3(BEACON_ID)
 
 
-def test_mesh_voice_for_another_tg_does_not_cut_a_beacon_on_its_master_slot() -> None:
-    """Regression: since announcements became a plugin, a call on another TG bridged to
-    the same MASTER slot (from OpenBridge, or with more than one hotspot connected) skips
-    the global slot contention and takes the slot's TX leg, so the next announcement
-    frame is refused and the playback stops after a few seconds. The core announcements
-    stamped the TX row, which re-applied the contention; plugin voice holds the RX leg."""
+def test_mesh_voice_for_another_tg_on_the_master_slot_neither_cuts_the_beacon_nor_is_held_back() -> None:
+    """Like the core announcements: a call on another TG bridged to the slot a beacon plays
+    on takes the slot's TX leg (each hotspot keeps the stream it hears first) and the
+    beacon goes on. Refusing the frame stopped announcements a few seconds in; holding
+    the slot instead cut the start of the call for every other hotspot of the MASTER."""
     config = minimal_config(("SYSTEM", "SYSTEM-B"))
     config["SYSTEMS"]["SYSTEM"]["PEERS"] = {b"\x00\x00\x03\xe9": {"CALLSIGN": "HOTSPOT", "CONNECTION": "YES"}}
     add_openbridge_system(config, "OBP-1")
@@ -298,7 +297,9 @@ def test_mesh_voice_for_another_tg_does_not_cut_a_beacon_on_its_master_slot() ->
     sc.routing.apply_startup_subscriptions()
     for name in ("SYSTEM", "SYSTEM-B"):
         sc.protocols[name].STATUS[2] = idle_hbp_slot()
-    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None, clock=sc.clock.time)
+    local: list[bytes] = []
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda system, pkt: local.append(pkt),
+                            clock=sc.clock.time)
     frames = _beacon()
     assert _play(sc, ingress, frames[:3]) == [True] * 3
     # a hotspot on SYSTEM listens to TG 214 on TS2; a call on it arrives from the mesh
@@ -306,7 +307,29 @@ def test_mesh_voice_for_another_tg_does_not_cut_a_beacon_on_its_master_slot() ->
     mesh = PacketSpec(rf_src=7140099, dst_id=214, peer_id=714009901, slot=1, stream_id=0x0D0D0D0D)
     with patch_routing_wall_time(sc.clock):
         sc.inject_obp("OBP-1", DeterministicScenario.voice_head_spec(mesh))
-    slot = sc.protocols["SYSTEM"].STATUS[2]
-    assert slot.get("TX_STREAM_ID") != bytes_4(0x0D0D0D0D)  # kept off the slot the beacon holds
+    assert sc.protocols["SYSTEM"].STATUS[2].get("TX_STREAM_ID") == bytes_4(0x0D0D0D0D)
     assert _play(sc, ingress, frames[3:]) == [True] * (len(frames) - 3)
-    assert len(sc.capture.for_system("SYSTEM-B")) >= len(frames)  # 214 still reaches the rest of the mesh
+    assert len(local) == len(frames)
+
+
+def test_a_frame_routing_refuses_is_still_heard_on_the_master_and_the_beacon_goes_on() -> None:
+    """The core announcements only logged a refused frame; the MASTER's hotspots got it anyway."""
+    sc, ingress, local = _voice_scenario()
+    route = ingress._route
+    refused = {3}
+    calls = iter(range(100))
+    ingress._route = lambda *a: None if next(calls) in refused else route(*a)
+    frames = _beacon()
+    assert _play(sc, ingress, frames) == [True] * len(frames)
+    assert len(local) == len(frames)
+    assert len(sc.capture.for_system("SYSTEM-B")) == len(frames) - len(refused)
+
+
+def test_voice_slot_is_free_while_routed_voice_for_another_tg_uses_the_tx_leg() -> None:
+    """Core parity: on the slot where the TG lives, only a QSO coming in makes it busy."""
+    sc, ingress, _ = _voice_scenario()
+    sc.protocols["SYSTEM"].STATUS[2].update(
+        RX_TYPE=HBPF_SLT_VTERM, TX_TYPE=HBPF_SLT_VHEAD, TX_TIME=sc.clock.time(),
+        TX_STREAM_ID=b"\x0d" * 4, TX_TGID=bytes_3(214),
+    )
+    assert ingress.voice_slot_for_tg(TG) == 2
