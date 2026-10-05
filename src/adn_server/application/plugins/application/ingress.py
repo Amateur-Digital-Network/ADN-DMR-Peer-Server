@@ -32,7 +32,7 @@ from ....domain.dmr.const import LC_OPT
 from ....domain.hbp_protocol import STREAM_TO
 from ....domain.mesh_engine import server_id_bytes
 from ...routing.announcement_ptt_inject import announcement_ptt_system, inject_plugin_dmrd
-from ...routing.helpers import PLUGIN_RX_STREAM_ID, master_dynamic_tg_slots, slot_voice_held_by_other_stream
+from ...routing.helpers import master_dynamic_tg_slots
 from ..domain.send import GROUP_VOICE, UNIT_DATA, parse_dmrd_header, plugin_frame_kind
 
 logger = logging.getLogger(__name__)
@@ -49,9 +49,12 @@ class PluginIngress:
     legs included, as for any local ingress), and out to the hotspots of the MASTER it
     enters on. Each accepted frame records the slot's RX state exactly as ``udp_hbp`` does
     for a hotspot's frame (RX_STREAM_ID, RX_LC, RX_RFS, RX_TGID, RX_TYPE, RX_TIME…): routing
-    then knows the stream it is continuing and the LC it carries, and routed voice finds
-    the slot busy. A radio or another stream on the slot makes the frame fail, which tells
-    the plugin to stop. The terminator frees the slot.
+    then knows the stream it is continuing and the LC it carries. The terminator frees the slot.
+
+    As with the core announcements, only a radio or another stream on the slot's RX leg
+    makes a frame fail, which tells the plugin to stop. Routed voice on the TX leg does
+    not (each hotspot keeps the stream it hears first), and a frame routing refuses is
+    still played to the MASTER's hotspots.
     """
 
     def __init__(
@@ -69,7 +72,7 @@ class PluginIngress:
         self._send_local = send_local
         self._clock = clock
         self._send_routing_event = send_routing_event
-        # Plugin voice streams on air: stream_id -> [master, slot, tg, rf_src, start, last frame].
+        # Plugin voice streams on air: stream_id -> [master, slot, tg, rf_src, start, last frame, refusal logged].
         self._on_air: dict[bytes, list[Any]] = {}
 
     def set_routing(self, routing: Any) -> None:
@@ -100,8 +103,8 @@ class PluginIngress:
 
     @staticmethod
     def _slot_busy(slot: dict[str, Any], tg_lives_here: bool, now: float) -> bool:
-        if slot_voice_held_by_other_stream(slot, b"", now):
-            return True  # live voice on the slot, in or out
+        if _rx_taken(slot, b"", now):
+            return True  # a QSO or another plugin stream on the slot
         if slot.get("RX_TYPE") != HBPF_SLT_VTERM and slot.get("TX_TYPE") == HBPF_SLT_VTERM:
             return True  # an outside QSO still in its hang time
         if tg_lives_here:
@@ -136,16 +139,22 @@ class PluginIngress:
         slot = getattr(proto, "STATUS", {}).get(header.slot) if proto is not None else None
         if slot is None:
             return False
-        if _slot_taken(slot, header.stream_id, now) or self._route(master, pkt, now, server_id, plugin) is not True:
+        if _rx_taken(slot, header.stream_id, now):
             self._release(slot, header.stream_id)
             self._off_air(header.stream_id, now)
             return False
-        is_term = header.frame_type == HBPF_DATA_SYNC and header.dtype_vseq == HBPF_SLT_VTERM
-        _record_rx(slot, header, pkt, server_id, now)
+        routed = self._route(master, pkt, now, server_id, plugin) is True
+        if routed:
+            _record_rx(slot, header, pkt, server_id, now)
         self._send_local(master, pkt)
         if header.stream_id not in self._on_air:
             self._on_air_start(master, header, now)
-        self._on_air[header.stream_id][5] = now
+        entry = self._on_air[header.stream_id]
+        entry[5] = now
+        if not routed and not entry[6]:
+            entry[6] = True
+            logger.warning("(PLUGIN) %s: routing rejected stream %s, played to %s only", plugin, int_id(header.stream_id), master)
+        is_term = header.frame_type == HBPF_DATA_SYNC and header.dtype_vseq == HBPF_SLT_VTERM
         if is_term:
             self._off_air(header.stream_id, now)
         return True
@@ -153,7 +162,7 @@ class PluginIngress:
     def _on_air_start(self, master: str, header: Any, now: float) -> None:
         """Monitor TX on the MASTER itself: its hotspots hear the stream, which no bridge leg reports."""
         tg, rf_src = int_id(header.dst_id), int_id(header.rf_src)
-        self._on_air[header.stream_id] = [master, header.slot, tg, rf_src, now, now]
+        self._on_air[header.stream_id] = [master, header.slot, tg, rf_src, now, now, False]
         self._report("START", master, header.stream_id, header.slot, tg, rf_src)
 
     def _end_silent_streams(self, now: float) -> None:
@@ -170,7 +179,7 @@ class PluginIngress:
     def _off_air(self, stream_id: bytes, now: float) -> None:
         entry = self._on_air.pop(stream_id, None)
         if entry is not None:
-            master, slot, tg, rf_src, start, _last = entry
+            master, slot, tg, rf_src, start = entry[:5]
             self._report("END", master, stream_id, slot, tg, rf_src, now - start)
 
     def _report(
@@ -197,17 +206,12 @@ class PluginIngress:
         return server_id_bytes(self._config.get("GLOBAL", {}).get("SERVER_ID"))[:4]
 
 
-def _slot_taken(slot: dict[str, Any], stream_id: bytes, now: float) -> bool:
-    """Live voice on the slot that is not this stream: a radio, or another stream."""
-    for leg in ("RX", "TX"):
-        leg_type = slot.get(f"{leg}_TYPE")
-        if leg_type is None or leg_type == HBPF_SLT_VTERM:
-            continue
-        if slot.get(f"{leg}_STREAM_ID") == stream_id:
-            continue
-        if now - float(slot.get(f"{leg}_TIME", 0) or 0) < STREAM_TO:
-            return True
-    return False
+def _rx_taken(slot: dict[str, Any], stream_id: bytes, now: float) -> bool:
+    """Live voice coming in on the slot that is not this stream: a radio, or another stream."""
+    rx_type = slot.get("RX_TYPE")
+    if rx_type is None or rx_type == HBPF_SLT_VTERM or slot.get("RX_STREAM_ID") == stream_id:
+        return False
+    return now - float(slot.get("RX_TIME", 0) or 0) < STREAM_TO
 
 
 def _record_rx(slot: dict[str, Any], header: Any, pkt: bytes, peer_id: bytes, now: float) -> None:
@@ -228,4 +232,3 @@ def _record_rx(slot: dict[str, Any], header: Any, pkt: bytes, peer_id: bytes, no
     slot["RX_TGID"] = header.dst_id
     slot["RX_TIME"] = now
     slot["RX_STREAM_ID"] = header.stream_id
-    slot[PLUGIN_RX_STREAM_ID] = header.stream_id  # routed voice keeps off the slot while it plays

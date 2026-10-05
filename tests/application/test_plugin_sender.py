@@ -268,3 +268,30 @@ def test_the_default_rate_leaves_room_for_one_voice_stream_per_talkgroup() -> No
     assert send_permission(cfg, "beacon").max_frames_per_s == 40 + 3 * 18
     cfg["PLUGINS"]["send"]["beacon"]["max_frames_per_s"] = 25
     assert send_permission(cfg, "beacon").max_frames_per_s == 25
+
+
+def test_the_announcements_plugin_runs_on_the_root_config_alone(tmp_path) -> None:
+    """Docker images (hp3icc) copy the example yamls to the project root and write adn-voice.yaml
+    there; no PLUGINS section, nothing in the plugin's folder: announcements must still play."""
+    import shutil
+
+    from adn_server.application.plugins.domain.send import ANNOUNCEMENTS_PLUGIN, send_permission
+    from adn_server.application.plugins.infrastructure.loader import scan_plugin_dirs
+    from adn_server.infrastructure.config_loader import YamlConfigLoader
+
+    repo = Path(__file__).resolve().parents[2]
+    shutil.copy(repo / "adn-server.example.yaml", tmp_path / "adn-server.yaml")
+    (tmp_path / "adn-voice.yaml").write_text(
+        "VOICE:\n  ANNOUNCEMENTS:\n    - ENABLED: true\n      FILE: announcement1\n      TG: 730777\n"
+        "      MODE: interval\n      INTERVAL: 60\n      LANGUAGE: es_ES\n",
+        encoding="utf-8",
+    )
+    loader = YamlConfigLoader(tmp_path)
+    config = loader.load(str(tmp_path / "adn-server.yaml"))
+    config["VOICE"].update(loader.load_voice_config(str(tmp_path / "adn-voice.yaml")))
+
+    assert "PLUGINS" not in config
+    assert ANNOUNCEMENTS_PLUGIN in {e.name for e in scan_plugin_dirs(repo / "plugins")}
+    permission = send_permission(config, ANNOUNCEMENTS_PLUGIN)
+    assert permission is not None and permission.group_voice_tgs == {730777}
+    assert 1000001 in permission.allowed_src_ids
