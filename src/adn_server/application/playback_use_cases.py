@@ -36,7 +36,7 @@ from ..domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, HBPF_VOICE,
 logger = logging.getLogger(__name__)
 
 # Legacy playback.py: sleep(2) before playback, sleep(0.06) between packets.
-_PLAYBACK_DELAY_S = 2.0
+PLAYBACK_DELAY_S = 2.0
 _PACKET_INTERVAL_S = 0.06
 # Match bridge stream_trimmer_loop RX idle (routing_use_cases / legacy bridge_master).
 _RECORD_IDLE_S = 5.0
@@ -283,7 +283,7 @@ class PlaybackUseCases:
             return
         self._playback_busy = True
         self._delay_call = self._call_later(
-            _PLAYBACK_DELAY_S,
+            PLAYBACK_DELAY_S,
             self._start_playback,
             proto,
             recorded,

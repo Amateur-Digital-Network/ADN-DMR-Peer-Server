@@ -279,6 +279,7 @@ class RoutingUseCases(
         if not source_is_obp and call_type in ("group", "vcsbk"):
             if not self._hbp_group_voice_ingress_controls(
                 system_name, peer_id, rf_src, dst_id, seq, slot, stream_id, data, pkt_time,
+                loop_guard_check=plugin_origin is None and not synthetic_announcement,
             ):
                 return
             # Arm ON in-band rules on VHEAD (echo 9990 and UA bridges); VTERM handled in udp_hbp too.

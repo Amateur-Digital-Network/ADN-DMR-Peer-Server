@@ -27,6 +27,9 @@ GLOBAL:
   TALKER_ALIAS_SEND_DMRA: false
   # UDP SO_RCVBUF for voice listeners (bytes); default 4 MB avoids kernel RcvbufErrors under load
   # UDP_RCVBUF: 4194304
+  # Loop guard: seconds after a caller's over ends during which the same caller on the
+  # same TG from another ingress is an echo (more than 0 and less than 2.0, the parrot's delay)
+  LOOP_GUARD_HOLD: 1.0
 
 REPORTS:
   REPORT: true
@@ -136,6 +139,8 @@ SYSTEMS:
     ALLOW_UNREG_ID: false
     PROXY_CONTROL: false
     OVERRIDE_IDENT_TG: ""
+    # Bridge loop echoes entering here: log (default) only logs them, true drops them, false skips the check
+    LOOP_GUARD: log
 
   D-APRS:
     MODE: MASTER
@@ -193,6 +198,9 @@ SYSTEMS:
     # The parrot plays calls back with the caller's own ID: keep it from becoming
     # where that caller is reached for private calls and unit data.
     SUB_MAP_LEARN: false
+    # The replay starts 2.0 s after the over, beyond GLOBAL.LOOP_GUARD_HOLD, so the
+    # loop guard never takes it for a bridge loop; this only makes it explicit.
+    LOOP_GUARD: false
 
   # OpenBridge: use DMRE embedded version 5 ("OpenBridge v5") + ENHANCED_OBP on all ADN Systems peers.
   OBP-TEST:
