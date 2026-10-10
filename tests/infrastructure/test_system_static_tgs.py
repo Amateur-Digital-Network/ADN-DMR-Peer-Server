@@ -126,3 +126,18 @@ def test_the_master_keeps_its_yaml_static_bridge_leg_after_hotspots_rewrite_ts2_
     for tg, ts in ((_STATIC_TG, 2), (730555, 1)):
         legs = table.get(str(tg), [])
         assert any(leg.get("SYSTEM") == "SYSTEM" and leg.get("TS") == ts and leg.get("ACTIVE") for leg in legs), tg
+
+
+def test_the_monitor_gets_the_masters_yaml_statics_on_both_slots_as_each_hotspots_own() -> None:
+    from adn_server.application.report.payloads import build_topology
+
+    stack = _stack(ts1_static="730555")
+    _login(stack, _A, "TS2=91;VOICE=0;TIMER=300;")
+    _login(stack, _B)
+    stack.config["SYSTEMS"]["MASTER-A"].update(TS1_STATIC="", TS2_STATIC="91")  # as options_config rewrites it
+    rows = {p["id"]: p for s in build_topology(stack.config["SYSTEMS"], seq=1)["systems"] for p in s["peers"]}
+    assert rows[730044401]["ts1_static"] == ["730555"]
+    assert rows[730044401]["ts2_static"] == [str(_STATIC_TG), "91"]  # the yaml ones first
+    # the monitor builds its table from the OPTIONS text: it carries every slot the hotspot gets
+    assert rows[730044401]["options"] == f"TS1=730555;TS2={_STATIC_TG},91;VOICE=0;TIMER=300;"
+    assert "730555" in rows[730044402]["ts1_static"] and str(_STATIC_TG) in rows[730044402]["ts2_static"]
