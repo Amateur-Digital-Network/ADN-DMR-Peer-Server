@@ -1532,6 +1532,7 @@ class RoutingUseCases(
                     ts_st["TX_STREAM_ID"] = stream_id
                     ts_st["TX_RFS"] = rf_src
                     ts_st["TX_PEER"] = peer_id
+                    ts_st["TX_FROM_MESH"] = self._config.get("SYSTEMS", {}).get(system_name, {}).get("MODE") == "OPENBRIDGE"
                     logger.info("(%s) PRIVATE call bridged to HBP System: %s TS: %s, DST: %s", system_name, _target, slot, int_id(dst_id))
                     if not _unit_data:
                         if _target_peer_id is not None and _target_peer_id in getattr(target_proto, "_peers", {}):
