@@ -42,18 +42,23 @@ def invalidate_peer_options_cache(peer: dict[str, Any]) -> None:
     peer.pop("_CACHED_OPTIONS_FIELDS", None)
 
 
+_NO_STATIC: tuple[tuple[str, ...], tuple[str, ...]] = ((), ())
+
+
 def cached_peer_static_tgs(peer: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
-    """Memoize ``parse_peer_options_static`` per peer OPTIONS blob."""
+    """The hotspot's static TGs: its OPTIONS plus its MASTER's TS1/TS2_STATIC, memoized."""
     opts = peer.get("OPTIONS")
-    key = opts if isinstance(opts, bytes) else b""
+    system = peer.get("_SYSTEM_STATIC")
     cached = peer.get("_CACHED_OPTIONS_STATIC")
-    if cached and cached[0] == key:
+    if cached and cached[0] is opts and cached[3] is system:
         return cached[1], cached[2]
     from adn_server.application.report.payloads import parse_peer_options_static
 
     ts1, ts2 = parse_peer_options_static(opts)
-    t1, t2 = tuple(ts1), tuple(ts2)
-    peer["_CACHED_OPTIONS_STATIC"] = (key, t1, t2)
+    sys_ts1, sys_ts2 = system or _NO_STATIC
+    t1 = tuple(dict.fromkeys([*ts1, *sys_ts1]))
+    t2 = tuple(dict.fromkeys([*ts2, *sys_ts2]))
+    peer["_CACHED_OPTIONS_STATIC"] = (opts, t1, t2, system)
     return t1, t2
 
 

@@ -132,6 +132,8 @@ SYSTEMS:
     DEFAULT_UA_TIMER: 60
     SINGLE_MODE: false
     VOICE_IDENT: false
+    # Static TGs for every hotspot of this MASTER, besides the ones in each hotspot's own OPTIONS
+    # (comma-separated, e.g. "214,730"). Service TGs 9990-9999 are ignored.
     TS1_STATIC: ""
     TS2_STATIC: ""
     DEFAULT_REFLECTOR: 0
