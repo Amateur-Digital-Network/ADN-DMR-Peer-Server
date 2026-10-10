@@ -1248,18 +1248,27 @@ class HBPProtocol(DatagramProtocol):
             )
             self.transport.write(b"".join([MSTCL, peer]), self._peers[peer]["SOCKADDR"])
             self._remove_peer(peer)
-            if not self._peers:
-                sys_cfg = self._CONFIG["SYSTEMS"][self._system]
-                if "OPTIONS" in sys_cfg:
-                    if "_default_options" in sys_cfg:
-                        logger.info("(%s) Setting default Options: %s", self._system, sys_cfg["_default_options"])
-                        sys_cfg["OPTIONS"] = sys_cfg["_default_options"]
-                    else:
-                        del sys_cfg["OPTIONS"]
-                        logger.info("(%s) Deleting HBP Options", self._system)
-                sys_cfg["_reset"] = True
+            self._reset_if_no_peers()
         if remove_list:
             self._push_config_to_monitor()
+
+    def _reset_if_no_peers(self) -> None:
+        """Last peer gone: restore default OPTIONS and let BRIDGERESET clear this system's legs.
+
+        The legs and OPTIONS belong to every hotspot on this MASTER, so a failed login or one
+        peer leaving must not reset them while others are still connected.
+        """
+        if self._peers:
+            return
+        sys_cfg = self._CONFIG.setdefault("SYSTEMS", {}).setdefault(self._system, {})
+        if "OPTIONS" in sys_cfg:
+            if "_default_options" in sys_cfg:
+                logger.info("(%s) Setting default Options: %s", self._system, sys_cfg["_default_options"])
+                sys_cfg["OPTIONS"] = sys_cfg["_default_options"]
+            else:
+                del sys_cfg["OPTIONS"]
+                logger.info("(%s) Deleting HBP Options", self._system)
+        sys_cfg["_reset"] = True
 
     def _on_peer_disconnected(self, peer_id: bytes) -> None:
         """Drop stale slot STATUS when a hotspot leaves; keep persisted UA state in sys_cfg."""
@@ -1678,7 +1687,7 @@ class HBPProtocol(DatagramProtocol):
                     if self._config.get("PROXY_CONTROL"):
                         self.proxy_IPBlackList(_peer_id, _sockaddr)
                     logger.warning("(%s) Invalid Login from %s Radio ID: %s Denied by Registation ACL or not registered ID", self._system, _sockaddr[0], int_id(_peer_id))
-                    if self._CONFIG.get("SYSTEMS", {}).get(self._system):
+                    if self._CONFIG.get("SYSTEMS", {}).get(self._system) and not self._peers:
                         self._CONFIG["SYSTEMS"][self._system]["_reset"] = True
             else:
                 self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
@@ -1729,15 +1738,7 @@ class HBPProtocol(DatagramProtocol):
                     logger.info("(%s) Peer is closing down: %s (%s)", self._system, _rptc_field_str(self._peers[_peer_id]["CALLSIGN"]), int_id(_peer_id))
                     self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
                     self._remove_peer(_peer_id)
-                    sys_cfg = self._CONFIG.get("SYSTEMS", {}).get(self._system, {})
-                    if "OPTIONS" in sys_cfg:
-                        if "_default_options" in sys_cfg:
-                            sys_cfg["OPTIONS"] = sys_cfg["_default_options"]
-                            logger.info("(%s) Setting default Options: %s", self._system, sys_cfg["_default_options"])
-                        else:
-                            logger.info("(%s) Deleting HBP Options", self._system)
-                            del sys_cfg["OPTIONS"]
-                    sys_cfg["_reset"] = True
+                    self._reset_if_no_peers()
                     self._push_config_to_monitor()
             else:
                 _peer_id = _data[4:8]
@@ -1772,7 +1773,8 @@ class HBPProtocol(DatagramProtocol):
                         if self._config.get("PROXY_CONTROL"):
                             self.proxy_IPBlackList(_peer_id, _sockaddr)
                         self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
-                        self._CONFIG.setdefault("SYSTEMS", {}).setdefault(self._system, {})["_reset"] = True
+                        if not self._peers:
+                            self._CONFIG.setdefault("SYSTEMS", {}).setdefault(self._system, {})["_reset"] = True
                         logger.info("(%s) Callsign does not match subscriber database: ID: %s, Sent Call: %s, DB call %s", self._system, int_id(_peer_id), _sent_call, self.validate_id(_peer_id))
                     else:
                         self.send_peer(_peer_id, b"".join([RPTACK, _peer_id]))
