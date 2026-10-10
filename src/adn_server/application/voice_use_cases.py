@@ -131,6 +131,7 @@ class VoiceUseCases:
         slot["TX_TYPE"] = HBPF_SLT_VHEAD
         slot["TX_STREAM_ID"] = stream_id
         slot["TX_RFS"] = source_id
+        slot["TX_FROM_MESH"] = False  # this server's own prompt holds the slot
         slot["TX_TIME"] = now
         run.stream_id = stream_id
         protocol.send_voice_packet(pkt, source_id, dst_id, slot)

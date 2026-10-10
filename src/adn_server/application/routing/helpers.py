@@ -529,7 +529,14 @@ def master_slot_holds_server_broadcast(
     Announcements stamp TX_TYPE=VHEAD, TX_RFS=server voice ID, and refresh TX_TIME each frame.
     Re-apply global slot contention for OBP→MASTER when held so inject-only defer
     does not interleave mesh voice (legacy ``bridge_master`` TX_TGID/TX_TIME rules).
+
+    Only this server's own voice counts: every server announces with the same IDs, and
+    another server's announcement relayed over OpenBridge (``TX_FROM_MESH``) is ordinary
+    mesh voice. Holding the slot for it made two mesh announcements on different TGs
+    (one server's hourly batch) take the slot from each other for every hotspot.
     """
+    if slot_st.get("TX_FROM_MESH"):
+        return False
     tx_rfs = int_id(slot_st.get("TX_RFS", b"\x00\x00\x00"))
     if server_voice_rf_srcs is not None:
         if tx_rfs not in server_voice_rf_srcs:
@@ -554,6 +561,7 @@ _OBP_FLAT_TX_KEYS = (
     "TX_STREAM_ID",
     "TX_RFS",
     "TX_PEER",
+    "TX_FROM_MESH",
     "TX_H_LC",
     "TX_T_LC",
     "TX_EMB_LC",
