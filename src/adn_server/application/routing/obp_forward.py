@@ -431,7 +431,7 @@ class ObpForwardMixin:
                 )
                 return False
             if seq and st["lastSeq"] and seq > (st["lastSeq"] + 1):
-                st["loss"] += 1
+                st["loss"] += seq - st["lastSeq"] - 1  # every packet the jump skipped, not one per jump
                 logger.debug(
                     "(%s) *PacketControl* Missed packet(s) - last SEQ: %s, this SEQ: %s. Stream ID:, %s TGID: %s , LOSS: %.2f%%",
                     system_name,
@@ -456,6 +456,11 @@ class ObpForwardMixin:
 
         st = status[stream_id]
         st["crcs"].add(_pkt_crc)
+        # Longest silence inside the stream: frames held back and released in a burst
+        # keep their sequence numbers, so Loss alone does not show them.
+        _gap = pkt_time - st.get("LAST", pkt_time)
+        if _gap > st.get("MAX_GAP", 0.0):
+            st["MAX_GAP"] = _gap
         st["LAST"] = pkt_time
 
         if self._config.get("GLOBAL", {}).get("GEN_STAT_BRIDGES"):
