@@ -108,6 +108,19 @@ def static_tg_list(value: Any) -> list[str]:
     return [text] if text else []
 
 
+# Echo/parrot and on-demand services are never static (apply_startup_subscriptions skips them too).
+_NOT_SYSTEM_STATIC = frozenset({"0", "1", "2", "3", "4", "5", "9", *(str(tg) for tg in range(9990, 10000))})
+
+
+def system_static_tgs(sys_cfg: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """TS1_STATIC / TS2_STATIC as written in adn-server.yaml: static TGs for every hotspot of the MASTER."""
+    def usable(value: Any) -> tuple[str, ...]:
+        tgs = dedupe_static_tg_list(static_tg_list(value))
+        return tuple(tg for tg in tgs if tg.isdigit() and tg not in _NOT_SYSTEM_STATIC)
+
+    return usable(sys_cfg.get("TS1_STATIC")), usable(sys_cfg.get("TS2_STATIC"))
+
+
 def dedupe_static_tg_list(parts: list[str]) -> list[str]:
     """Collapse duplicate TG ids within one TS list (order preserved)."""
     out: list[str] = []

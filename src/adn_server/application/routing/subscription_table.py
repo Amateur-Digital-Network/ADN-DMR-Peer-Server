@@ -731,6 +731,9 @@ class SubscriptionTableMixin:
             ts1_list, ts2_list = runtime
             ts1_set.update(ts1_list)
             ts2_set.update(ts2_list)
+        yaml_ts1, yaml_ts2 = sys_cfg.get("_YAML_STATIC") or ((), ())
+        ts1_set.update(int(tg) for tg in yaml_ts1)
+        ts2_set.update(int(tg) for tg in yaml_ts2)
         protocols = self._get_protocols() if self._get_protocols else {}
         proto = protocols.get(system_name)
         peers = getattr(proto, "_peers", {}) if proto is not None else {}

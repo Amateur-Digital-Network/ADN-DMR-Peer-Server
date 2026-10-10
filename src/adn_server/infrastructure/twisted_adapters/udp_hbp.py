@@ -362,6 +362,8 @@ class HBPProtocol(DatagramProtocol):
         self._peer_mesh_config_cache = None
         if sys_cfg.get("MODE") == "MASTER":
             self._peers = sys_cfg.setdefault("PEERS", {})
+            for peer in self._peers.values():
+                peer["_SYSTEM_STATIC"] = sys_cfg.get("_YAML_STATIC")
             self._refresh_connected_peer_count()
             self._mark_downlink_index_dirty()
 
@@ -1743,6 +1745,7 @@ class HBPProtocol(DatagramProtocol):
                     _this_peer = self._peers[_peer_id]
                     _this_peer["CONNECTION"] = "YES"
                     _this_peer["CONNECTED"] = time.time()
+                    _this_peer["_SYSTEM_STATIC"] = self._config.get("_YAML_STATIC")
                     _this_peer["LAST_PING"] = time.time()
                     _this_peer["CALLSIGN"] = _data[8:16]
                     _this_peer["RX_FREQ"] = _data[16:25]

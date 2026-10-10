@@ -31,6 +31,8 @@ import logging
 import socket
 import time
 
+from adn_server.application.report.payloads import system_static_tgs
+
 
 def expand_generator(config: dict, logger: logging.Logger) -> None:
     """Replace MASTER systems with GENERATOR > 1 by SYSTEM-0, SYSTEM-1, ... (legacy generator)."""
@@ -74,6 +76,8 @@ def ensure_system_runtime_config(config: dict) -> None:
     for name, sys_cfg in config.get("SYSTEMS", {}).items():
         if sys_cfg.get("MODE") == "MASTER":
             sys_cfg.setdefault("PEERS", {})
+            # Read here, on the config as loaded: TS1/TS2_STATIC are later rewritten from the hotspots' OPTIONS.
+            sys_cfg["_YAML_STATIC"] = system_static_tgs(sys_cfg)
         elif sys_cfg.get("MODE") == "PEER":
             sys_cfg.setdefault("STATS", {
                 "CONNECTION": "NO",
