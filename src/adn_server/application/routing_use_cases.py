@@ -970,7 +970,7 @@ class RoutingUseCases(
                 packet_rate = (ost.get("packets", 0) / call_duration) if call_duration else 0.0
                 loss_pct = ((ost.get("loss", 0) / ost["packets"]) * 100) if ost.get("packets") else 0.0
                 logger.info(
-                    "(%s) *CALL END*   STREAM ID: %s SUB: %s PEER: %s TGID %s, TS %s, Duration: %.2f, Packet rate: %.2f/s, Loss: %.2f%%",
+                    "(%s) *CALL END*   STREAM ID: %s SUB: %s PEER: %s TGID %s, TS %s, Duration: %.2f, Packet rate: %.2f/s, Loss: %.2f%%, Max gap: %.2fs",
                     system_name,
                     int_id(stream_id),
                     int_id(rf_src),
@@ -980,6 +980,7 @@ class RoutingUseCases(
                     call_duration,
                     packet_rate,
                     loss_pct,
+                    ost.get("MAX_GAP", 0.0),
                 )
                 self._send_routing_event(
                     "GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f},{}".format(

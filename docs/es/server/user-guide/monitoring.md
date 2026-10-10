@@ -99,6 +99,24 @@ Ejemplo de fragmento en **`/etc/logrotate.d/adn`** (adaptar rutas y nombres de u
 
 Repite **`postrotate`** con **`kill -USR2`** para **`adn-echo`** y **`adn-monitor`** si rotas sus logs en el mismo host. Usa el **PID** correcto (**`MainPID`** de systemd, pidfile, o el proceso que gestiones).
 
+## Qué le llega a un hotspot (`tools/hotspot_probe.py`)
+
+Cuando llegan quejas de llamadas cortadas o entrecortadas, `tools/hotspot_probe.py` muestra lo que el servidor entrega de verdad a un hotspot. Se conecta a un MASTER como un hotspot, se suscribe a TGs mediante OPTIONS y nunca transmite. Por cada stream de voz de grupo escribe una fila CSV: inicio y fin (UTC), slot, TG, origen, stream ID, tramas recibidas, el silencio más largo entre dos tramas (`max_gap_s`) y si terminó con terminador (`terminated`).
+
+```bash
+ADN_PROBE_PASSWORD='...' python3 tools/hotspot_probe.py --callsign INDICATIVO 127.0.0.1 62031 213003599 \
+    "TS1=214;TS2=3340,9140;" probe.csv
+python3 tools/hotspot_probe.py --summary probe.csv
+```
+
+Usa un ID de hotspot propio (tu DMR ID + dos cifras), la contraseña con la que entra y tu indicativo. Solo necesita la biblioteca estándar, así que funciona en el propio servidor o en cualquier máquina que llegue al MASTER.
+
+Busca el mismo stream ID en el log del servidor:
+
+- El `*CALL END*` de una llamada OpenBridge muestra `Loss` (paquetes que faltan por número de secuencia) y `Max gap` (el silencio más largo tal como entró la llamada).
+- Si el `max_gap_s` de la sonda coincide con el `Max gap` del servidor, el silencio ya venía en la llamada al entrar por la malla. Si solo lo ve la sonda, o `terminated` es 0 mientras el servidor registró la llamada hasta el final, apareció entre este servidor y el hotspot.
+- Un hotspot que escucha varios TG por un mismo slot oye un stream cada vez: uno que empezó mientras sonaba otro le llega tarde. Eso no es pérdida.
+
 ## Requisitos
 
 - Conectividad de red desde el **host del monitor** al **`REPORTS.REPORT_PORT`** del servidor (y la lista **`REPORT_CLIENTS`** del servidor debe incluir al monitor si se usa).
