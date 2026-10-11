@@ -66,6 +66,26 @@ RF_MODE_DUPLEX = "duplex"
 SIMPLEX_VOICE_SLOT = 2
 
 
+def seq_advance(last_seq: Any, seq: int) -> int:
+    """Steps from ``last_seq`` to ``seq`` on the 8-bit HBP/OBP sequence, which wraps 255 -> 0.
+
+    1: the next packet (or no previous one: ``last_seq`` False/None). 2..127: a forward jump,
+    the packets in between were missed. 0: the same sequence again. -1: behind ``last_seq``,
+    a late or out-of-order packet; the caller drops it and keeps ``last_seq``. A late packet
+    taken as the new reference used to make every later frame of the call look out of order.
+    ``seq`` 1 behind is a source restarting its count, and ``seq`` 0 again is a repeated
+    voice header, as before: both taken as the next packet.
+    """
+    if last_seq is False or last_seq is None:
+        return 1
+    step = (seq - last_seq) & 0xFF
+    if step == 0 and seq == 0:
+        return 1
+    if step >= 128:
+        return 1 if seq == 1 else -1
+    return step
+
+
 def _peer_freq_text(value: Any) -> str:
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace").strip("\x00").strip()

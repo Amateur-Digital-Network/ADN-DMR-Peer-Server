@@ -52,6 +52,7 @@ from .helpers import (
     hbp_ingress_downlink_session_blocks_tx,
     hbp_ingress_new_stream_collision,
     master_per_peer_slot_contention,
+    seq_advance,
     tg_has_active_conversation,
     unit_data_reportable,
 )
@@ -342,10 +343,8 @@ class HbpForwardMixin:
                             src_proto._obp_send_bcsq(dst_id, stream_id)
                         _slot_st["_bcsq"] = True
                     return False
-        if seq and seq == _slot_st.get("lastSeq"):
-            _slot_st["loss"] = _slot_st.get("loss", 0) + 1
-            return False
-        if seq and _slot_st.get("lastSeq") and seq != 1 and seq < _slot_st.get("lastSeq", 0):
+        _step = seq_advance(_slot_st.get("lastSeq"), seq)
+        if _step <= 0:  # same sequence again, or a late / out-of-order packet
             _slot_st["loss"] = _slot_st.get("loss", 0) + 1
             return False
         _h = blake2b(digest_size=16)
@@ -354,8 +353,8 @@ class HbpForwardMixin:
         if seq > 0 and "crcs" in _slot_st and _pkt_crc in _slot_st["crcs"]:
             _slot_st["loss"] = _slot_st.get("loss", 0) + 1
             return False
-        if seq and _slot_st.get("lastSeq") and seq > (_slot_st.get("lastSeq", 0) + 1):
-            _slot_st["loss"] = _slot_st.get("loss", 0) + 1
+        if _step > 1:
+            _slot_st["loss"] = _slot_st.get("loss", 0) + _step - 1
         _slot_st["lastSeq"] = seq
         _slot_st["lastData"] = data
         if "crcs" in _slot_st:

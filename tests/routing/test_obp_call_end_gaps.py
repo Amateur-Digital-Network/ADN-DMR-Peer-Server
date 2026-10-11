@@ -33,15 +33,19 @@ from tests.harness.deterministic import (
     active_routing_table,
     add_openbridge_system,
     minimal_config,
+    parse_dmr_fields,
     patch_routing_wall_time,
 )
+
+from adn_server.application.routing.helpers import seq_advance
 
 _TG = 3340
 _STREAM = 0x0C0C0C0C
 
 
-def _call_end(caplog: pytest.LogCaptureFixture, schedule: list[tuple[float, int]]) -> str:
-    """Play an OBP over: voice header, then (delay before the frame, seq) for each burst, then VTERM."""
+def _call_end(caplog: pytest.LogCaptureFixture, schedule: list[tuple[float, int]], sent: list | None = None) -> str:
+    """Play an OBP over: voice header, then (delay before the frame, seq) for each burst, then VTERM.
+    ``sent`` collects the sequence numbers forwarded to MASTER-A."""
     config = minimal_config(("MASTER-A",))
     add_openbridge_system(config, "OBP-1")
     sc = DeterministicScenario(config=config)
@@ -55,8 +59,10 @@ def _call_end(caplog: pytest.LogCaptureFixture, schedule: list[tuple[float, int]
             sc.inject_obp("OBP-1", DeterministicScenario.voice_burst_spec(spec, seq=seq, dtype_vseq=(seq - 1) % 6 + 1))
         sc.clock.advance(0.06)
         sc.inject_obp("OBP-1", DeterministicScenario.voice_term_spec(spec, seq=seq + 1))
+    if sent is not None:
+        sent.extend(parse_dmr_fields(p.packet)["seq"] for p in sc.capture.for_system("MASTER-A"))
     lines = [r.getMessage() for r in caplog.records if "*CALL END*" in r.getMessage()]
-    assert len(lines) == 1
+    assert len(lines) == 1, "no CALL END: the terminator was dropped"
     return lines[0]
 
 
@@ -88,3 +94,30 @@ def test_a_clean_over_reports_the_frame_spacing(caplog: pytest.LogCaptureFixture
     line = _call_end(caplog, [(0.06, s) for s in range(1, 21)])
     assert _field(line, "Loss") == 0.0
     assert _field(line, "Max gap") == pytest.approx(0.06, abs=0.01)
+
+
+# Sequence wraps 255 -> 0. A packet that arrives late right after the wrap (254 after 0..3)
+# was taken as the new reference, so every later frame looked out of order and was dropped:
+# the rest of the call never left over that link and no CALL END was logged.
+_WRAP_LATE = [s for s in range(240, 256) if s != 254] + [0, 1, 2, 3, 254] + list(range(4, 20))
+
+
+def test_seq_advance_wraps_and_keeps_late_packets_behind() -> None:
+    assert seq_advance(False, 7) == 1
+    assert seq_advance(255, 0) == 1
+    assert seq_advance(253, 255) == 2
+    assert seq_advance(250, 3) == 9
+    assert seq_advance(3, 254) == -1  # late, after the wrap
+    assert seq_advance(10, 9) == -1
+    assert seq_advance(9, 9) == 0
+    assert seq_advance(0, 0) == 1  # repeated voice header
+    assert seq_advance(50, 1) == 1  # source restarting its count (1 behind the last)
+
+
+def test_a_late_packet_after_the_wrap_does_not_drop_the_rest_of_the_call(caplog: pytest.LogCaptureFixture) -> None:
+    sent: list[int] = []
+    line = _call_end(caplog, [(0.06, s) for s in _WRAP_LATE], sent)
+    assert sent[-17:] == list(range(4, 21)), "the frames after the late packet and the terminator are forwarded"
+    assert 254 not in sent
+    # 254 skipped once (253 -> 255) and once late: 2 lost; "packets" = the bursts + the terminator
+    assert _field(line, "Loss") == pytest.approx(100 * 2 / (len(_WRAP_LATE) + 1), abs=0.01)
