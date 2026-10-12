@@ -99,6 +99,24 @@ Example **`/etc/logrotate.d/adn`** fragment (adjust paths and service names):
 
 Repeat **`postrotate`** with **`kill -USR2`** for **`adn-echo`** and **`adn-monitor`** units if those logs are rotated on the same host. Use the correct **PID** (systemd **`MainPID`**, a pidfile, or **`kill`** targeting the process you manage).
 
+## What reaches a hotspot (`tools/hotspot_probe.py`)
+
+When users report cut or choppy calls, `tools/hotspot_probe.py` shows what the server actually delivers to one hotspot. It logs in to a MASTER like a hotspot, subscribes to talkgroups through OPTIONS and never transmits. For every group voice stream it writes one CSV row: start and end (UTC), slot, TG, source, stream ID, frames received, the longest silence between two frames (`max_gap_s`), and whether it ended with a terminator (`terminated`).
+
+```bash
+ADN_PROBE_PASSWORD='...' python3 tools/hotspot_probe.py --callsign CALL 127.0.0.1 62031 213003599 \
+    "TS1=214;TS2=3340,9140;" probe.csv
+python3 tools/hotspot_probe.py --summary probe.csv
+```
+
+Use a hotspot ID of your own (your DMR ID + two digits), the password it logs in with and your callsign. Only the standard library is needed, so it runs on the server host or anywhere that can reach the MASTER.
+
+Look up the same stream ID in the server log:
+
+- `*CALL END*` of an OpenBridge call shows `Loss` (packets missing by sequence) and `Max gap` (the longest silence as the call came in).
+- If the probe's `max_gap_s` matches the server's `Max gap`, the silence was already there when the call came in over the mesh. If only the probe shows it, or `terminated` is 0 while the server logged the call to its end, it appeared on the way from this server to the hotspot.
+- A hotspot listening to several TGs on one slot hears one stream at a time, so a stream that started while another one was playing reaches it late. That is not loss.
+
 ## Requirements
 
 - Network reachability from the **monitor host** to the server’s **`REPORTS.REPORT_PORT`** (and the server’s **`REPORT_CLIENTS`** allow list must include the monitor if used).

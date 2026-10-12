@@ -54,7 +54,7 @@ from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
 from ..subscription.obp_source_ops import ensure_obp_source_for_tg_store, obp_source_needs_ensure
 from ..subscription.subscription_queries import store_has_table
-from .helpers import group_voice_tg_ingress_collision, obp_is_canonical_ingress, unit_data_reportable
+from .helpers import group_voice_tg_ingress_collision, obp_is_canonical_ingress, seq_advance, unit_data_reportable
 from .loop_guard import loop_guard_drops
 
 logger = logging.getLogger(__name__)
@@ -394,7 +394,8 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
                 return False
-            if seq and seq == st["lastSeq"]:
+            _step = seq_advance(st["lastSeq"], seq, pkt_time - st.get("lastSeqTime", pkt_time))
+            if _step == 0:
                 st["loss"] += 1
                 logger.debug(
                     "(%s) *PacketControl* Duplicate sequence number %s, disgarding. Stream ID:, %s TGID: %s, LOSS: %.2f%%",
@@ -405,7 +406,7 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
                 return False
-            if seq and st["lastSeq"] and (seq != 1) and (seq < st["lastSeq"]):
+            if _step < 0:
                 st["loss"] += 1
                 logger.debug(
                     "(%s) *PacketControl* Out of order packet - last SEQ: %s, this SEQ: %s,  disgarding. Stream ID:, %s TGID: %s, LOSS: %.2f%%",
@@ -430,8 +431,8 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
                 return False
-            if seq and st["lastSeq"] and seq > (st["lastSeq"] + 1):
-                st["loss"] += 1
+            if _step > 1:
+                st["loss"] += _step - 1  # every packet the jump skipped, not one per jump
                 logger.debug(
                     "(%s) *PacketControl* Missed packet(s) - last SEQ: %s, this SEQ: %s. Stream ID:, %s TGID: %s , LOSS: %.2f%%",
                     system_name,
@@ -442,6 +443,7 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
             st["lastSeq"] = seq
+            st["lastSeqTime"] = pkt_time
             st["lastData"] = data
 
         # Canonical START,RX for monitor CTABLE (OpenBridge / Linked / Active QSO) after loop win; INGRESS was debug-only.
@@ -456,6 +458,11 @@ class ObpForwardMixin:
 
         st = status[stream_id]
         st["crcs"].add(_pkt_crc)
+        # Longest silence inside the stream: frames held back and released in a burst
+        # keep their sequence numbers, so Loss alone does not show them.
+        _gap = pkt_time - st.get("LAST", pkt_time)
+        if _gap > st.get("MAX_GAP", 0.0):
+            st["MAX_GAP"] = _gap
         st["LAST"] = pkt_time
 
         if self._config.get("GLOBAL", {}).get("GEN_STAT_BRIDGES"):
