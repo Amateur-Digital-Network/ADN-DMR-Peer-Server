@@ -343,7 +343,7 @@ class HbpForwardMixin:
                             src_proto._obp_send_bcsq(dst_id, stream_id)
                         _slot_st["_bcsq"] = True
                     return False
-        _step = seq_advance(_slot_st.get("lastSeq"), seq)
+        _step = seq_advance(_slot_st.get("lastSeq"), seq, pkt_time - _slot_st.get("lastSeqTime", pkt_time))
         if _step <= 0:  # same sequence again, or a late / out-of-order packet
             _slot_st["loss"] = _slot_st.get("loss", 0) + 1
             return False
@@ -356,6 +356,7 @@ class HbpForwardMixin:
         if _step > 1:
             _slot_st["loss"] = _slot_st.get("loss", 0) + _step - 1
         _slot_st["lastSeq"] = seq
+        _slot_st["lastSeqTime"] = pkt_time
         _slot_st["lastData"] = data
         if "crcs" in _slot_st:
             _slot_st["crcs"].add(_pkt_crc)

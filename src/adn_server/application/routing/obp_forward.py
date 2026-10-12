@@ -394,7 +394,7 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
                 return False
-            _step = seq_advance(st["lastSeq"], seq)
+            _step = seq_advance(st["lastSeq"], seq, pkt_time - st.get("lastSeqTime", pkt_time))
             if _step == 0:
                 st["loss"] += 1
                 logger.debug(
@@ -443,6 +443,7 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
             st["lastSeq"] = seq
+            st["lastSeqTime"] = pkt_time
             st["lastData"] = data
 
         # Canonical START,RX for monitor CTABLE (OpenBridge / Linked / Active QSO) after loop win; INGRESS was debug-only.

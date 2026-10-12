@@ -66,7 +66,12 @@ RF_MODE_DUPLEX = "duplex"
 SIMPLEX_VOICE_SLOT = 2
 
 
-def seq_advance(last_seq: Any, seq: int) -> int:
+# A late packet arrives within milliseconds of its neighbours. A frame that looks behind (or
+# repeated) after this much silence is the stream resuming after a pause: resync to it.
+SEQ_RESYNC_SILENCE_S = 1.0
+
+
+def seq_advance(last_seq: Any, seq: int, silence: float = 0.0) -> int:
     """Steps from ``last_seq`` to ``seq`` on the 8-bit HBP/OBP sequence, which wraps 255 -> 0.
 
     1: the next packet (or no previous one: ``last_seq`` False/None). 2..127: a forward jump,
@@ -75,10 +80,17 @@ def seq_advance(last_seq: Any, seq: int) -> int:
     taken as the new reference used to make every later frame of the call look out of order.
     ``seq`` 1 behind is a source restarting its count, and ``seq`` 0 again is a repeated
     voice header, as before: both taken as the next packet.
+
+    ``silence`` is the time since the last accepted frame of the stream. After more than
+    ``SEQ_RESYNC_SILENCE_S`` the stream is resuming from a pause, where the jump can be
+    128 or more (or a whole lap, 0): the frame is taken as a forward jump of ``step`` (at
+    least 1) and the caller resyncs to it.
     """
     if last_seq is False or last_seq is None:
         return 1
     step = (seq - last_seq) & 0xFF
+    if silence > SEQ_RESYNC_SILENCE_S:
+        return max(step, 1)
     if step == 0 and seq == 0:
         return 1
     if step >= 128:

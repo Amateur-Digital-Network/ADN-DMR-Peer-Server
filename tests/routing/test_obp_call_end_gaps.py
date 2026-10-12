@@ -112,6 +112,10 @@ def test_seq_advance_wraps_and_keeps_late_packets_behind() -> None:
     assert seq_advance(9, 9) == 0
     assert seq_advance(0, 0) == 1  # repeated voice header
     assert seq_advance(50, 1) == 1  # source restarting its count (1 behind the last)
+    # after a silence the stream is resuming, whatever the jump
+    assert seq_advance(10, 160, silence=9.0) == 150
+    assert seq_advance(10, 10, silence=20.0) == 1  # a whole lap
+    assert seq_advance(10, 160, silence=0.06) == -1  # no silence: still a late packet
 
 
 def test_a_late_packet_after_the_wrap_does_not_drop_the_rest_of_the_call(caplog: pytest.LogCaptureFixture) -> None:
@@ -121,3 +125,15 @@ def test_a_late_packet_after_the_wrap_does_not_drop_the_rest_of_the_call(caplog:
     assert 254 not in sent
     # 254 skipped once (253 -> 255) and once late: 2 lost; "packets" = the bursts + the terminator
     assert _field(line, "Loss") == pytest.approx(100 * 2 / (len(_WRAP_LATE) + 1), abs=0.01)
+
+
+# Seq 1..10, a 9 s pause, then 160..199 on the same stream: a jump of 150, which without the
+# silence would look like a late packet and drop the rest of the call.
+_PAUSE = [(0.06, s) for s in range(1, 11)] + [(9.0, 160)] + [(0.06, s) for s in range(161, 200)]
+
+
+def test_a_stream_resuming_after_a_long_pause_is_forwarded(caplog: pytest.LogCaptureFixture) -> None:
+    sent: list[int] = []
+    line = _call_end(caplog, _PAUSE, sent)
+    assert sent[-41:] == list(range(160, 201)), "all 40 frames after the pause and the terminator"
+    assert _field(line, "Max gap") == pytest.approx(9.0, abs=0.01)
