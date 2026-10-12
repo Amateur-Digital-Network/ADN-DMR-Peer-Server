@@ -28,7 +28,6 @@ same user or 6-digit legacy prefix.
 
 from __future__ import annotations
 
-import copy
 from typing import Any
 
 from adn_server.application.proxy.deployment import is_proxy_inject_only, proxy_target_system
@@ -101,11 +100,14 @@ def expand_inject_proxy_systems(
     slot_map = _resolve_slot_map(connected, peer_slots, max_slots=max_slots)
 
     out = {name: cfg for name, cfg in systems.items() if name != target}
+    # Shallow: the report only reads it. A deep copy of every peer for each virtual master
+    # blocked the reactor ~0.2 s per report with 26 hotspots and MAX_PEERS 200.
+    base = {key: value for key, value in sys_cfg.items() if key != "PEERS"}
     # Legacy ``expand_generator``: emit every virtual master (SYSTEM-0..N-1) so the
     # monitor does not delete unused upstream slots on topology/config update.
     for slot in range(max_slots):
         virtual_name = f"{target}-{slot}"
-        virtual = copy.deepcopy(sys_cfg)
+        virtual = dict(base)
         virtual["PORT"] = base_port + slot
         # Merged TS1/TS2 on inject SYSTEM are for bridges only — not per-hotspot dashboard chips.
         virtual["TS1_STATIC"] = ""
