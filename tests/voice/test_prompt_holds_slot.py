@@ -27,9 +27,9 @@ from unittest.mock import MagicMock, patch
 
 from tests.harness.voice_helpers import FakeMasterForVoice, FakeVoiceProvider, voice_master_scenario
 
-from adn_server.application.routing.helpers import hbp_slot_blocks_group_voice
+from adn_server.application.routing.helpers import hbp_slot_blocks_group_voice, master_slot_holds_server_broadcast
 from adn_server.application.voice_use_cases import VoiceUseCases
-from adn_server.domain import HBPF_SLT_VHEAD, HBPF_SLT_VTERM, bytes_3
+from adn_server.domain import HBPF_SLT_VHEAD, HBPF_SLT_VTERM, bytes_3, int_id
 
 PROMPT_STREAM = b"\xaa\xbb\xcc\xdd"
 OTHER_STREAM = b"\x01\x02\x03\x04"
@@ -129,3 +129,19 @@ def test_a_call_already_on_the_slot_is_left_alone() -> None:
     assert sent == 0
     assert master.voice_packets == []
     assert {k: master.STATUS[2][k] for k in routed} == routed
+
+
+def test_a_prompt_holds_the_slot_after_a_mesh_call_used_it() -> None:
+    """On SYSTEM the last TX on TS2 is usually a mesh call (TX_FROM_MESH True). The prompt
+    is this server's own voice: it must hold the slot, not inherit the mesh flag."""
+    held: list[bool] = []
+
+    def check(_n: int, slot: dict) -> None:
+        srcs = frozenset({int_id(slot["TX_RFS"])})
+        held.append(master_slot_holds_server_broadcast(slot, time.time(), server_voice_rf_srcs=srcs))
+
+    master = _Master("MASTER-A", on_frame=check)
+    master.STATUS[2] = {**_idle_slot(), "TX_FROM_MESH": True, "TX_RFS": bytes_3(1000001)}
+
+    assert _play(_uc(master), master) == FRAMES
+    assert held == [True] * FRAMES

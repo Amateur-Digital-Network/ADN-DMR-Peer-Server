@@ -196,6 +196,7 @@ def _make_slot_status() -> dict[str, Any]:
         "RX_SEQ": 0,
         "RX_RFS": b"\x00",
         "TX_RFS": b"\x00",
+        "TX_FROM_MESH": False,
         "RX_PEER": b"\x00",
         "TX_PEER": b"\x00",
         "RX_STREAM_ID": b"\x00",

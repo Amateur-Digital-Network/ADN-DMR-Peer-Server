@@ -51,6 +51,20 @@ def test_master_slot_holds_server_broadcast_ignores_obp_tx() -> None:
     assert master_slot_holds_server_broadcast(slot, 100.1) is False
 
 
+def test_master_slot_holds_server_broadcast_ignores_another_servers_announcement() -> None:
+    """Every server announces as 1000001: one relayed over OpenBridge is ordinary mesh voice."""
+    slot = {
+        "TX_TYPE": HBPF_SLT_VHEAD,
+        "TX_TIME": 100.0,
+        "TX_RFS": bytes_3(DEFAULT_SERVER_VOICE_ID),
+        "TX_TGID": bytes_3(9140),
+        "TX_FROM_MESH": True,
+    }
+    assert master_slot_holds_server_broadcast(slot, 100.1) is False
+    slot["TX_FROM_MESH"] = False  # this server's own announcement still holds the slot
+    assert master_slot_holds_server_broadcast(slot, 100.1) is True
+
+
 def test_obp_blocked_when_server_broadcast_holds_slot() -> None:
     slot = {
         "RX_TYPE": HBPF_SLT_VTERM,
