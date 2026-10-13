@@ -1790,3 +1790,14 @@ def test_stale_ingress_session_does_not_block_downlink_after_ptt_lost_vterm() ->
     assert peer_slot_blocks_downlink(ctx, hs, peer, obp_vhead, pkt_time=now + 0.1)
     # After stale-session timeout: abandoned ingress session expires, downlink restored.
     assert not peer_slot_blocks_downlink(ctx, hs, peer, obp_vhead, pkt_time=now + 6.0)
+
+
+def test_ingress_downlink_session_allows_the_terminator_of_its_own_transmission() -> None:
+    """Two hotspots talking at once on the shared MASTER slot: the first to end had its
+    terminator dropped as \"already receiving\" and no END RX was ever sent (stuck dashboard)."""
+    peer_slots = {
+        2: {"stream_id": b"", "tgid": 730801, "time": 1_000_000.0, "bridge_hold": True, "bridge_hold_ingress": True},
+    }
+    assert not hbp_ingress_downlink_session_blocks_tx(2, bytes_3(730801), peer_slots)
+    peer_slots[2]["bridge_hold_ingress"] = False  # a hold from a call it received still blocks
+    assert hbp_ingress_downlink_session_blocks_tx(2, bytes_3(730801), peer_slots)

@@ -69,6 +69,7 @@ from ...application.routing.helpers import (
     synthetic_group_dmrd_burst_packet,
     synthetic_group_dmrd_route_packet,
     tg4000_reset_on_vhead,
+    track_rx_stream,
 )
 from ...application.routing.peer_downlink_index import (
     build_peer_downlink_index,
@@ -1592,6 +1593,11 @@ class HBPProtocol(DatagramProtocol):
                             self.STATUS[_slot]["RX_TYPE"] = _dtype_vseq
                             self.STATUS[_slot]["RX_TGID"] = _dst_id
                             self.STATUS[_slot]["RX_TIME"] = pkt_time
+                            if _call_type in ("group", "vcsbk"):
+                                track_rx_stream(
+                                    self.STATUS[_slot], _stream_id, _peer_id, _rf_src, _dst_id, pkt_time,
+                                    ended=_frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM,
+                                )
                         # Always track RX_STREAM_ID so subsequent frames of a suppressed
                         # stream are not re-evaluated as a new stream (which would clear
                         # _suppress_uplink and leak the uplink to the network).

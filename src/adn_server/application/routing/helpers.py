@@ -1057,14 +1057,46 @@ def group_voice_tg_ingress_collision(
     return False
 
 
+def track_rx_stream(
+    slot_st: dict[str, Any],
+    stream_id: bytes,
+    peer_id: bytes,
+    rf_src: bytes,
+    tgid: bytes,
+    now: float,
+    *,
+    ended: bool,
+) -> None:
+    """Keep each ingress stream of a MASTER slot on its own: [peer, rf_src, tgid, start, last].
+
+    Hotspots sharing the inject-only MASTER overwrite the slot's RX_* fields, so the timeout
+    and the reported duration only ever saw the last stream: one that lost its terminator
+    while another hotspot talked on the same slot never got its END RX.
+    """
+    streams = slot_st.setdefault("RX_STREAMS", {})
+    if ended:
+        streams.pop(stream_id, None)
+        return
+    entry = streams.get(stream_id)
+    if entry is None:
+        streams[stream_id] = [peer_id, rf_src, tgid, now, now]
+    else:
+        entry[4] = now
+
+
 def hbp_ingress_downlink_session_blocks_tx(
     voice_slot: int,
     incoming_tgid_b: bytes,
     peer_slots: PeerVoiceSlotMap | None,
 ) -> bool:
-    """True when a hotspot mid downlink QSO on this TG/slot must not ingress TX."""
+    """True when a hotspot mid downlink QSO on this TG/slot must not ingress TX.
+
+    Its own transmission is no downlink: neither while it lasts (``ingress``) nor the bridge
+    hold its terminator leaves (``bridge_hold_ingress``). With another hotspot talking on the
+    same MASTER slot the terminator is checked again as a new stream, after that hold was set.
+    """
     active = (peer_slots or {}).get(int(voice_slot))
-    if not isinstance(active, dict) or active.get("ingress"):
+    if not isinstance(active, dict) or active.get("ingress") or active.get("bridge_hold_ingress"):
         return False
     active_tg = int(active.get("tgid", 0) or 0)
     incoming_tg = int_id(incoming_tgid_b)
