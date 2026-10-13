@@ -31,78 +31,70 @@ from dataclasses import replace
 from unittest.mock import MagicMock
 
 from tests.harness.deterministic import PacketSpec
+from tests.support.hbp_repeat_stack import HbpRepeatStack, build_hbp_repeat_stack
 
 from adn_server.domain import bytes_3
-from adn_server.infrastructure.config_normalizer import ensure_system_runtime_config
-from adn_server.infrastructure.twisted_adapters.udp_hbp import HBPProtocol
+from adn_server.domain.subscription import SystemId
 
 _A = (213003507).to_bytes(4, "big")
 _B = (213003591).to_bytes(4, "big")
 _ADDR_A = ("10.0.0.7", 62031)
 _ADDR_B = ("10.0.0.8", 62031)
+_SYSTEM = "MASTER-A"
 
 
-class _Router:
-    def acl_check(self, _id: bytes, _acl: object) -> bool:
-        return True
-
-
-class _Transport:
-    def write(self, _data: bytes, _addr: tuple[str, int]) -> None:
-        pass
-
-
-def _master(*, shared: bool) -> tuple[HBPProtocol, MagicMock, MagicMock, MagicMock]:
-    config = {
-        "GLOBAL": {"PING_TIME": 10, "MAX_MISSED": 3, "USE_ACL": False},
-        "SYSTEMS": {"SYSTEM": {"MODE": "MASTER", "ENABLED": True, "MAX_PEERS": 8, "PASSPHRASE": b"x"}},
-    }
+def _master(*, shared: bool) -> tuple[HbpRepeatStack, MagicMock, MagicMock]:
+    """The real HBPProtocol and routing; hotspot B listens to TG 3340 on TS2."""
+    stack = build_hbp_repeat_stack(talker_alias=False, system_name=_SYSTEM)
     if shared:
-        config["PROXY"] = {"TARGET_SYSTEM": "SYSTEM"}
-    ensure_system_runtime_config(config)
-    in_band, deactivate, dynamic_tgs = MagicMock(), MagicMock(), MagicMock()
-    hbp = HBPProtocol(
-        "SYSTEM", config, router=_Router(),  # type: ignore[arg-type]
-        on_in_band_signalling=in_band, on_deactivate_dynamic_relays=deactivate, dynamic_tg_uc=dynamic_tgs,
+        stack.config["PROXY"] = {"TARGET_SYSTEM": _SYSTEM}
+    hbp = stack.hbp
+    hbp._on_in_band_signalling = stack.bridge.apply_in_band_signalling
+    deactivate, dynamic_tgs = MagicMock(), MagicMock()
+    hbp._on_deactivate_dynamic_relays = deactivate
+    hbp._dynamic_tg_uc = dynamic_tgs
+    stack.register_peer(_A, _ADDR_A)
+    stack.register_peer(_B, _ADDR_B)
+    stack.bridge.ensure_dynamic_relay(bytes_3(3340), _SYSTEM, 2, 900.0)
+    assert _leg_3340_active(stack)
+    return stack, deactivate, dynamic_tgs
+
+
+def _leg_3340_active(stack: HbpRepeatStack) -> bool:
+    store = stack.bridge._subscription_store
+    return any(
+        sub.is_active() for sub in store.list_by_system(SystemId(_SYSTEM))
+        if int(sub.target_tgid) == 3340 and int(sub.channel.slot) == 2
     )
-    hbp.transport = _Transport()  # type: ignore[assignment]
-    for peer, addr in ((_A, _ADDR_A), (_B, _ADDR_B)):
-        hbp._peers[peer] = {
-            "CONNECTION": "YES", "CONNECTED": 1.0, "LAST_PING": 1e12, "SOCKADDR": addr,
-            "CALLSIGN": b"C31AG   ", "RADIO_ID": str(int.from_bytes(peer, "big")),
-        }
-    return hbp, in_band, deactivate, dynamic_tgs
 
 
-def _tg4000_from_a(hbp: HBPProtocol, call_type: str = "group") -> None:
+def _tg4000_from_a(stack: HbpRepeatStack, call_type: str = "group") -> None:
     head = replace(
         PacketSpec(dst_id=4000, slot=2, stream_id=0x40004000, call_type=call_type,
                    peer_id=int.from_bytes(_A, "big"), rf_src=2130035),
         frame_type=2, dtype_vseq=1,
     ).data()
-    hbp._master_datagram_received(head, _ADDR_A)
+    stack.hbp._master_datagram_received(head, _ADDR_A)
 
 
 def test_on_a_shared_master_4000_leaves_the_other_hotspots_legs_alone() -> None:
-    hbp, in_band, deactivate, dynamic_tgs = _master(shared=True)
-    _tg4000_from_a(hbp)
-    in_band.assert_not_called()
+    stack, deactivate, dynamic_tgs = _master(shared=True)
+    _tg4000_from_a(stack)
+    assert _leg_3340_active(stack), "hotspot B still hears TG 3340"
     deactivate.assert_not_called()
-    dynamic_tgs.delete_peer.assert_called_once_with(_A, "SYSTEM")  # the sender's own dynamics go
+    dynamic_tgs.delete_peer.assert_called_once_with(_A, _SYSTEM)  # the sender's own dynamics go
 
 
 def test_a_private_call_to_4000_on_a_shared_master_does_the_same() -> None:
-    hbp, in_band, deactivate, dynamic_tgs = _master(shared=True)
-    _tg4000_from_a(hbp, call_type="unit")
-    in_band.assert_not_called()
+    stack, deactivate, dynamic_tgs = _master(shared=True)
+    _tg4000_from_a(stack, call_type="unit")
+    assert _leg_3340_active(stack)
     deactivate.assert_not_called()
-    dynamic_tgs.delete_peer.assert_called_once_with(_A, "SYSTEM")
+    dynamic_tgs.delete_peer.assert_called_once_with(_A, _SYSTEM)
 
 
 def test_a_master_of_its_own_still_resets_its_legs() -> None:
-    hbp, in_band, deactivate, dynamic_tgs = _master(shared=False)
-    _tg4000_from_a(hbp)
-    in_band.assert_called_once()
-    system, slot, dst, _t = in_band.call_args.args
-    assert (system, slot, dst) == ("SYSTEM", 2, bytes_3(4000))
-    deactivate.assert_called_once_with("SYSTEM")
+    stack, deactivate, _dynamic_tgs = _master(shared=False)
+    _tg4000_from_a(stack)
+    assert not _leg_3340_active(stack)  # in-band 4000 signalling, as before
+    deactivate.assert_called_once_with(_SYSTEM)
