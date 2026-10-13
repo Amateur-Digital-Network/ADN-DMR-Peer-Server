@@ -142,6 +142,14 @@ def test_a_leg_another_hotspot_holds_as_dynamic_stays() -> None:
     assert _leg_active(stack, 3340)
 
 
+def test_a_leg_the_sender_also_has_as_static_stays() -> None:
+    """A 4000 clears dynamics, never a static, the sender's own included."""
+    stack, _ = _stack(release=True, options_a="TS2=3340;")
+    _hold_dynamic(stack, _A, 3340)
+    _over_4000(stack)
+    assert _leg_active(stack, 3340)
+
+
 def test_a_leg_another_hotspot_has_as_static_stays() -> None:
     stack, _ = _stack(release=True, options_b="TS2=3340;")
     _hold_dynamic(stack, _A, 3340)
@@ -215,12 +223,14 @@ class _Reactor:
         self.delays.append(delay)
         self.queue.append((delay, fn, a))
 
-    def run(self) -> None:
+    def run(self, work: float = 0.0) -> None:
+        """``work``: time each callback takes, so a schedule that drifts shows in the delays."""
         with patch("adn_server.application.voice_use_cases.time.time", side_effect=lambda: self.now):
             while self.queue:
                 delay, fn, a = self.queue.pop(0)
                 self.now += delay
                 fn(*a)
+                self.now += work
 
 
 def _voice(master: _Master, reactor: _Reactor) -> VoiceUseCases:
@@ -257,9 +267,10 @@ def test_a_private_reply_comes_from_id_4000_to_the_caller() -> None:
 def test_the_reply_is_paced_on_the_reactor_after_a_second() -> None:
     master, reactor = _Master(), _Reactor()
     _voice(master, reactor).tg4000_voice(_SYSTEM, _A, 2, rf_src=bytes_3(_CALLER))
-    reactor.run()
+    reactor.run(work=0.005)  # each frame takes 5 ms to send
     assert reactor.delays[0] == 1.0  # after the over, the radio is back in receive
-    assert reactor.delays[1:] == pytest.approx([0.058] * 3)  # one frame per burst time, no drift
+    # frames keep a fixed 58 ms grid from the start: the 5 ms of work comes off each wait
+    assert reactor.delays[1:] == pytest.approx([0.053] * 3)
 
 
 def test_the_reply_stops_when_the_hotspot_refuses_a_frame() -> None:

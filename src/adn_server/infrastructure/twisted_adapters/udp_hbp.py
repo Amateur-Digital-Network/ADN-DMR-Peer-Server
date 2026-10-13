@@ -702,20 +702,18 @@ class HBPProtocol(DatagramProtocol):
     def _release_legs_nobody_else_holds(self, peer_id: bytes, held_by_sender: set[tuple[int, int]]) -> None:
         """After a 4000 on a shared MASTER, set IDLE the dynamic legs only the sender was using.
 
-        A leg stays while any other connected hotspot holds that TG on that slot as a dynamic
-        session or a static (OPTIONS or YAML).
+        A 4000 clears dynamics, never a static: a leg stays while any connected hotspot, the
+        sender included, has that TG on that slot as a static (OPTIONS or YAML), or another one
+        holds it as a dynamic session (the sender's were cleared before this runs).
         """
         if not held_by_sender or self._on_release_dynamic_leg is None:
             return
         now = time.time()
-        others = [
-            p for pid, p in self._peers.items()
-            if pid != peer_id and isinstance(p, dict) and p.get("CONNECTION") == "YES"
-        ]
+        connected = [p for p in self._peers.values() if isinstance(p, dict) and p.get("CONNECTION") == "YES"]
         for tgid, slot in sorted(held_by_sender):
             if slot in master_dynamic_tg_slots(self._config, tgid, now=now):
                 continue
-            if any(tgid in self._peer_static_tgs_on_slot(p, slot) for p in others):
+            if any(tgid in self._peer_static_tgs_on_slot(p, slot) for p in connected):
                 continue
             self._on_release_dynamic_leg(self._system, tgid, slot)
 
