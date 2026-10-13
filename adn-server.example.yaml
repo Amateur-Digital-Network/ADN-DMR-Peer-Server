@@ -143,6 +143,8 @@ SYSTEMS:
     OVERRIDE_IDENT_TG: ""
     # Bridge loop echoes entering here: log (default) only logs them, true drops them, false skips the check
     LOOP_GUARD: log
+    # Answer a hotspot's TG / ID 4000 with "not linked" (to that hotspot only)
+    TG4000_VOICE: false
 
   D-APRS:
     MODE: MASTER

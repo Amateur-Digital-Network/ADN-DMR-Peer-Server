@@ -75,6 +75,8 @@ In-band bridge activation/deactivation is applied on **voice terminator (VTERM)*
 
 **TG 4000 must never appear** as a dynamic UA chip on the monitor or in `peer_dynamic_tgs`.
 
+**Voice reply (`TG4000_VOICE: true` on the MASTER):** when the 4000 over ends (its terminator), the server answers **that hotspot only** about a second later with the link status in the system's `ANNOUNCEMENT_LANGUAGE`: "not linked", or "linked to *N*" with a `DEFAULT_REFLECTOR`. It is a group call from the server voice ID to **TG 4000** on the slot the 4000 came in on, so the radio hears it on the contact it just used. Other hotspots on a shared MASTER do not hear it, it never goes to OpenBridge, and it stops if that hotspot starts receiving another stream on the slot. One reply per over; none if the terminator is lost.
+
 ### `SINGLE_MODE` impact on in-band deactivation
 
 When in-band rules evaluate deactivation on a MASTER slot:

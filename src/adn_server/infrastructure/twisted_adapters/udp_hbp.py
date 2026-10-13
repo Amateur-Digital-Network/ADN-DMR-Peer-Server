@@ -231,6 +231,7 @@ class HBPProtocol(DatagramProtocol):
         dmrd_received: Callable[..., None] | None = None,
         get_user_password_callback: Callable[[int], bytes | None] | None = None,
         on_play_file_request: Callable[[str, str], None] | None = None,
+        on_tg4000_voice: Callable[[str, bytes, int], None] | None = None,
         on_handle_recording: Callable[..., None] | None = None,
         on_in_band_signalling: Callable[[str, int, bytes, float], None] | None = None,
         on_options_received: Callable[..., None] | None = None,
@@ -255,6 +256,8 @@ class HBPProtocol(DatagramProtocol):
         self._dmrd_received = dmrd_received
         self._get_user_password = get_user_password_callback if get_user_password_callback is not None else get_user_password
         self._on_play_file_request = on_play_file_request
+        self._on_tg4000_voice = on_tg4000_voice
+        self._tg4000_answered: dict[bytes, float] = {}  # stream ID -> time: one voice reply per over
         self._on_handle_recording = on_handle_recording
         self._on_in_band_signalling = on_in_band_signalling
         self._on_options_received = on_options_received
@@ -679,13 +682,29 @@ class HBPProtocol(DatagramProtocol):
         rf_src: bytes,
         stream_id: bytes,
     ) -> bool:
-        """Legacy early return for TG/ID 4000; reset once per PTT on voice header only."""
+        """Legacy early return for TG/ID 4000; reset once per PTT on voice header only.
+
+        With ``TG4000_VOICE`` the terminator of the over also queues one voice reply to this
+        hotspot (``VoiceUseCases.tg4000_voice``).
+        """
         if int_dst_id != 4000:
             return False
         if tg4000_reset_on_vhead(int_dst_id, frame_type, dtype_vseq):
             self._apply_tg4000_reset(
                 peer_id, slot, call_type, rf_src=rf_src, stream_id=stream_id,
             )
+        elif (
+            frame_type == HBPF_DATA_SYNC
+            and dtype_vseq == HBPF_SLT_VTERM
+            and self._on_tg4000_voice is not None
+            and self._config.get("TG4000_VOICE") is True
+            and stream_id not in self._tg4000_answered
+        ):
+            now = time.time()
+            for sid in [k for k, t in self._tg4000_answered.items() if now - t > 60]:
+                del self._tg4000_answered[sid]
+            self._tg4000_answered[stream_id] = now
+            reactor.callInThread(self._on_tg4000_voice, self._system, peer_id, slot)
         return True
 
     def purge_peer_dynamic_tgs(self, peer_id: bytes) -> bool:
@@ -894,6 +913,26 @@ class HBPProtocol(DatagramProtocol):
                     voice_slot=_route_parsed[0] if _route_parsed else None,
                 )
         self.transport.write(_packet, self._peers[_peer]["SOCKADDR"])
+
+    def send_prompt_to_peer(self, peer_id: bytes, packet: bytes) -> bool:
+        """One frame of a server prompt for one hotspot only (the TG 4000 voice reply).
+
+        The hotspot did not subscribe to the prompt's TG, so the OPTIONS filter does not
+        apply; its own slot gate does: False (frame not sent) when it is busy with another
+        stream on that slot or no longer connected. The MASTER slot rows are not touched,
+        so nobody else on a shared MASTER is held off.
+        """
+        peer = self._peers.get(peer_id)
+        if not isinstance(peer, dict) or peer.get("CONNECTION") != "YES":
+            return False
+        packet = b"".join([packet[:11], peer_id, packet[15:]])
+        ctx = self._downlink_ctx()
+        if not peer_accepts_group_dmrd_packet(ctx, peer_id, peer, packet, routed=True):
+            return False
+        route = parse_dmrd_route_fields(packet)
+        track_peer_group_dmrd(ctx, peer_id, packet, peer, from_ingress=False, voice_slot=route[0] if route else None)
+        self.transport.write(packet, peer["SOCKADDR"])
+        return True
 
     def _ta_buffer_enabled(self) -> bool:
         return self._config.get("MODE") in ("MASTER", "OPENBRIDGE")
@@ -2566,6 +2605,7 @@ def HBPProtocolFactory(
     dmrd_received: Callable[..., None] | None = None,
     get_user_password_callback: Callable[[int], bytes | None] | None = None,
     on_play_file_request: Callable[[str, str], None] | None = None,
+    on_tg4000_voice: Callable[[str, bytes, int], None] | None = None,
     on_handle_recording: Callable[..., None] | None = None,
     on_in_band_signalling: Callable[[str, int, bytes, float], None] | None = None,
     on_options_received: Callable[..., None] | None = None,
@@ -2590,6 +2630,7 @@ def HBPProtocolFactory(
         dmrd_received,
         get_user_password_callback=get_user_password_callback,
         on_play_file_request=on_play_file_request,
+        on_tg4000_voice=on_tg4000_voice,
         on_handle_recording=on_handle_recording,
         on_in_band_signalling=on_in_band_signalling,
         on_options_received=on_options_received,

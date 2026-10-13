@@ -31,7 +31,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable
 
-from ..domain import HBPF_SLT_VHEAD, HBPF_SLT_VTERM, bytes_3, bytes_4
+from ..domain import HBPF_SLT_VHEAD, HBPF_SLT_VTERM, bytes_3, bytes_4, int_id
 from .ports import VoiceProvider
 from .routing.helpers import slot_voice_held_by_other_stream
 from .server_voice import server_voice_rf_src_bytes
@@ -167,22 +167,16 @@ class VoiceUseCases:
         _pkt_count = self.play_on_slot(protocol, system, speech, _source_id, bytes_3(9))
         logger.info("(%s) On-demand playback complete: %s (%d packets)", system, file_number, _pkt_count)
 
-    def disconnected_voice(self, system: str) -> None:
-        """Send 'disconnected' / 'linked to reflector' voice (legacy disconnectedVoice). Run from thread."""
-        if not self._get_protocols or not self._call_from_reactor or not self._audio_path:
-            return
-        protocol = self._get_protocols().get(system)
-        if not protocol or not getattr(protocol, "STATUS", None):
-            return
-        sys_cfg = self._config.get("SYSTEMS", {}).get(system, {})
+    def _link_status_words(self, sys_cfg: dict[str, Any]) -> list[Any] | None:
+        """"not linked", or "linked to <DEFAULT_REFLECTOR>", in the system's language; None without audio."""
         _lang = sys_cfg.get("ANNOUNCEMENT_LANGUAGE", "en_GB")
         words_by_lang = self.get_ambe_words(_lang, self._audio_path)
         if _lang not in words_by_lang:
-            return
+            return None
         words = words_by_lang[_lang]
         silence = words.get("silence")
         if not silence:
-            return
+            return None
         _say = [silence, silence]
         default_refl = int(sys_cfg.get("DEFAULT_REFLECTOR", 0))
         if default_refl > 0:
@@ -198,6 +192,18 @@ class VoiceUseCases:
         else:
             _say.append(words.get("notlinked") or silence)
         _say.append(silence)
+        return _say
+
+    def disconnected_voice(self, system: str) -> None:
+        """Send 'disconnected' / 'linked to reflector' voice (legacy disconnectedVoice). Run from thread."""
+        if not self._get_protocols or not self._call_from_reactor or not self._audio_path:
+            return
+        protocol = self._get_protocols().get(system)
+        if not protocol or not getattr(protocol, "STATUS", None):
+            return
+        _say = self._link_status_words(self._config.get("SYSTEMS", {}).get(system, {}))
+        if _say is None:
+            return
         _source_id = self._server_source_id()
         speech = self.pkt_gen(_source_id, bytes_3(9), bytes_4(9), 1, _say)
         time.sleep(1)
@@ -206,3 +212,47 @@ class VoiceUseCases:
         logger.debug("(%s) Sending disconnected voice", system)
         self.play_on_slot(protocol, system, speech, _source_id, bytes_3(9))
         logger.debug("(%s) disconnected voice thread end", system)
+
+    def tg4000_voice(self, system: str, peer_id: bytes, slot: int) -> int:
+        """Answer a hotspot's TG/ID 4000 with the link status, to that hotspot only. Run from thread.
+
+        A group call from the server voice ID to TG 4000 on the slot the 4000 came in on: the
+        radio is still on that contact. Sent a second after the over ends, frame by frame on
+        the reactor through ``send_prompt_to_peer``, so it stops if the hotspot gets busy on
+        that slot or leaves. Returns the frames sent.
+        """
+        if not self._get_protocols or not self._call_from_reactor or not self._audio_path:
+            return 0
+        protocol = self._get_protocols().get(system)
+        if protocol is None or not hasattr(protocol, "send_prompt_to_peer"):
+            return 0
+        _say = self._link_status_words(self._config.get("SYSTEMS", {}).get(system, {}))
+        if _say is None:
+            return 0
+        _source_id = self._server_source_id()
+        speech = self.pkt_gen(_source_id, bytes_3(4000), bytes_4(9), 1 if int(slot) == 2 else 0, _say)
+        time.sleep(1)
+        run = _PromptRun()
+        _next_time = time.time()
+        for pkt in speech:
+            if run.stopped:
+                break
+            _next_time += _FRAME_INTERVAL
+            delay = _next_time - time.time()
+            if delay > 0.001:
+                time.sleep(delay)
+            self._call_from_reactor(self._peer_prompt_frame, protocol, peer_id, pkt, run)
+        logger.info(
+            "(%s) TG 4000 voice reply to peer %s on TS %s: %d frames", system, int_id(peer_id), slot, run.sent,
+        )
+        return run.sent
+
+    @staticmethod
+    def _peer_prompt_frame(protocol: Any, peer_id: bytes, pkt: bytes, run: _PromptRun) -> None:
+        """Reactor side of ``tg4000_voice``: one frame, or stop when the hotspot refuses it."""
+        if run.stopped:
+            return
+        if protocol.send_prompt_to_peer(peer_id, pkt):
+            run.sent += 1
+        else:
+            run.stopped = True

@@ -75,6 +75,8 @@ La activación/desactivación in-band de bridges se aplica sobre **voice termina
 
 **TG 4000 no debe aparecer** como chip UA dinámico en el monitor ni en `peer_dynamic_tgs`.
 
+**Respuesta de voz (`TG4000_VOICE: true` en el MASTER):** al terminar la pasada al 4000 (su terminador), el servidor responde **solo a ese hotspot**, alrededor de un segundo después, con el estado de enlace en el `ANNOUNCEMENT_LANGUAGE` del sistema: «no enlazado», o «enlazado a *N*» si hay `DEFAULT_REFLECTOR`. Es una llamada de grupo del ID de voz del servidor al **TG 4000** por el mismo slot del 4000, así que la radio la oye en el contacto que acaba de usar. Los demás hotspots de un MASTER compartido no la oyen, nunca sale por OpenBridge y se corta si ese hotspot empieza a recibir otro stream por ese slot. Una respuesta por pasada; ninguna si se pierde el terminador.
+
 ### Impacto de `SINGLE_MODE` en la lógica de desactivación
 
 Cuando las reglas in-band evalúan desactivación en un slot MASTER:

@@ -137,3 +137,27 @@ def test_rejects_bad_loop_guard_hold(hold) -> None:
     with pytest.raises(ConfigError) as exc:
         validate_config(_minimal_config(LOOP_GUARD_HOLD=hold))
     assert "GLOBAL.LOOP_GUARD_HOLD" in str(exc.value)
+
+
+def test_accepts_tg4000_voice_bool_on_master() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"SYSTEM": {"MODE": "MASTER", "TG4000_VOICE": True}}
+    config["PROXY"] = {"TARGET_SYSTEM": "SYSTEM", "LISTEN_PORT": 62031}
+    config["DATABASE"] = {"DB_NAME": "x", "DB_USERNAME": "x"}
+    validate_config(config)
+
+
+def test_rejects_non_bool_tg4000_voice() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"SYSTEM": {"MODE": "MASTER", "TG4000_VOICE": "yes"}}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "SYSTEMS.SYSTEM.TG4000_VOICE: expected boolean" in str(exc.value)
+
+
+def test_rejects_tg4000_voice_outside_a_master() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"BRIDGE": {"MODE": "PEER", "TG4000_VOICE": True}}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "SYSTEMS.BRIDGE.TG4000_VOICE: only on MASTER" in str(exc.value)
