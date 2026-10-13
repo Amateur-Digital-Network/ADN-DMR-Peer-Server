@@ -698,6 +698,7 @@ def run_peer_server(
             dmrd_received=routing_use_cases.dmrd_received,
             get_user_password_callback=user_passwords_loader.get_user_password,
             on_play_file_request=voice_use_cases.play_file_on_request,
+            on_tg4000_voice=voice_use_cases.tg4000_voice,
             on_handle_recording=recording_handler.handle_recording,
             on_in_band_signalling=routing_use_cases.apply_in_band_signalling,
             on_options_received=routing_use_cases.options_config_for_system,
