@@ -431,6 +431,7 @@ def run_peer_server(
         get_protocols=lambda: protocols,
         call_from_reactor=reactor.callFromThread,
         audio_path=audio_path,
+        call_later=reactor.callLater,
     )
     ident_use_cases = IdentUseCases(
         config,
@@ -703,6 +704,7 @@ def run_peer_server(
             on_in_band_signalling=routing_use_cases.apply_in_band_signalling,
             on_options_received=routing_use_cases.options_config_for_system,
             on_deactivate_dynamic_relays=routing_use_cases.deactivate_all_dynamic_relays,
+            on_release_dynamic_leg=routing_use_cases.release_dynamic_leg,
             on_obp_bcsq_received=routing_use_cases.on_obp_bcsq_received,
             on_talker_alias_repeat_prepare=routing_use_cases.prepare_talker_alias_local_repeat,
             on_talker_alias_repeat_burst=routing_use_cases.rewrite_repeat_voice_burst,

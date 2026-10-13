@@ -75,7 +75,14 @@ In-band bridge activation/deactivation is applied on **voice terminator (VTERM)*
 
 **TG 4000 must never appear** as a dynamic UA chip on the monitor or in `peer_dynamic_tgs`.
 
-**Voice reply (`TG4000_VOICE: true` on the MASTER):** when the 4000 over ends (its terminator), the server answers **that hotspot only** about a second later with the link status in the system's `ANNOUNCEMENT_LANGUAGE`: "not linked", or "linked to *N*" with a `DEFAULT_REFLECTOR`. It is a group call from the server voice ID to **TG 4000** on the slot the 4000 came in on, so the radio hears it on the contact it just used. Other hotspots on a shared MASTER do not hear it, it never goes to OpenBridge, and it stops if that hotspot starts receiving another stream on the slot. One reply per over; none if the terminator is lost.
+**Voice reply (`TG4000_VOICE: true` on the MASTER):** when the 4000 over ends (its terminator), the server answers **that hotspot only** about a second later with the link status in the system's `ANNOUNCEMENT_LANGUAGE`: "linked to" and the static TGs the hotspot still has on that slot (its OPTIONS and the MASTER's `TS1_STATIC` / `TS2_STATIC`, up to four), else "linked to *N*" with a `DEFAULT_REFLECTOR`, else "not linked".
+
+- A **group** call to TG 4000 is answered with a group call from the server voice ID to **TG 4000** on that slot: the radio hears it on the contact it just used.
+- A **private** call to ID 4000 is answered with a private call **from ID 4000** to the caller, which hotspot configurations map back to the private contact (e.g. `PCRewrite …,84000,…,4000,…`).
+
+Other hotspots on a shared MASTER do not hear it, it never goes to OpenBridge, and it stops if that hotspot starts receiving another stream on the slot. It is paced on the reactor, one frame every 58 ms. One reply per over; none if the terminator is lost.
+
+**Shared MASTER, legs:** a dynamic leg the sender was the only one using (no other connected hotspot holds that TG on that slot as a dynamic session, an OPTIONS static or a YAML static) is set IDLE right away instead of waiting for its timer.
 
 ### `SINGLE_MODE` impact on in-band deactivation
 

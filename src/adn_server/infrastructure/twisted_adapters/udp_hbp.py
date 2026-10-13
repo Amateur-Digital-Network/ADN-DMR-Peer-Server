@@ -58,8 +58,10 @@ from ...application.routing.helpers import (
     is_server_originated_voice,
     is_special_tg,
     is_unit_data_ingress,
+    master_dynamic_tg_slots,
     parse_dmrd_route_fields,
     peer_downlink_voice_slot,
+    peer_is_simplex,
     peer_matches_rf_source,
     peer_should_receive_group_voice,
     peer_single_exclusive_tgid,
@@ -73,6 +75,7 @@ from ...application.routing.helpers import (
 )
 from ...application.routing.peer_downlink_index import (
     build_peer_downlink_index,
+    cached_peer_static_tgs,
     count_connected_peers,
     invalidate_peer_options_cache,
 )
@@ -231,11 +234,12 @@ class HBPProtocol(DatagramProtocol):
         dmrd_received: Callable[..., None] | None = None,
         get_user_password_callback: Callable[[int], bytes | None] | None = None,
         on_play_file_request: Callable[[str, str], None] | None = None,
-        on_tg4000_voice: Callable[[str, bytes, int], None] | None = None,
+        on_tg4000_voice: Callable[..., None] | None = None,
         on_handle_recording: Callable[..., None] | None = None,
         on_in_band_signalling: Callable[[str, int, bytes, float], None] | None = None,
         on_options_received: Callable[..., None] | None = None,
         on_deactivate_dynamic_relays: Callable[[str], None] | None = None,
+        on_release_dynamic_leg: Callable[[str, int, int], bool] | None = None,
         on_obp_bcsq_received: Callable[[str, bytes, bytes], None] | None = None,
         on_talker_alias_local_repeat: Callable[[str, bytes, bytes, bytes], None] | None = None,
         on_talker_alias_repeat_prepare: Callable[[str, bytes, bytes, bytes, int, bytes, str], None] | None = None,
@@ -262,6 +266,7 @@ class HBPProtocol(DatagramProtocol):
         self._on_in_band_signalling = on_in_band_signalling
         self._on_options_received = on_options_received
         self._on_deactivate_dynamic_relays = on_deactivate_dynamic_relays
+        self._on_release_dynamic_leg = on_release_dynamic_leg
         self._on_obp_bcsq_received = on_obp_bcsq_received
         self._on_talker_alias_local_repeat = on_talker_alias_local_repeat
         self._on_talker_alias_repeat_prepare = on_talker_alias_repeat_prepare
@@ -644,6 +649,7 @@ class HBPProtocol(DatagramProtocol):
         hotspot on it.
         """
         peer = self._peers.get(peer_id, {})
+        held_by_sender = self._peer_dynamic_tg_slots(peer_id)
         clear_peer_ua_sessions(peer, self._config, peer_id)
         clear_peer_rx_status_slots(self.STATUS, peer_id)
         if self._dynamic_tg_uc is not None:
@@ -653,7 +659,8 @@ class HBPProtocol(DatagramProtocol):
         if self._inject_multi_peer_options_filter():
             # The MASTER's legs are shared by every hotspot on it: in-band 4000 signalling would
             # set all of them IDLE on this slot (dynamics and OPTIONS statics of the others).
-            # This peer's own dynamics are what was cleared above.
+            # This peer's own dynamics are what was cleared above; a leg only it held goes too.
+            self._release_legs_nobody_else_holds(peer_id, held_by_sender)
             self._mark_downlink_index_dirty()
             self._push_config_to_monitor()
             logger.info(
@@ -670,6 +677,48 @@ class HBPProtocol(DatagramProtocol):
             )
             self._on_deactivate_dynamic_relays(self._system)
 
+    def _peer_dynamic_tg_slots(self, peer_id: bytes) -> set[tuple[int, int]]:
+        """(TG, slot) pairs this hotspot holds as dynamic UA sessions (SINGLE=1 and SINGLE=0)."""
+        pk = bytes_4(int_id(peer_id))
+        held: set[tuple[int, int]] = set()
+        single = (self._config.get("_PEER_UA_SESSIONS") or {}).get(pk)
+        if isinstance(single, dict):
+            for slot, entry in single.items():
+                if isinstance(entry, dict) and int(entry.get("tgid", 0) or 0):
+                    held.add((int(entry["tgid"]), int(slot)))
+        multi = (self._config.get("_PEER_UA_MULTI_TGS") or {}).get(pk)
+        if isinstance(multi, dict):
+            for slot, tgs in multi.items():
+                for tg in tgs or ():
+                    held.add((int(tg), int(slot)))
+        return held
+
+    def _peer_static_tgs_on_slot(self, peer: dict[str, Any], slot: int) -> tuple[int, ...]:
+        """A hotspot's static TGs on ``slot``: its MASTER's TS1/TS2_STATIC and its OPTIONS (both lists if simplex)."""
+        ts1, ts2 = cached_peer_static_tgs(peer)
+        listed = (*ts1, *ts2) if peer_is_simplex(peer) else (ts1 if int(slot) == 1 else ts2)
+        return tuple(dict.fromkeys(int(tg) for tg in listed if str(tg).isdigit() and int(tg) > 0))
+
+    def _release_legs_nobody_else_holds(self, peer_id: bytes, held_by_sender: set[tuple[int, int]]) -> None:
+        """After a 4000 on a shared MASTER, set IDLE the dynamic legs only the sender was using.
+
+        A leg stays while any other connected hotspot holds that TG on that slot as a dynamic
+        session or a static (OPTIONS or YAML).
+        """
+        if not held_by_sender or self._on_release_dynamic_leg is None:
+            return
+        now = time.time()
+        others = [
+            p for pid, p in self._peers.items()
+            if pid != peer_id and isinstance(p, dict) and p.get("CONNECTION") == "YES"
+        ]
+        for tgid, slot in sorted(held_by_sender):
+            if slot in master_dynamic_tg_slots(self._config, tgid, now=now):
+                continue
+            if any(tgid in self._peer_static_tgs_on_slot(p, slot) for p in others):
+                continue
+            self._on_release_dynamic_leg(self._system, tgid, slot)
+
     def _handle_tg4000_packet(
         self,
         peer_id: bytes,
@@ -685,7 +734,8 @@ class HBPProtocol(DatagramProtocol):
         """Legacy early return for TG/ID 4000; reset once per PTT on voice header only.
 
         With ``TG4000_VOICE`` the terminator of the over also queues one voice reply to this
-        hotspot (``VoiceUseCases.tg4000_voice``).
+        hotspot (``VoiceUseCases.tg4000_voice``): a group 4000 on TG 4000, a private 4000 as a
+        private call from ID 4000 to the caller, naming the statics it still has on that slot.
         """
         if int_dst_id != 4000:
             return False
@@ -704,7 +754,12 @@ class HBPProtocol(DatagramProtocol):
             for sid in [k for k, t in self._tg4000_answered.items() if now - t > 60]:
                 del self._tg4000_answered[sid]
             self._tg4000_answered[stream_id] = now
-            reactor.callInThread(self._on_tg4000_voice, self._system, peer_id, slot)
+            reactor.callInThread(
+                self._on_tg4000_voice, self._system, peer_id, slot,
+                rf_src=rf_src,
+                private=call_type == "unit",
+                linked=self._peer_static_tgs_on_slot(self._peers.get(peer_id, {}), slot),
+            )
         return True
 
     def purge_peer_dynamic_tgs(self, peer_id: bytes) -> bool:
@@ -915,7 +970,7 @@ class HBPProtocol(DatagramProtocol):
         self.transport.write(_packet, self._peers[_peer]["SOCKADDR"])
 
     def send_prompt_to_peer(self, peer_id: bytes, packet: bytes) -> bool:
-        """One frame of a server prompt for one hotspot only (the TG 4000 voice reply).
+        """One frame of a server prompt for one hotspot only (the TG/ID 4000 voice reply, group or private).
 
         The hotspot did not subscribe to the prompt's TG, so the OPTIONS filter does not
         apply; its own slot gate does: False (frame not sent) when it is busy with another
@@ -926,11 +981,17 @@ class HBPProtocol(DatagramProtocol):
         if not isinstance(peer, dict) or peer.get("CONNECTION") != "YES":
             return False
         packet = b"".join([packet[:11], peer_id, packet[15:]])
+        bits = packet[15]
+        slot = 2 if bits & 0x80 else 1
+        # The slot gate and tracking are per TG: a private reply (from ID 4000) is checked and
+        # tracked as TG 4000 on its slot, so routed group voice does not start under it.
+        gate = packet if not bits & 0x40 else synthetic_group_dmrd_burst_packet(
+            slot, 4000, packet[16:20], frame_type=(bits >> 4) & 0x3, dtype_vseq=bits & 0xF,
+        )
         ctx = self._downlink_ctx()
-        if not peer_accepts_group_dmrd_packet(ctx, peer_id, peer, packet, routed=True):
+        if not peer_accepts_group_dmrd_packet(ctx, peer_id, peer, gate, routed=True):
             return False
-        route = parse_dmrd_route_fields(packet)
-        track_peer_group_dmrd(ctx, peer_id, packet, peer, from_ingress=False, voice_slot=route[0] if route else None)
+        track_peer_group_dmrd(ctx, peer_id, gate, peer, from_ingress=False, voice_slot=slot)
         self.transport.write(packet, peer["SOCKADDR"])
         return True
 
@@ -2605,11 +2666,12 @@ def HBPProtocolFactory(
     dmrd_received: Callable[..., None] | None = None,
     get_user_password_callback: Callable[[int], bytes | None] | None = None,
     on_play_file_request: Callable[[str, str], None] | None = None,
-    on_tg4000_voice: Callable[[str, bytes, int], None] | None = None,
+    on_tg4000_voice: Callable[..., None] | None = None,
     on_handle_recording: Callable[..., None] | None = None,
     on_in_band_signalling: Callable[[str, int, bytes, float], None] | None = None,
     on_options_received: Callable[..., None] | None = None,
     on_deactivate_dynamic_relays: Callable[[str], None] | None = None,
+    on_release_dynamic_leg: Callable[[str, int, int], bool] | None = None,
     on_obp_bcsq_received: Callable[[str, bytes, bytes], None] | None = None,
     on_talker_alias_local_repeat: Callable[[str, bytes, bytes, bytes], None] | None = None,
     on_talker_alias_repeat_prepare: Callable[[str, bytes, bytes, bytes, int, bytes, str], None] | None = None,
@@ -2635,6 +2697,7 @@ def HBPProtocolFactory(
         on_in_band_signalling=on_in_band_signalling,
         on_options_received=on_options_received,
         on_deactivate_dynamic_relays=on_deactivate_dynamic_relays,
+        on_release_dynamic_leg=on_release_dynamic_leg,
         on_obp_bcsq_received=on_obp_bcsq_received,
         on_talker_alias_local_repeat=on_talker_alias_local_repeat,
         on_talker_alias_repeat_prepare=on_talker_alias_repeat_prepare,

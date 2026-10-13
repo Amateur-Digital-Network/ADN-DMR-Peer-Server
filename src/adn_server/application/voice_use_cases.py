@@ -39,6 +39,10 @@ from .server_voice import server_voice_rf_src_bytes
 logger = logging.getLogger(__name__)
 
 _FRAME_INTERVAL = 0.058
+# The TG/ID 4000 reply starts this long after the over ends, so the radio is back in receive.
+_TG4000_REPLY_DELAY = 1.0
+# At most this many statics are named in "linked to ..." (each TG is a few digits of speech).
+_MAX_LINKED_SPOKEN = 4
 
 
 @dataclass
@@ -66,12 +70,14 @@ class VoiceUseCases:
         get_protocols: Callable[[], dict[str, Any]] | None = None,
         call_from_reactor: Callable[..., None] | None = None,
         audio_path: str | None = None,
+        call_later: Callable[..., Any] | None = None,
     ) -> None:
         self._voice = voice_provider
         self._config = config
         self._get_protocols = get_protocols
         self._call_from_reactor = call_from_reactor
         self._audio_path = audio_path or ""
+        self._call_later = call_later  # reactor.callLater: paces replies on the reactor, no thread held
 
     def _server_source_id(self) -> bytes:
         return server_voice_rf_src_bytes(self._config)
@@ -80,8 +86,12 @@ class VoiceUseCases:
         """Load AMBE words for given languages (legacy readAMBE.readfiles)."""
         return self._voice.get_ambe_words(languages, audio_path)
 
-    def pkt_gen(self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any]) -> Any:
-        """Generate HBP voice packets for phrase (legacy mk_voice.pkt_gen)."""
+    def pkt_gen(
+        self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any], *, private: bool = False
+    ) -> Any:
+        """Generate HBP voice packets for phrase (legacy mk_voice.pkt_gen); ``private``: unit call."""
+        if private:
+            return self._voice.pkt_gen(rf_src, dst_id, peer, slot, phrase, private=True)
         return self._voice.pkt_gen(rf_src, dst_id, peer, slot, phrase)
 
     def read_single_file(self, audio_path: str, lang: str, file_number: str) -> list:
@@ -167,8 +177,12 @@ class VoiceUseCases:
         _pkt_count = self.play_on_slot(protocol, system, speech, _source_id, bytes_3(9))
         logger.info("(%s) On-demand playback complete: %s (%d packets)", system, file_number, _pkt_count)
 
-    def _link_status_words(self, sys_cfg: dict[str, Any]) -> list[Any] | None:
-        """"not linked", or "linked to <DEFAULT_REFLECTOR>", in the system's language; None without audio."""
+    def _link_status_words(self, sys_cfg: dict[str, Any], linked: tuple[int, ...] = ()) -> list[Any] | None:
+        """The link status in the system's language; None without audio.
+
+        "linked to" and the TGs in ``linked`` (statics still on the slot, at most
+        ``_MAX_LINKED_SPOKEN``), else "linked to <DEFAULT_REFLECTOR>", else "not linked".
+        """
         _lang = sys_cfg.get("ANNOUNCEMENT_LANGUAGE", "en_GB")
         words_by_lang = self.get_ambe_words(_lang, self._audio_path)
         if _lang not in words_by_lang:
@@ -179,7 +193,13 @@ class VoiceUseCases:
             return None
         _say = [silence, silence]
         default_refl = int(sys_cfg.get("DEFAULT_REFLECTOR", 0))
-        if default_refl > 0:
+        if linked:
+            _say.append(words.get("linkedto") or silence)
+            for tg in linked[:_MAX_LINKED_SPOKEN]:
+                _say.append(silence)
+                for digit in str(tg):
+                    _say.append(words.get(digit) or silence)
+        elif default_refl > 0:
             _say.append(silence)
             _say.append(words.get("linkedto") or silence)
             _say.append(silence)
@@ -213,46 +233,59 @@ class VoiceUseCases:
         self.play_on_slot(protocol, system, speech, _source_id, bytes_3(9))
         logger.debug("(%s) disconnected voice thread end", system)
 
-    def tg4000_voice(self, system: str, peer_id: bytes, slot: int) -> int:
-        """Answer a hotspot's TG/ID 4000 with the link status, to that hotspot only. Run from thread.
+    def tg4000_voice(
+        self,
+        system: str,
+        peer_id: bytes,
+        slot: int,
+        *,
+        rf_src: bytes = b"",
+        private: bool = False,
+        linked: tuple[int, ...] = (),
+    ) -> int:
+        """Answer a hotspot's TG/ID 4000 with the link status, to that hotspot only.
 
-        A group call from the server voice ID to TG 4000 on the slot the 4000 came in on: the
-        radio is still on that contact. Sent a second after the over ends, frame by frame on
-        the reactor through ``send_prompt_to_peer``, so it stops if the hotspot gets busy on
-        that slot or leaves. Returns the frames sent.
+        Runs from a worker thread only to load the words and build the frames; playback is
+        paced on the reactor with ``call_later`` (``_TG4000_REPLY_DELAY`` after the over, then
+        one frame per ``_FRAME_INTERVAL``) through ``send_prompt_to_peer``, so it stops if the
+        hotspot gets busy on that slot or leaves. A group 4000 is answered on TG 4000 from the
+        server voice ID (the radio is still on that contact); a private 4000 (``private``) with
+        a private call from ID 4000 to ``rf_src``. Returns the frames queued.
         """
-        if not self._get_protocols or not self._call_from_reactor or not self._audio_path:
+        if not self._get_protocols or not self._call_from_reactor or not self._audio_path or not self._call_later:
             return 0
         protocol = self._get_protocols().get(system)
         if protocol is None or not hasattr(protocol, "send_prompt_to_peer"):
             return 0
-        _say = self._link_status_words(self._config.get("SYSTEMS", {}).get(system, {}))
+        _say = self._link_status_words(self._config.get("SYSTEMS", {}).get(system, {}), tuple(linked))
         if _say is None:
             return 0
-        _source_id = self._server_source_id()
-        speech = self.pkt_gen(_source_id, bytes_3(4000), bytes_4(9), 1 if int(slot) == 2 else 0, _say)
-        time.sleep(1)
-        run = _PromptRun()
-        _next_time = time.time()
-        for pkt in speech:
-            if run.stopped:
-                break
-            _next_time += _FRAME_INTERVAL
-            delay = _next_time - time.time()
-            if delay > 0.001:
-                time.sleep(delay)
-            self._call_from_reactor(self._peer_prompt_frame, protocol, peer_id, pkt, run)
-        logger.info(
-            "(%s) TG 4000 voice reply to peer %s on TS %s: %d frames", system, int_id(peer_id), slot, run.sent,
-        )
-        return run.sent
-
-    @staticmethod
-    def _peer_prompt_frame(protocol: Any, peer_id: bytes, pkt: bytes, run: _PromptRun) -> None:
-        """Reactor side of ``tg4000_voice``: one frame, or stop when the hotspot refuses it."""
-        if run.stopped:
-            return
-        if protocol.send_prompt_to_peer(peer_id, pkt):
-            run.sent += 1
+        ts = 1 if int(slot) == 2 else 0
+        if private and rf_src:
+            frames = list(self.pkt_gen(bytes_3(4000), rf_src, bytes_4(9), ts, _say, private=True))
         else:
-            run.stopped = True
+            frames = list(self.pkt_gen(self._server_source_id(), bytes_3(4000), bytes_4(9), ts, _say))
+        if frames:
+            self._call_from_reactor(self._start_peer_prompt, protocol, system, peer_id, int(slot), frames)
+        return len(frames)
+
+    def _start_peer_prompt(self, protocol: Any, system: str, peer_id: bytes, slot: int, frames: list[bytes]) -> None:
+        """Reactor: schedule the reply's first frame ``_TG4000_REPLY_DELAY`` from now."""
+        run = _PromptRun()
+        start = time.time() + _TG4000_REPLY_DELAY
+        self._call_later(_TG4000_REPLY_DELAY, self._peer_prompt_step, protocol, system, peer_id, slot, frames, 0, start, run)
+
+    def _peer_prompt_step(
+        self, protocol: Any, system: str, peer_id: bytes, slot: int,
+        frames: list[bytes], index: int, start: float, run: _PromptRun,
+    ) -> None:
+        """Reactor: one frame of the reply, then the next one on time; stops at the first refusal."""
+        if index < len(frames) and protocol.send_prompt_to_peer(peer_id, frames[index]):
+            run.sent += 1
+            due = start + (index + 1) * _FRAME_INTERVAL
+            self._call_later(
+                max(0.0, due - time.time()), self._peer_prompt_step,
+                protocol, system, peer_id, slot, frames, index + 1, start, run,
+            )
+            return
+        logger.info("(%s) TG 4000 voice reply to peer %s on TS %s: %d frames", system, int_id(peer_id), slot, run.sent)

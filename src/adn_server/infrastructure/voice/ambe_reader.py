@@ -173,10 +173,10 @@ class DefaultVoiceProvider(VoiceProvider):
         return reader.readSingleFile(rel)
 
     def pkt_gen(
-        self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any]
+        self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any], *, private: bool = False
     ) -> Iterator[bytes]:
         """Generate HBP voice packets for phrase. Legacy mk_voice.pkt_gen."""
-        return _pkt_gen(rf_src, dst_id, peer, slot, phrase)
+        return _pkt_gen(rf_src, dst_id, peer, slot, phrase, private=private)
 
 
 class StubVoiceProvider(VoiceProvider):
@@ -186,7 +186,7 @@ class StubVoiceProvider(VoiceProvider):
         return {}
 
     def pkt_gen(
-        self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any]
+        self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any], *, private: bool = False
     ) -> Iterator[bytes]:
         return iter([])
 

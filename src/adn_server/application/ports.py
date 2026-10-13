@@ -192,8 +192,10 @@ class VoiceProvider(ABC):
         ...
 
     @abstractmethod
-    def pkt_gen(self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any]) -> Any:
-        """Generate HBP voice packets for a phrase (generator). Legacy mk_voice.pkt_gen."""
+    def pkt_gen(
+        self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any], *, private: bool = False
+    ) -> Any:
+        """Generate HBP voice packets for a phrase (generator). Legacy mk_voice.pkt_gen; ``private``: unit call."""
         ...
 
     def read_single_file(self, audio_path: str, lang: str, file_number: str) -> list:

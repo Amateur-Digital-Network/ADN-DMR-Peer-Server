@@ -33,7 +33,7 @@ from bitarray import bitarray
 from ...domain import bytes_4
 from ...domain.dmr import bptc
 from ...domain.dmr.bptc import encode_emblc
-from ...domain.dmr.const import BS_DATA_SYNC, BS_VOICE_SYNC, EMB, LC_OPT, SLOT_TYPE
+from ...domain.dmr.const import BS_DATA_SYNC, BS_VOICE_SYNC, EMB, LC_OPT, LC_OPT_U, SLOT_TYPE
 
 # Precalculated DMRD byte 15 (slot << 7 | this)
 HEADBITS = 0b00100001
@@ -52,11 +52,16 @@ def pkt_gen(
     peer: bytes,
     slot: int,
     phrase: list[Any],
+    *,
+    private: bool = False,
 ) -> Iterator[bytes]:
-    """Generate DMRD voice packets for phrase. Each word in phrase is list of [b0, b1] burst pairs (bitarray)."""
+    """Generate DMRD voice packets for phrase. Each word in phrase is list of [b0, b1] burst pairs (bitarray).
+
+    ``private``: a unit-to-unit call (LC FLCO 3, DMRD call type bit) instead of a group call.
+    """
     stream_id = bytes_4(randint(0x00, 0xFFFFFFFF))
     sdp = rf_src + dst_id + peer
-    lc = LC_OPT + dst_id + rf_src
+    lc = (LC_OPT_U if private else LC_OPT) + dst_id + rf_src
 
     head_lc = bptc.encode_header_lc(lc)
     head_lc = [head_lc[:98], head_lc[-98:]]
@@ -75,7 +80,7 @@ def pkt_gen(
     ]
 
     seq = 0
-    slot_byte = (slot << 7) & 0xFF
+    slot_byte = ((slot << 7) & 0xFF) | (0x40 if private else 0)
 
     for _ in range(3):
         pkt = (

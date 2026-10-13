@@ -178,6 +178,11 @@ class SubscriptionTableMixin:
         from ..subscription.subscription_table_ops import deactivate_all_dynamic_relays_store
 
         deactivate_all_dynamic_relays_store(self._subscription_store, system_name)
+    def release_dynamic_leg(self, system_name: str, tgid: int, slot: int) -> bool:
+        """Set one dynamic leg of a system IDLE (TG/ID 4000 on a shared MASTER, last holder gone)."""
+        from ..subscription.subscription_table_ops import release_dynamic_leg_store
+
+        return release_dynamic_leg_store(self._subscription_store, system_name, tgid, slot)
     def apply_startup_subscriptions(self) -> None:
         """Legacy startup: set default reflectors and static TGs for each MASTER system."""
         prohibited_tgs = (0, 1, 2, 3, 4, 5, 9, 9990, 9991, 9992, 9993, 9994, 9995, 9996, 9997, 9998, 9999)
