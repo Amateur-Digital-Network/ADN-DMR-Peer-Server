@@ -634,7 +634,12 @@ class HBPProtocol(DatagramProtocol):
         rf_src: bytes,
         stream_id: bytes,
     ) -> None:
-        """Clear per-peer UA dynamics and stale STATUS; deactivate bridges on 4000."""
+        """Clear the sender's UA dynamics and stale STATUS on TG/ID 4000.
+
+        A MASTER of its own also runs the in-band 4000 signalling and deactivates all its
+        dynamic bridges; a shared MASTER (proxy target) does not, its legs belong to every
+        hotspot on it.
+        """
         peer = self._peers.get(peer_id, {})
         clear_peer_ua_sessions(peer, self._config, peer_id)
         clear_peer_rx_status_slots(self.STATUS, peer_id)
