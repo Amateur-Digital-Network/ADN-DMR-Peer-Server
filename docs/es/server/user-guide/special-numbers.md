@@ -75,7 +75,14 @@ La activación/desactivación in-band de bridges se aplica sobre **voice termina
 
 **TG 4000 no debe aparecer** como chip UA dinámico en el monitor ni en `peer_dynamic_tgs`.
 
-**Respuesta de voz (`TG4000_VOICE: true` en el MASTER):** al terminar la pasada al 4000 (su terminador), el servidor responde **solo a ese hotspot**, alrededor de un segundo después, con el estado de enlace en el `ANNOUNCEMENT_LANGUAGE` del sistema: «no enlazado», o «enlazado a *N*» si hay `DEFAULT_REFLECTOR`. Es una llamada de grupo del ID de voz del servidor al **TG 4000** por el mismo slot del 4000, así que la radio la oye en el contacto que acaba de usar. Los demás hotspots de un MASTER compartido no la oyen, nunca sale por OpenBridge y se corta si ese hotspot empieza a recibir otro stream por ese slot. Una respuesta por pasada; ninguna si se pierde el terminador.
+**Respuesta de voz (`TG4000_VOICE: true` en el MASTER):** al terminar la pasada al 4000 (su terminador), el servidor responde **solo a ese hotspot**, alrededor de un segundo después, con el estado de enlace en el `ANNOUNCEMENT_LANGUAGE` del sistema: «enlazado a» y los TG estáticos que el hotspot conserva en ese slot (sus OPTIONS y los `TS1_STATIC` / `TS2_STATIC` del MASTER, hasta cuatro); si no tiene, «enlazado a *N*» si hay `DEFAULT_REFLECTOR`; si no, «no enlazado».
+
+- Una llamada de **grupo** al TG 4000 se responde con una llamada de grupo del ID de voz del servidor al **TG 4000** por ese slot: la radio la oye en el contacto que acaba de usar.
+- Una llamada **privada** al ID 4000 se responde con una llamada privada **desde el ID 4000** a quien llamó, que las configuraciones de los hotspots devuelven al contacto privado (p. ej. `PCRewrite …,84000,…,4000,…`).
+
+Los demás hotspots de un MASTER compartido no la oyen, nunca sale por OpenBridge y se corta si ese hotspot empieza a recibir otro stream por ese slot. Se reproduce en el reactor, una trama cada 58 ms. Una respuesta por pasada; ninguna si se pierde el terminador.
+
+**MASTER compartido, patas:** una pata dinámica que solo usaba el que hace el 4000 (ningún otro hotspot conectado tiene ese TG en ese slot como sesión dinámica, estático de OPTIONS o estático del YAML) pasa a IDLE en el momento, sin esperar a su temporizador.
 
 ### Impacto de `SINGLE_MODE` en la lógica de desactivación
 

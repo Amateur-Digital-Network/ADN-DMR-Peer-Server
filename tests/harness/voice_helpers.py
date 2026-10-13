@@ -39,9 +39,11 @@ class FakeVoiceProvider:
         peer: bytes,
         slot: int,
         phrase: list[Any],
+        *,
+        private: bool = False,
     ) -> Iterator[bytes]:
         del phrase
-        ts_bit = 0x80 if slot else 0
+        ts_bit = (0x80 if slot else 0) | (0x40 if private else 0)
         stream_id = bytes_4(0xA0A0A0A0)
         for seq in range(3):
             yield b"DMRD" + bytes([seq]) + rf_src[:3] + dst_id[:3] + peer[:4] + bytes([ts_bit | 0x10]) + stream_id + b"\x00" * 33 + b"\x00\x00"
