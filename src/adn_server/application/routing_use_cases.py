@@ -348,7 +348,10 @@ class RoutingUseCases(
                     if src_proto and getattr(src_proto, "STATUS", None):
                         slot_st = src_proto.STATUS.get(slot, {})
                         if isinstance(slot_st, dict):
-                            _is_new_rx_stream = stream_id != slot_st.get("RX_STREAM_ID")
+                            _is_new_rx_stream = (
+                                stream_id != slot_st.get("RX_STREAM_ID")
+                                and stream_id not in slot_st.get("RX_STREAMS", ())
+                            )
                             _suppress_uplink_rx = bool(slot_st.get("_suppress_uplink"))
                 if _is_new_rx_stream and not _suppress_uplink_rx:
                     _rx_report_peer = peer_id
@@ -393,7 +396,8 @@ class RoutingUseCases(
                     ent = st.get(stream_id)
                     start = ent.get("START") if isinstance(ent, dict) else None
                     if start is None and slot in st:
-                        start = st.get(slot, {}).get("RX_START")
+                        tracked = st.get(slot, {}).get("RX_STREAMS", {}).get(stream_id)
+                        start = tracked[3] if tracked else st.get(slot, {}).get("RX_START")
                     if start is not None:
                         duration = pkt_time - start
                     slot_st_vterm = st.get(slot, {})
