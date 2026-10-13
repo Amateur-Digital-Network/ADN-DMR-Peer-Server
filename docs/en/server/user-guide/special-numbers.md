@@ -67,7 +67,7 @@ In-band bridge activation/deactivation is applied on **voice terminator (VTERM)*
 - Clears per-peer UA sessions in memory (**all slots** for that peer).
 - Deletes matching rows from **`peer_dynamic_tgs`** (MariaDB).
 - Clears stale **STATUS** RX fields so a later **RPTO** does not re-seed the old TG.
-- Runs **in-band bridge deactivation** on the slot (same as legacy).
+- On a MASTER of its own, runs **in-band bridge deactivation** on the slot (same as legacy). On a shared **inject-only** MASTER it does not: its legs belong to every hotspot on it, and in-band 4000 would set them all IDLE on that slot (the other hotspots' dynamics and OPTIONS statics).
 - Sends **`GROUP VOICE,INGRESS,RX,…,4000`** to the monitor (not **START**) so **SINGLE=0** multi-dynamic chips clear **without** lighting a live TX chip.
 - On **inject-only** MASTER, pushes updated **CONFIG_SND** to the monitor.
 

@@ -67,7 +67,7 @@ La activación/desactivación in-band de bridges se aplica sobre **voice termina
 - Limpia sesiones UA del peer en memoria (**todos los slots** de ese peer).
 - Borra filas correspondientes en **`peer_dynamic_tgs`** (MariaDB).
 - Limpia campos RX obsoletos en **STATUS** para que un **RPTO** posterior no re-sembré el TG antiguo.
-- Ejecuta **desactivación in-band** de bridges en el slot (como legacy).
+- En un MASTER propio, ejecuta **desactivación in-band** de bridges en el slot (como legacy). En un MASTER **inject-only** compartido no: sus patas son de todos los hotspots, y el 4000 in-band las pondría todas en IDLE en ese slot (los dinámicos y los estáticos OPTIONS de los demás).
 - Envía **`GROUP VOICE,INGRESS,RX,…,4000`** al monitor (no **START**) para que los chips **SINGLE=0** se limpien **sin** encender TX en vivo.
 - En MASTER **inject-only**, empuja **CONFIG_SND** actualizado al monitor.
 
