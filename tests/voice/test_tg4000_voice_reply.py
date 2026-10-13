@@ -113,12 +113,16 @@ def test_a_prompt_frame_for_a_hotspot_that_left_is_refused() -> None:
 
 
 class _Master:
+    """Accepts the first ``accept`` frames, then refuses, then would accept again (hotspot free)."""
+
     def __init__(self, accept: int = 99) -> None:
         self.frames: list[tuple[bytes, bytes]] = []
+        self.attempts = 0
         self._accept = accept
 
     def send_prompt_to_peer(self, peer_id: bytes, pkt: bytes) -> bool:
-        if len(self.frames) >= self._accept:
+        self.attempts += 1
+        if self.attempts == self._accept + 1:
             return False
         self.frames.append((peer_id, pkt))
         return True
@@ -146,6 +150,9 @@ def test_the_reply_is_a_group_call_from_the_server_to_tg_4000_on_the_same_slot()
 
 
 def test_the_reply_stops_when_the_hotspot_refuses_a_frame() -> None:
+    """Once refused, no later frame is even tried: the reply must not resume half-way
+    when the hotspot is free again."""
     master = _Master(accept=1)
     with patch("adn_server.application.voice_use_cases.time.sleep"):
         assert _voice(master).tg4000_voice(_SYSTEM, _A, 2) == 1
+    assert master.attempts == 2  # the accepted frame and the refused one, nothing after
