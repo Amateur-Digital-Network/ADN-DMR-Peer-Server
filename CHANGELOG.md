@@ -4,6 +4,301 @@ All notable changes to **adn-server** are documented here.
 
 <!-- version list -->
 
+## v2.6.0 (2026-10-14)
+
+### Bug Fixes
+
+- **acl**: OpenBridge systems apply their TGID_ACL
+  ([`ad46496`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/ad46496edd835dfeff1cc00c8096d2ea19116dac))
+
+- **announcements**: Keep mesh voice off the MASTER slot a plugin announcement holds
+  ([`127ef24`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/127ef24ad9f9c710daeef01a1b986a5cd2bfc707))
+
+- **announcements**: Plugin announcements behave like the core ones under routed traffic
+  ([`5c6348a`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/5c6348a96a9b111f52125f55a03ca1905d952da2))
+
+- **config**: Reject PROXY and OBP_PROXY sharing the same LISTEN_PORT
+  ([`35765a5`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/35765a5d824199d1ec6bd4025fec60331bc88964))
+
+- **config-reload**: SIGHUP applies OBP_PROXY
+  ([`3645bd1`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/3645bd103452eb074f9d7509bd27aa6b71d0ad86))
+
+- **hbp**: A 4000 never releases a leg the sender has as a static
+  ([`d8cfcf2`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/d8cfcf239f29a96783c2b6d71dbec14b455464c5))
+
+- **hbp**: Every hotspot stream on a shared MASTER slot gets its END
+  ([`a6059b3`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/a6059b3d27a4408827b164d6ccce7c338ac9d09b))
+
+- **hbp**: Reset a MASTER's bridges only when its last peer is gone
+  ([`fc127e8`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/fc127e8dc20c5353dadfdc1a7d4e992a9dfea9df))
+
+- **hbp**: TG 4000 on a shared MASTER clears the sender's dynamics only
+  ([`9f9dc1f`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/9f9dc1fd9f8c639781006ff5257043101f979ba7))
+
+- **loop-guard**: Hold 1.0 s by default and always under the parrot's 2.0 s
+  ([`ef31359`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/ef31359878765d8871990d7d72b0dd221f93a1db))
+
+- **obp**: Anchor a DNS-named peer by host, not by host and port
+  ([`17a8a8d`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/17a8a8d815436326f635f8f851852fe2acadc753))
+
+- **obp**: Count frames refused for coming from the wrong address
+  ([`55faf79`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/55faf797dae1102bb2e92fbca1b11cc6b7743fe3))
+
+- **obp**: Keep keepalives from relocating a bridge's peer
+  ([`35f5c01`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/35f5c01b3f9f516c4bbb4b2db2fa2e2cf41fee37))
+
+- **obp**: Let a reused stream_id start a new call instead of dropping it
+  ([`c2fd826`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/c2fd82698dd8065987a5ad5723421178ed63247f))
+
+- **obp**: Release per-stream talker-alias state when OBP streams are trimmed
+  ([`59ae137`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/59ae137b60484f0db184eda5ffe56bbe9bea96f9))
+
+- **obp**: Trim idle forward legs so STATUS does not grow per call
+  ([`c3db5b4`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/c3db5b4c421154f7f2490d37d47bd851c1f63843))
+
+- **obp-proxy**: Drop per-packet RX debug for voice, not once-per-stream
+  ([`e8da064`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/e8da064d63cc9ced9e27e9356d249e162fc27210))
+
+- **obp-proxy**: Keep OBP_PROXY config, demux control frames by peer, pin egress
+  ([`38e8c2d`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/38e8c2d60bd28446186037a447c82d44f99c125f))
+
+- **obp-proxy**: Log OBP_PROXY RX once per stream instead of per packet
+  ([`fd82c57`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/fd82c573c8f816fa65dcd2dfe634c8252760b948))
+
+- **obp-proxy**: Re-pin egress after a reload and match peers by configured target
+  ([`7ab5d77`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/7ab5d774a1033d81e054a98bebc9f19155d9dabe))
+
+- **obp-replay**: Judge only what arrived, and do not blame a table we do not have
+  ([`d5755cc`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/d5755cc3f21403a9cfac042cf0cf914e5cdf4520))
+
+- **plugins**: An announcement waits for a QSO on its talkgroup, mesh included
+  ([`117afaf`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/117afafb07adb4c58f90681f1321e2f12263e7de))
+
+- **plugins**: Plugin voice records RX state like a hotspot frame
+  ([`0e61d5d`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/0e61d5d473d028fffba6b3971f816c5a5aee7f58))
+
+- **plugins**: PLUGINS is read from adn-server.yaml and follows SIGHUP
+  ([`c418b1a`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/c418b1a893304fb054617dc8f983b4c129d7bd28))
+
+- **plugins**: Wait on a per-TG last-heard record, with a plugin tg_quiet_s
+  ([`6bf4394`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/6bf4394f38d229de60016a3bc11642f400019623))
+
+- **reload**: A system added by SIGHUP gets its own config, and answers
+  ([`808e61c`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/808e61cab1a4327764503dda8bbf14113bd37839))
+
+- **report**: The monitor shows a MASTER's yaml statics as each hotspot's own
+  ([`eeee4dd`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/eeee4ddc9a55ed8584c473c57346ce04505dd95e))
+
+- **routing**: A stream resuming after a pause resyncs its sequence
+  ([`ddda5ae`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/ddda5aeca9934634e68a0b3a94291c6fa9df812f))
+
+- **routing**: A terminator behind the last sequence still ends the call
+  ([`8e55cbd`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/8e55cbd764e7a712165e9836f65349b979c30c7e))
+
+- **routing**: Another server's announcement over OpenBridge is mesh voice
+  ([`3d9202d`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/3d9202d3c9e90d6f5f9a2e0d767b0223191b92cc))
+
+- **routing**: Compare voice sequence numbers modulo 256 on OBP and HBP ingress
+  ([`0caece5`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/0caece53d51fa46b3d4538b9d24f4fb75297174a))
+
+- **routing**: Don't fan out unit data to OBPs for a fresh local subscriber
+  ([`fa0ceae`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/fa0ceae8a106fd75e21e8e8d1eaee4b97ee382a4))
+
+- **routing**: Tg_quiet_for sees per-stream live voice and overs without terminator
+  ([`b0f6dd2`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/b0f6dd2afd6647ebe8876c22572767935dfb8c72))
+
+- **schema**: Declare connected_at and options on topology peers
+  ([`e7b8701`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/e7b87017a96d4a3fcf13e4465350436e4c73f04d))
+
+- **sub_map**: Save routes within minutes of a change, and atomically
+  ([`915aacf`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/915aacfa82dde1953687ce477ef3b75a9f42a9e9))
+
+- **sub_map**: Unique temp name per save and remove it if the dump fails
+  ([`a74e391`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/a74e391010ab2411bf30ae10dae5309c42cae9e6))
+
+- **subscription**: Unindex a leg by where it was indexed, not by its state now
+  ([`e5bc60f`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/e5bc60fd17089ddbd9ffb2ae78555d35a0cd38b1))
+
+- **tools**: Hotspot_probe rows carry the UTC date
+  ([`0e3324f`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/0e3324f2ab432d27aa52d8866ecbc40a395e4043))
+
+- **unit-data**: Do not send unit data back to the hotspot it came from
+  ([`4b6e5cd`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/4b6e5cd602753f82f6ce489755b018afc2198e66))
+
+- **voice**: A private call to 9991-9999 plays its on-demand file again
+  ([`02ce1b4`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/02ce1b4e952c2858e99f5b3b3b9c456e723d6a65))
+
+- **voice**: A server prompt holds its slot after mesh voice used it
+  ([`75067b7`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/75067b761d9e6be8c16804af0ecc3a36682ce5e0))
+
+- **voice**: Server prompts hold TS2 while they play
+  ([`9283bd7`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/9283bd73bdff5b0578a65c869c2fe572befa11d6))
+
+### Documentation
+
+- Sync the guides with what changed since 2.5.6
+  ([`ee482c2`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/ee482c210618a962901a8768a60a2da198461a90))
+
+- TG 4000 in-band deactivation only on a MASTER of its own
+  ([`9cc02c6`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/9cc02c6b1f156a3631f3113e03a4d1cc6f3b542d))
+
+- **hbp**: _apply_tg4000_reset says what a shared MASTER skips
+  ([`306650d`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/306650d30b559c409f55e2a08f21907a21ed9689))
+
+- **obp-replay**: What a live master taught about reading the report
+  ([`091d260`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/091d2609a79fab02ab6f4b4e35ee5805c56c8523))
+
+- **readme**: Sync version parity note to 2.6, translate README_es.md
+  ([`5a4741f`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/5a4741fac481019df6cbddb88b0ed3e4b9d847cb))
+
+- **routing**: The seq-0 terminator comes from client apps in general
+  ([`b445863`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/b4458630ef24a2e23d9ea4453295cdde6c4a5c4b))
+
+### Features
+
+- **hbp**: TS1_STATIC / TS2_STATIC reach every hotspot of their MASTER
+  ([`b910155`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/b9101552c83594db78f350e29166178e63aeca10))
+
+- **loop-guard**: Catch voice coming back through transcoding bridges
+  ([`a83cfd5`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/a83cfd5b1bcffe2c8f0642147483735460962b32))
+
+- **loop-guard**: Count all OpenBridge links as one ingress, the mesh
+  ([`269fb8e`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/269fb8e17910d5c91613bbd2d7fe6761967aa380))
+
+- **loop-guard**: Drop bridge loop echoes by default
+  ([`ab54a0c`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/ab54a0cc0ac07b2026dbdf66e6c972bfb92efb2e))
+
+- **obp**: Anchor a bridge's peer to DNS when TARGET_IP is a hostname
+  ([`d5d44b1`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/d5d44b1fde7cd19ad3651ad3983782fba6c9bc6b))
+
+- **obp**: CALL END counts every missed packet and shows the longest gap
+  ([`0e1eeac`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/0e1eeaca1542c2974d9eacffa79b0229f7134e66))
+
+- **obp**: Replay a capture through the ingress to see why frames were refused
+  ([`5c24ecb`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/5c24ecb48bb7bd52dc962b0e48a64b61467f3c40))
+
+- **obp**: Warn when two bridges share a passphrase
+  ([`2ed5d74`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/2ed5d74bc61e362a2f62908a6fa6c2a32f7fd997))
+
+- **plugins**: Group voice from plugins, routed like announcements
+  ([`ecddd11`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/ecddd1191d17432cf4175b3e1141851501950fb9))
+
+- **plugins**: Let a plugin send unit data, opt-in per plugin
+  ([#103](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/pull/103),
+  [`0c3432e`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/0c3432ebfd31b2ae8e702f3cc1e0ce868f837ad0))
+
+- **plugins**: Voice-announcements plugin (scheduled, TTS, beacons)
+  ([`620a2b7`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/620a2b7b43d0927667d121a5a388c9ff4073c7c5))
+
+- **plugins**: Voice_slot_for_tg and monitor TX for plugin voice
+  ([`d76de25`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/d76de25cbc8a26be1c77a62c7f8f282d13a454ab))
+
+- **report**: Send peer latitude, longitude and height
+  ([`805aa92`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/805aa92a58abe9cdaeed27d7a36878226ac322b1))
+
+- **sub-map**: Per-system SUB_MAP_LEARN for service systems
+  ([`0b8e45d`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/0b8e45d6639ce4d474fedc80a10293e6fb4737b5))
+
+- **tools**: Hotspot_probe, a listen-only hotspot that records what reaches it
+  ([`31c4aa2`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/31c4aa22e7ec4c349a6aeeb5a7e93df0aebd46d6))
+
+- **voice**: TG 4000 follow-up: private reply, statics named, reactor pacing, sender-only legs
+  ([`2d5efaa`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/2d5efaa72d992ca43fa0e4a6e2857d0d6b24b684))
+
+- **voice**: TG4000_VOICE answers a hotspot's TG / ID 4000 with the link status
+  ([`868c507`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/868c5079ea5fb485333114693427210264515603))
+
+- **voice**: TG4000_VOICE on by default
+  ([`b4a41bc`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/b4a41bcf5938af7a3934bdf37a31ea4ad453c7ab))
+
+### Performance Improvements
+
+- **alias**: Reload alias files only when they change
+  ([`3bbc174`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/3bbc17497362b9806e4ce473c27f0c863171d8b3))
+
+- **aliases**: Download the lists when their published checksum changes
+  ([`1f06564`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/1f06564237109eb2c6f63056e2d2aed1595201aa))
+
+- **aliases**: Stop each alias reload from raising the server's memory
+  ([`1aa602a`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/1aa602a934d0379125109d7aefb068a7acc19764))
+
+- **auth**: Load user passwords when they change, not every 10s
+  ([`5ee724d`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/5ee724dc92f035b23977448134a958430c80f8d6))
+
+- **hbp**: Parse a peer's OPTIONS and RF mode when they change, not per frame
+  ([`cb70a1c`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/cb70a1cae6547769418b4a505fbcbfbdf63c8b58))
+
+- **obp**: Derive a bridge's dns_host on reload, not on every lookup
+  ([`fea9507`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/fea9507fe85f2b6ca6754fcc559a65fb1007190f))
+
+- **obp**: Stop repeating per-frame work in OBP ingress
+  ([`d0fc702`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/d0fc7020f70403122e748495938f221a11644957))
+
+- **plugins**: Build only the events some plugin wants; batch deferred ones
+  ([`d74ef04`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/d74ef04bfc6975d4caf99d194184dda7528683dc))
+
+- **report**: Stop deep-copying every hotspot for each virtual SYSTEM-N
+  ([`579e844`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/579e844c18a63f7b9db0e8be6376d6964d9dcd2f))
+
+- **routing**: Encode a call's LC once for all its legs; index legs by system
+  ([`3396030`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/3396030ac3f317596e79467dcc9fa68328b50c5d))
+
+- **routing**: Stop rescanning the subscription store per voice frame
+  ([`1896a24`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/1896a2484205f5bcc18deeac14014fd303d6562d))
+
+- **sub-map**: Cache the SUB_MAP_LEARN decision on the HBP protocol
+  ([`ec69f90`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/ec69f90776b9fb29474d6575db10666f4a1b9d0b))
+
+- **subscription**: Answer store_has_table from the index, not a scan
+  ([`91ff612`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/91ff6128d9c23951e25a8d68e4cf10b1a99cb7ca))
+
+- **talker-alias**: Stop re-decoding a stream's alias once it is complete
+  ([`703b013`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/703b013a62f5acd03d897150f33cd267193bf9df))
+
+### Refactoring
+
+- **alias**: One loader with .bak fallback, so the TSV caches too
+  ([`77cc451`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/77cc451c04a21c2cc1a1c4a894f3f50fad034dbc))
+
+- **hbp**: One ACL gate for the MASTER and PEER ingress paths
+  ([`82e8450`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/82e845088e8e205f1375b588d727db32e240ac1c))
+
+- **loop-guard**: Cap the hold at the parrot's own PLAYBACK_DELAY_S
+  ([`3e74b10`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/3e74b100ada6effcca416c548a124aa11dd3e37c))
+
+- **obp**: Drive OpenBridge ingress from an engine that answers with effects
+  ([`e105d49`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/e105d493f05c170a42e2a8c03ed5f4897d783449))
+
+- **obp**: Give each bridge a session instead of writing state into its config
+  ([`05915a8`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/05915a8207428bd03c66d64036de42152716e7e0))
+
+- **obp**: Lift ingress admission out of the hblink port into the domain
+  ([`616d939`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/616d939f5b358e6544682371456729b6fb5ce937))
+
+- **routing**: Address review on the forward plan cache
+  ([`7c8db55`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/7c8db554a3e21393c8e5cfb84f1c2e7e7d483d68))
+
+- **voice**: Address review on the prompt slot hold
+  ([`01abfe3`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/01abfe3bdd0bd4fc372b3e686c754b1dd768ce81))
+
+- **voice**: Scheduled announcements and TTS leave the core
+  ([`1ab9036`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/1ab9036345a8f9ad1bcb8348d40d7e55d1a49f1d))
+
+- **voice-announcements**: Use server_id_bytes()
+  ([`0dd50cd`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/0dd50cd752975f805c8c13edd031ef2cbbb87d6b))
+
+### Testing
+
+- **hbp**: TG 4000 tests on the shared repeat stack with real routing
+  ([`2c9f668`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/2c9f668131fb971ab5dad76d17367e6d7a8feedd))
+
+- **report**: Cover peer latitude/longitude/height in topology payload
+  ([`d0da3aa`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/d0da3aa80e56d5e84ad3a8a91cbe490123835f2c))
+
+- **voice**: A refused TG 4000 reply frame is the last one tried
+  ([`e85c056`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/e85c0560f873b53bc4c2d84d8acae56609b0776e))
+
+
 ## v2.5.6 (2026-09-19)
 
 ### Bug Fixes
