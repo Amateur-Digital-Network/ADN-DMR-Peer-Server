@@ -125,6 +125,11 @@ Ver ejemplo completo en `schemas/examples/dashboard_state.json` (mismo objeto qu
 | `systems[].repeat` | bool | no | Repeat en master. |
 | `systems[].enhanced_obp` | bool | no | OBP enhanced. |
 | `systems[].peers[]` | array | no | `{id, connected, ip?, port?}` por radio peer. |
+| `systems[].peers[].latitude`, `longitude`, `height` | string | no | Datos del sitio tal como los envió el peer en RPTC. |
+| `systems[].peers[].options` | string | no | Línea OPTIONS con los TG estáticos que el peer recibe de verdad (los suyos más `TS1_STATIC` / `TS2_STATIC` del MASTER, primero los del yaml); sin `PASS=`. |
+| `systems[].peers[].ts1_static`, `ts2_static` | array de string | no | TG estáticos que el peer recibe de verdad por slot, en el mismo orden. |
+| `systems[].peers[].single_mode` | bool | no | `SINGLE=1` de las OPTIONS del peer; si no, `SINGLE_MODE` del MASTER. |
+| `systems[].peers[].ua_timer_min` | number | no | `TIMER` de las OPTIONS del peer (minutos); si no, `DEFAULT_UA_TIMER`; se omite si es infinito. |
 
 Sin contraseñas ni material de cifrado (a diferencia del pickle legacy).
 

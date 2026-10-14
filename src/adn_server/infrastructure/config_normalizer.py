@@ -31,6 +31,8 @@ import logging
 import socket
 import time
 
+from adn_server.application.report.payloads import system_static_tgs
+
 
 def expand_generator(config: dict, logger: logging.Logger) -> None:
     """Replace MASTER systems with GENERATOR > 1 by SYSTEM-0, SYSTEM-1, ... (legacy generator)."""
@@ -74,6 +76,8 @@ def ensure_system_runtime_config(config: dict) -> None:
     for name, sys_cfg in config.get("SYSTEMS", {}).items():
         if sys_cfg.get("MODE") == "MASTER":
             sys_cfg.setdefault("PEERS", {})
+            # Read here, on the config as loaded: TS1/TS2_STATIC are later rewritten from the hotspots' OPTIONS.
+            sys_cfg["_YAML_STATIC"] = system_static_tgs(sys_cfg)
         elif sys_cfg.get("MODE") == "PEER":
             sys_cfg.setdefault("STATS", {
                 "CONNECTION": "NO",
@@ -151,6 +155,8 @@ def normalize_obp_config(config: dict) -> None:
         sys_cfg["NETWORK_ID"] = (net_id & 0xFFFFFFFF).to_bytes(4, "big")
         target_ip = str(sys_cfg.get("TARGET_IP", ""))
         target_port = int(sys_cfg.get("TARGET_PORT", 62044))
+        # Resolving overwrites TARGET_IP, so keep the name, as PEER keeps _MASTER_IP.
+        sys_cfg["_TARGET_IP"] = target_ip
         if target_ip:
             try:
                 resolved = socket.gethostbyname(target_ip)
@@ -174,6 +180,4 @@ def normalize_obp_config(config: dict) -> None:
         sys_cfg["PASSPHRASE"] = (p + b"\x00" * 20)[:20]
         sys_cfg.setdefault("RELAX_CHECKS", True)
         sys_cfg.setdefault("ENHANCED_OBP", True)
-        if "TG1_ACL" not in sys_cfg and "TGID_ACL" in sys_cfg:
-            sys_cfg["TG1_ACL"] = sys_cfg["TGID_ACL"]
         sys_cfg.setdefault("TG2_ACL", "PERMIT:ALL")

@@ -1,0 +1,4 @@
+enabled: false
+
+# Relative to adn-server project root (created on write if missing).
+output_dir: example-events

@@ -45,6 +45,26 @@ def test_reports_missing_security_fields_when_url_set() -> None:
     assert "GLOBAL.PASS_SECURITY" in msg
 
 
+def test_rejects_proxy_and_obp_proxy_same_port() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {
+        "MASTER1": {"MODE": "MASTER"},
+        "OBP1": {
+            "MODE": "OPENBRIDGE",
+            "NETWORK_ID": 73044,
+            "PASSPHRASE": "x",
+            "TARGET_IP": "127.0.0.1",
+            "TARGET_PORT": 62044,
+        },
+    }
+    config["PROXY"] = {"TARGET_SYSTEM": "MASTER1", "LISTEN_PORT": 62032}
+    config["OBP_PROXY"] = {"LISTEN_PORT": 62032}
+    config["DATABASE"] = {"DB_NAME": "x", "DB_USERNAME": "x"}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "PROXY.LISTEN_PORT and OBP_PROXY.LISTEN_PORT" in str(exc.value)
+
+
 def test_collects_multiple_errors() -> None:
     with pytest.raises(ConfigError) as exc:
         validate_config(
@@ -63,3 +83,81 @@ def test_collects_multiple_errors() -> None:
     msg = str(exc.value)
     assert "bad.yaml" in msg
     assert msg.count("  - ") >= 4
+
+
+def test_accepts_sub_map_learn_bool_on_peer() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"BRIDGE": {"MODE": "PEER", "SUB_MAP_LEARN": False}}
+    validate_config(config)
+
+
+def test_rejects_non_bool_sub_map_learn() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"BEACON": {"MODE": "MASTER", "SUB_MAP_LEARN": "no"}}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "SYSTEMS.BEACON.SUB_MAP_LEARN: expected boolean" in str(exc.value)
+
+
+def test_rejects_sub_map_learn_on_openbridge() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {
+        "OBP1": {
+            "MODE": "OPENBRIDGE",
+            "NETWORK_ID": 73044,
+            "PASSPHRASE": "x",
+            "TARGET_IP": "127.0.0.1",
+            "TARGET_PORT": 62044,
+            "SUB_MAP_LEARN": False,
+        },
+    }
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "SYSTEMS.OBP1.SUB_MAP_LEARN: not supported on OPENBRIDGE" in str(exc.value)
+
+
+@pytest.mark.parametrize("value", [True, False, "log"])
+def test_accepts_loop_guard_values(value) -> None:
+    config = _minimal_config(LOOP_GUARD_HOLD=1.5)
+    config["SYSTEMS"] = {"BRIDGE": {"MODE": "PEER", "LOOP_GUARD": value}}
+    validate_config(config)
+
+
+@pytest.mark.parametrize("value", ["yes", "drop", 1, 0])
+def test_rejects_other_loop_guard_values(value) -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"BRIDGE": {"MODE": "PEER", "LOOP_GUARD": value}}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "SYSTEMS.BRIDGE.LOOP_GUARD: expected true, false or \"log\"" in str(exc.value)
+
+
+@pytest.mark.parametrize("hold", [0, -1, 2, 2.0, 3.5, "1"])
+def test_rejects_bad_loop_guard_hold(hold) -> None:
+    with pytest.raises(ConfigError) as exc:
+        validate_config(_minimal_config(LOOP_GUARD_HOLD=hold))
+    assert "GLOBAL.LOOP_GUARD_HOLD" in str(exc.value)
+
+
+def test_accepts_tg4000_voice_bool_on_master() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"SYSTEM": {"MODE": "MASTER", "TG4000_VOICE": True}}
+    config["PROXY"] = {"TARGET_SYSTEM": "SYSTEM", "LISTEN_PORT": 62031}
+    config["DATABASE"] = {"DB_NAME": "x", "DB_USERNAME": "x"}
+    validate_config(config)
+
+
+def test_rejects_non_bool_tg4000_voice() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"SYSTEM": {"MODE": "MASTER", "TG4000_VOICE": "yes"}}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "SYSTEMS.SYSTEM.TG4000_VOICE: expected boolean" in str(exc.value)
+
+
+def test_rejects_tg4000_voice_outside_a_master() -> None:
+    config = _minimal_config()
+    config["SYSTEMS"] = {"BRIDGE": {"MODE": "PEER", "TG4000_VOICE": True}}
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "SYSTEMS.BRIDGE.TG4000_VOICE: only on MASTER" in str(exc.value)

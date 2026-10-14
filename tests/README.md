@@ -87,14 +87,12 @@ Mark new stack tests with `@pytest.mark.integration`.
 
 | File | Tests | Topic |
 |------|-------|-------|
-| `test_announcement_anticollision.py` | 3 | Busy slot skip / abort |
-| `test_broadcast_queue.py` | 2 | Same-TG broadcast queue |
 | `test_disconnected_voice.py` | 3 | Not-linked / reflector prompts |
 | `test_in_band_signalling.py` | 5 | Reflector / single-mode VTERM |
 | `test_play_file_on_request.py` | 3 | On-demand file playback |
-| `test_scheduled_announcement.py` | 4 | File announcements (AMBE) |
-| `test_scheduled_tts.py` | 7 | TTS schedule + conversion |
-| `test_voice_config_reload.py` | 3 | Hot reload announcement/TTS loops |
+| `test_prompt_holds_slot.py` | 4 | Server prompts hold TS2 while they play |
+
+Scheduled announcements, TTS and beacons are tested with their plugin: `plugins/voice-announcements/tests/`.
 
 ### talker_alias/
 

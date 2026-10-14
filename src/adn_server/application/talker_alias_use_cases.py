@@ -83,14 +83,10 @@ def format_talker_alias_text(config: dict[str, Any], rf_src: bytes) -> str:
     settings = talker_alias_settings(config)
     template = settings["format"]
     rid = int_id(rf_src)
-    profiles = config.get("_SUB_PROFILES", {})
-    profile = profiles.get(rid, {})
-    sub_ids = config.get("_SUB_IDS", {})
-    callsign = profile.get("callsign") or sub_ids.get(rid) or ""
-    fname = profile.get("fname") or ""
-    surname = profile.get("surname") or ""
-    if profile.get("talker_alias"):
-        text = str(profile["talker_alias"])
+    callsign, fname, surname, talker_alias = config.get("_SUB_PROFILES", {}).get(rid) or (None, "", "", "")
+    callsign = callsign or config.get("_SUB_IDS", {}).get(rid) or ""
+    if talker_alias:
+        text = talker_alias
     else:
         try:
             text = template.format(

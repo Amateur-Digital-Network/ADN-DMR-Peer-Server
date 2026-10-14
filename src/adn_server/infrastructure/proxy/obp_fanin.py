@@ -28,6 +28,7 @@ from typing import Any, Protocol
 
 from twisted.internet.protocol import DatagramProtocol
 
+from adn_server.domain.mesh_session import MeshSessionStore
 from adn_server.infrastructure.hbp_constants import BCKA, BCSQ, BCST, BCVE, DMRD, DMRE
 from adn_server.infrastructure.mesh.obp_v1 import verify_bcka, verify_bcsq, verify_bcst, verify_bcve
 from adn_server.infrastructure.udp_rcvbuf import apply_udp_rcvbuf, udp_rcvbuf_bytes
@@ -46,17 +47,28 @@ class _ObpReceiver(Protocol):
 
 
 class ObpIngressReplyTransport:
-    """Route OBP egress through the fan-in socket that last received for this bridge."""
+    """Route OBP egress through this bridge's own socket.
+
+    Priority: pinned socket (the bridge's legacy listener, when bound) > socket that
+    last received for this bridge > shared fan-in. Leaving egress on the shared fan-in
+    makes remote peers learn LISTEN_PORT as our source and reply there, where control
+    frames (no NETWORK_ID) can only be told apart by passphrase.
+    """
 
     def __init__(self, fallback: _DatagramWriter) -> None:
         self._fallback = fallback
         self._active: _DatagramWriter | None = None
+        self._pinned: _DatagramWriter | None = None
+
+    def pin(self, transport: _DatagramWriter) -> None:
+        """Bind egress to this bridge's own socket."""
+        self._pinned = transport
 
     def note_ingress(self, transport: _DatagramWriter) -> None:
         self._active = transport
 
     def write(self, data: bytes, addr: tuple[str, int]) -> None:
-        transport = self._active or self._fallback
+        transport = self._pinned or self._active or self._fallback
         transport.write(data, addr)
 
 
@@ -70,6 +82,23 @@ class InProcessObpSink:
         self._hbp._obp_datagram_received(data, client_addr)
 
 
+def peer_sock_from_config(cfg: dict[str, Any] | None) -> tuple[str, int] | None:
+    """``(ip, port)`` of a bridge's peer, or ``None`` when it is not known yet."""
+    if not cfg:
+        return None
+    sock = cfg.get("TARGET_SOCK")
+    if isinstance(sock, tuple) and len(sock) == 2:
+        host, port = sock
+    else:
+        host, port = cfg.get("TARGET_IP"), cfg.get("TARGET_PORT")
+    if not host:
+        return None
+    try:
+        return str(host), int(port)
+    except (TypeError, ValueError):
+        return None
+
+
 @dataclass
 class ObpBridgeEntry:
     system_name: str
@@ -78,6 +107,8 @@ class ObpBridgeEntry:
     sink: InProcessObpSink
     reply_transport: ObpIngressReplyTransport
     legacy_port: int | None = None
+    # Peer as configured, snapshotted when the registry is built.
+    peer_hint: tuple[str, int] | None = None
 
 
 @dataclass
@@ -87,12 +118,52 @@ class ObpBridgeRegistry:
     by_network_id: dict[bytes, str] = field(default_factory=dict)
     by_legacy_port: dict[int, str] = field(default_factory=dict)
     bridges: dict[str, ObpBridgeEntry] = field(default_factory=dict)
+    # Where each bridge's peer actually is, as DMRD/DMRE taught it.
+    sessions: MeshSessionStore | None = None
 
     def register(self, entry: ObpBridgeEntry) -> None:
         self.bridges[entry.system_name] = entry
         self.by_network_id[entry.network_id] = entry.system_name
         if entry.legacy_port is not None:
             self.by_legacy_port[entry.legacy_port] = entry.system_name
+
+    def _learned_peer(self, system_name: str) -> tuple[str, int] | None:
+        if self.sessions is None:
+            return None
+        session = self.sessions.get(system_name)
+        return session.learned_peer if session is not None else None
+
+    def _peer_rank(self, entry: ObpBridgeEntry, addr: tuple[str, int]) -> int:
+        host, port = addr
+        hint = entry.peer_hint
+        learned = self._learned_peer(entry.system_name)
+        if hint is not None and hint == (host, port):
+            return 0
+        if learned is not None and learned == (host, port):
+            return 1
+        if hint is not None and hint[0] == host:
+            return 2
+        if learned is not None and learned[0] == host:
+            return 3
+        return 4
+
+    def bridges_by_peer(self, addr: tuple[str, int] | None) -> list[tuple[str, ObpBridgeEntry]]:
+        """Bridges ordered by how well their peer matches ``addr``.
+
+        The configured peer (``peer_hint``, from the YAML) is tried before the learned
+        one so a wrong match can never entrench itself; the learned one is what lets a
+        peer that really moved still be recognised. It comes from the session store,
+        where only DMRD/DMRE put it — they carry NETWORK_ID, so they cannot be
+        misattributed the way a control frame can.
+
+        Order: configured IP:port, learned IP:port, configured IP, learned IP (a peer
+        answering from another local port, e.g. its own fan-in), then registration
+        order — where a shared passphrase leaves nothing else to go on.
+        """
+        items = list(self.bridges.items())
+        if addr is None:
+            return items
+        return sorted(items, key=lambda item: self._peer_rank(item[1], addr))
 
     def clear(self) -> None:
         self.by_network_id.clear()
@@ -127,7 +198,7 @@ class ObpFanInDemux:
         if system_name is None:
             system_name = self._lookup_by_network_id(data)
         if system_name is None:
-            system_name = self._lookup_control(data)
+            system_name = self._lookup_control(data, addr)
         if system_name is None:
             if self.debug:
                 self._log.debug(
@@ -141,7 +212,9 @@ class ObpFanInDemux:
         entry = self._registry.bridges.get(system_name)
         if entry is None:
             return
-        if self.debug:
+        if self.debug and data[:4] not in (DMRD, DMRE):
+            # DMRD/DMRE demux by NETWORK_ID, never ambiguous; *CALL START*/*CALL END*
+            # (routing_use_cases.py) already give once-per-call visibility for those.
             self._log.debug(
                 "(OBP_PROXY) RX %s from %s:%s len=%d -> %s",
                 data[:4],
@@ -162,11 +235,19 @@ class ObpFanInDemux:
         network_id = data[11:15]
         return self._registry.by_network_id.get(network_id)
 
-    def _lookup_control(self, data: bytes) -> str | None:
+    def _lookup_control(self, data: bytes, addr: tuple[str, int] | None = None) -> str | None:
+        """Resolve a control frame (BCKA/BCSQ/BCST/BCVE) to a bridge.
+
+        These frames carry no NETWORK_ID, so the only in-band discriminator is the
+        passphrase — and a mesh where every bridge shares one passphrase (as ADN
+        Systems does) would always resolve to whichever bridge is registered first.
+        Try the bridges whose peer address matches the datagram source before falling
+        back to the plain passphrase scan.
+        """
         if len(data) < 4:
             return None
         opcode = data[:4]
-        for name, entry in self._registry.bridges.items():
+        for name, entry in self._registry.bridges_by_peer(addr):
             passphrase = entry.passphrase
             if opcode == BCKA and verify_bcka(data, passphrase):
                 return name
@@ -222,4 +303,5 @@ __all__ = [
     "ObpFanInProtocol",
     "ObpIngressReplyTransport",
     "listen_obp_fanin",
+    "peer_sock_from_config",
 ]

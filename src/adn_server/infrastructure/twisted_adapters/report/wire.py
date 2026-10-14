@@ -28,6 +28,7 @@ import time
 from typing import Any
 
 from adn_server.application.ports import ReportWireEncoder
+from adn_server.domain.mesh_session import MeshSessionStore
 from adn_server.application.report import (
     REPORT_FEATURES,
     REPORT_PROTOCOL,
@@ -58,7 +59,8 @@ def _state_dedup_key(payload: dict[str, Any]) -> bytes:
 class ReportWire(ReportWireEncoder):
     """Slim monitor encoder — ``dashboard_state`` + ``routing_table`` + ``voice_event``."""
 
-    def __init__(self) -> None:
+    def __init__(self, sessions: MeshSessionStore | None = None) -> None:
+        self._sessions = sessions
         self._last_state_key: bytes | None = None
         self._routing_seq: int = 0
         self._last_routing_snapshot: dict[str, Any] | None = None
@@ -82,7 +84,7 @@ class ReportWire(ReportWireEncoder):
 
     def state_frames(self, systems: dict[str, Any], *, force: bool = False) -> tuple[bytes, ...]:
         ts = time.time()
-        payload = build_dashboard_state(systems, ts=ts)
+        payload = build_dashboard_state(systems, ts=ts, sessions=self._sessions)
         key = _state_dedup_key(payload)
         if not force and self._last_state_key == key:
             logger.debug("(REPORT) STATE_SND unchanged, skip")

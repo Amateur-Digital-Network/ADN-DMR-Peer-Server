@@ -29,7 +29,7 @@ from tests.harness.playback_helpers import FakePlaybackProtocol, make_capture_ca
 
 from adn_server.application.playback_use_cases import (
     _PACKET_INTERVAL_S,
-    _PLAYBACK_DELAY_S,
+    PLAYBACK_DELAY_S,
     _SOURCE_MAX_S,
     PlaybackUseCases,
 )
@@ -106,7 +106,7 @@ def test_max_duration_commits_recording_when_no_vterm() -> None:
 
     assert not pb._recording_active
     assert pb._playback_busy is True
-    assert any(item[0] == _PLAYBACK_DELAY_S for item in scheduled)
+    assert any(item[0] == PLAYBACK_DELAY_S for item in scheduled)
 
 
 def test_packet_interval_matches_expected() -> None:

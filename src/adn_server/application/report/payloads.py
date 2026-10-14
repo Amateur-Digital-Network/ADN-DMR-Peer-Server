@@ -31,6 +31,7 @@ from adn_server.application.routing.helpers import (
     export_peer_ua_sessions,
     peer_rf_mode,
 )
+from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 from adn_server.domain import int_id
 from adn_server.domain.hbp_protocol import normalize_fixed_width_ascii
 from adn_server.domain.ua_timer import normalize_ua_timer_minutes, ua_timer_is_infinite
@@ -52,13 +53,8 @@ _CSV_FAMILIES = {
     "GROUP VOICE": "GROUP",
     "PRIVATE VOICE": "PRIVATE",
     "UNIT DATA": "UNIT",
-    # routing_use_cases._dtype_labels emits one of these instead of the generic
-    # "UNIT DATA" label for dtype_vseq in (3, 6, 7, 8) — private-call CSBK setup
-    # signaling and SMS/GPS (ARS/LRRP) header + VCSBK blocks. Without these,
-    # parse_bridge_event_csv() returns None and the event is silently dropped
-    # ("voice_event not emitted (unmapped CSV)"), so a private call whose CSBK
-    # handshake never escalates to voice (e.g. destination unreachable) never
-    # shows up in the monitor at all.
+    # routing_use_cases emits these labels for dtype_vseq in (6, 7, 8). CSBK (3) is
+    # still logged at INFO but no longer emitted to monitor (prelude storm filter).
     "UNIT CSBK": "UNIT",
     "UNIT DATA HEADER": "UNIT",
     "UNIT VCSBK 1/2 DATA BLOCK": "UNIT",
@@ -111,6 +107,19 @@ def static_tg_list(value: Any) -> list[str]:
         return [str(x).strip() for x in value if str(x).strip()]
     text = str(value).strip()
     return [text] if text else []
+
+
+# Echo/parrot and on-demand services are never static (apply_startup_subscriptions skips them too).
+_NOT_SYSTEM_STATIC = frozenset({"0", "1", "2", "3", "4", "5", "9", *(str(tg) for tg in range(9990, 10000))})
+
+
+def system_static_tgs(sys_cfg: dict[str, Any]) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """TS1_STATIC / TS2_STATIC as written in adn-server.yaml: static TGs for every hotspot of the MASTER."""
+    def usable(value: Any) -> tuple[str, ...]:
+        tgs = dedupe_static_tg_list(static_tg_list(value))
+        return tuple(tg for tg in tgs if tg.isdigit() and tg not in _NOT_SYSTEM_STATIC)
+
+    return usable(sys_cfg.get("TS1_STATIC")), usable(sys_cfg.get("TS2_STATIC"))
 
 
 def dedupe_static_tg_list(parts: list[str]) -> list[str]:
@@ -288,6 +297,11 @@ _TOPOLOGY_PEER_FIELDS: tuple[tuple[str, str], ...] = (
     ("SOFTWARE_ID", "software_id"),
     ("COLORCODE", "colorcode"),
     ("TX_POWER", "tx_power"),
+    # Site data the peer sends in RPTC. The monitor needs it to place the peer
+    # on its map; it is the same information the Linked Systems page shows.
+    ("LATITUDE", "latitude"),
+    ("LONGITUDE", "longitude"),
+    ("HEIGHT", "height"),
 )
 
 
@@ -303,8 +317,16 @@ def _peer_connected_at(peer: dict[str, Any]) -> int | None:
     return ts if ts > 0 else None
 
 
-def _sanitized_peer_options_text(options: Any) -> str | None:
-    """RPTO OPTIONS for monitor display (omit ``PASS=`` secrets)."""
+_STATIC_OPTION = re.compile(r"^TS[12](?:_STATIC|_\d)?=", re.IGNORECASE)
+
+
+def _sanitized_peer_options_text(
+    options: Any, statics: tuple[list[str], list[str]] | None = None
+) -> str | None:
+    """RPTO OPTIONS for monitor display (omit ``PASS=`` secrets).
+
+    With ``statics`` the TS1/TS2 lists are the ones the hotspot gets, not only the ones it sent.
+    """
     if options is None:
         return None
     text = normalize_fixed_width_ascii(options)
@@ -317,7 +339,11 @@ def _sanitized_peer_options_text(options: Any) -> str | None:
             continue
         if piece.upper().startswith("PASS="):
             continue
+        if statics is not None and _STATIC_OPTION.match(piece):
+            continue
         parts.append(piece)
+    if statics is not None:
+        parts = [f"TS{n}={','.join(tgs)}" for n, tgs in ((1, statics[0]), (2, statics[1])) if tgs] + parts
     if not parts:
         return None
     return ";".join(parts) + ";"
@@ -348,25 +374,22 @@ def _topology_peer_row(
             row[json_key] = text
     yaml_cfg = sys_cfg if isinstance(sys_cfg, dict) else {}
     if "OPTIONS" in peer and peer_options_static_valid(peer.get("OPTIONS")):
-        opt_text = _sanitized_peer_options_text(peer.get("OPTIONS"))
+        fields = parse_peer_options_fields(peer.get("OPTIONS"))
+        single, timer = resolve_peer_single_and_timer(fields, yaml_cfg)
+        ts1, ts2 = cached_peer_static_tgs(peer)  # what routing delivers: OPTIONS plus the MASTER's yaml statics
+        opt_text = _sanitized_peer_options_text(peer.get("OPTIONS"), (list(ts1), list(ts2)))
         if opt_text:
             row["options"] = opt_text
-        fields = parse_peer_options_fields(peer.get("OPTIONS"))
-        ts1 = fields.get("TS1_STATIC") or []
-        ts2 = fields.get("TS2_STATIC") or []
-        if ts1:
-            row["ts1_static"] = ts1
-        if ts2:
-            row["ts2_static"] = ts2
-        single, timer = resolve_peer_single_and_timer(fields, yaml_cfg)
     else:
         single, timer = resolve_peer_single_and_timer({}, yaml_cfg)
-        ts1 = static_tg_list(yaml_cfg.get("TS1_STATIC"))
-        ts2 = static_tg_list(yaml_cfg.get("TS2_STATIC"))
-        if ts1:
-            row["ts1_static"] = ts1
-        if ts2:
-            row["ts2_static"] = ts2
+        sys_ts1, sys_ts2 = cached_peer_static_tgs(peer)
+        ts1 = dedupe_static_tg_list([*static_tg_list(yaml_cfg.get("TS1_STATIC")), *sys_ts1])
+        ts2 = dedupe_static_tg_list([*static_tg_list(yaml_cfg.get("TS2_STATIC")), *sys_ts2])
+    ts1, ts2 = list(ts1), list(ts2)
+    if ts1:
+        row["ts1_static"] = ts1
+    if ts2:
+        row["ts2_static"] = ts2
     row["single_mode"] = single
     if not ua_timer_is_infinite(timer):
         row["ua_timer_min"] = timer

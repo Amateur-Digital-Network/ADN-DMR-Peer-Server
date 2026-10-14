@@ -8,6 +8,33 @@
 
 - Populated when stations register traffic; persisted via configured **`SUB_MAP`** pickle path under **`ALIASES`**.
 - Used to resolve **destination radio ID** to a **target system** and **slot** for private forwarding.
+- Unit data (SMS, ACKs) whose destination was last heard on the same hotspot it came from is not sent back to that hotspot: both radios hear each other on RF, and the echo would transmit over their own exchange.
+- Unit data to an individual ID last heard on a non-OPENBRIDGE system less than 900 s ago is not fanned out to the OpenBridges; the `SUB_MAP` lookup delivers it locally. Subscribers learned over an OpenBridge, or older entries, keep the fan-out.
+
+<a id="sub_map-persistence"></a>
+### SUB_MAP persistence
+
+With `ALIASES.SUB_MAP_FILE` set, `SUB_MAP` is checked every **300 s** (entries older than 24 h are trimmed) and written only when a route changed or an entry's timestamp moved to a new hour. The file is written to a `.tmp` and renamed, so a crash never leaves it truncated. `SIGHUP` and shutdown always write it.
+
+<a id="service-systems-sub_map_learn"></a>
+### Service systems (`SUB_MAP_LEARN`)
+
+Every frame from a MASTER or PEER system moves its source ID to that system in `SUB_MAP`. A service system that transmits with someone else's ID would take that subscriber's place until they key up again, and private calls and unit data addressed to them would be delivered to the service instead:
+
+- the **ECHO** parrot plays each call back with the caller's own ID, so right after a 9990 test that caller's private traffic points at `ECHO`;
+- a beacon or announcement peer that transmits with a person's ID or a shared service ID;
+- an ASL / EchoLink / DVSwitch bridge that forwards the real callers' IDs from another mode.
+
+Set `SUB_MAP_LEARN: false` on those systems:
+
+```yaml
+SYSTEMS:
+  ECHO:
+    MODE: MASTER
+    SUB_MAP_LEARN: false   # the parrot never becomes where a caller is
+```
+
+Only learning is skipped: group routing, ACLs, and delivery to subscribers learned on other systems work as before. The default is `true` on every system, including one named `ECHO`. When a reload or a restart finds a system with `false`, the `SUB_MAP` entries that already point at it are dropped. OpenBridge systems always learn (whoever is behind the link must stay reachable), so the key is rejected on `MODE: OPENBRIDGE`. Frames that plugins send with `send_dmrd` never update `SUB_MAP` either.
 
 ## OpenBridge vs MASTER
 

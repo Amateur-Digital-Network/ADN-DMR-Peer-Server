@@ -152,7 +152,7 @@ def test_reload_collapsed_generator_migrates_listener_without_rebind() -> None:
         _Loader(),
         protocols,
         transports,
-        create_protocol=lambda name: _FakeProto(name),
+        create_protocol=lambda name, _cfg: _FakeProto(name),
         listen_udp=_listen,
         stop_listener=lambda port: port.stopListening() if port else None,
     ).addCallback(_done)
@@ -223,7 +223,7 @@ def test_reload_defers_rebind_until_stop_completes() -> None:
         _Loader(),
         protocols,
         transports,
-        create_protocol=lambda name: _FakeProto(name),
+        create_protocol=lambda name, _cfg: _FakeProto(name),
         listen_udp=_listen,
         stop_listener=lambda port: port.stopListening() if port else None,
     )
@@ -236,3 +236,61 @@ def test_reload_defers_rebind_until_stop_completes() -> None:
     stop_fired.callback(None)
     reactor.runUntilCurrent()
     assert listen_calls == [52556]
+
+
+def test_a_master_added_on_reload_answers_its_peers() -> None:
+    """Regression (ADN 2131, 25-sep-2026): a MASTER added by SIGHUP logged "added system ...
+    listening" but answered nothing. Its protocol was built from the live config, where the
+    new system did not exist yet (it is swapped in after the reload): no MODE, no login."""
+    from adn_server.application.runtime_context import (
+        ConfigProxy,
+        RuntimeContext,
+        RuntimeContextHolder,
+        prepare_reload_config,
+        swap_runtime_config,
+    )
+    from adn_server.infrastructure.acl_router import InMemoryAclRouter
+    from adn_server.infrastructure.config_loader import process_acls
+    from adn_server.infrastructure.twisted_adapters.udp_hbp import HBPProtocolFactory
+    from tests.support.hbp_repeat_stack import RecordingTransport
+
+    holder = RuntimeContextHolder(RuntimeContext(config=_base_config()))
+    live = ConfigProxy(holder)  # what the server hands its protocols
+    incoming = _base_config()
+    incoming["SYSTEMS"]["SMS-NEW"] = {
+        "MODE": "MASTER", "ENABLED": True, "IP": "", "PORT": 62999, "PASSPHRASE": "secret",
+        "MAX_PEERS": 1, "REPEAT": True, "USE_ACL": True, "REG_ACL": "PERMIT:ALL", "SUB_ACL": "PERMIT:ALL",
+        "TGID_TS1_ACL": "PERMIT:ALL", "TGID_TS2_ACL": "PERMIT:ALL", "ALLOW_UNREG_ID": True,
+    }
+
+    class _Loader(YamlConfigLoader):
+        def load(self, _path: str) -> dict[str, Any]:
+            process_acls(incoming)  # as the real loader does
+            return incoming
+
+    def _create(name: str, system_config: dict[str, Any] | None = None) -> Any:
+        # Mirrors peer_server._create_hbp_protocol: live config unless reload passes its own.
+        return HBPProtocolFactory(name, live if system_config is None else system_config, router=InMemoryAclRouter())
+
+    new_config = prepare_reload_config(holder)
+    protocols = {name: _FakeProto(name) for name in _base_config()["SYSTEMS"]}
+    reload_server_config(
+        new_config,
+        "adn-server.yaml",
+        _Loader(),
+        protocols,
+        {name: _FakePort() for name in protocols},
+        create_protocol=_create,
+        listen_udp=lambda _n, _b, _p: _FakePort(),
+        stop_listener=lambda port: port.stopListening() if port else None,
+    )
+    from twisted.internet import reactor
+
+    reactor.runUntilCurrent()
+    swap_runtime_config(holder, new_config)
+
+    proto = protocols["SMS-NEW"]
+    assert proto._config.get("MODE") == "MASTER"
+    proto.transport = RecordingTransport()
+    proto.datagramReceived(b"RPTL" + (213003590).to_bytes(4, "big"), ("127.0.0.1", 50000))
+    assert proto.transport.sent and proto.transport.sent[0][0].startswith(b"RPTACK")

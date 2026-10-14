@@ -67,13 +67,22 @@ In-band bridge activation/deactivation is applied on **voice terminator (VTERM)*
 - Clears per-peer UA sessions in memory (**all slots** for that peer).
 - Deletes matching rows from **`peer_dynamic_tgs`** (MariaDB).
 - Clears stale **STATUS** RX fields so a later **RPTO** does not re-seed the old TG.
-- Runs **in-band bridge deactivation** on the slot (same as legacy).
+- On a MASTER of its own, runs **in-band bridge deactivation** on the slot (same as legacy). On a shared **inject-only** MASTER it does not: its legs belong to every hotspot on it, and in-band 4000 would set them all IDLE on that slot (the other hotspots' dynamics and OPTIONS statics).
 - Sends **`GROUP VOICE,INGRESS,RX,…,4000`** to the monitor (not **START**) so **SINGLE=0** multi-dynamic chips clear **without** lighting a live TX chip.
 - On **inject-only** MASTER, pushes updated **CONFIG_SND** to the monitor.
 
 **Inject-only vs global:** With integrated **`PROXY`**, reset is **per peer** (only that hotspot’s dynamics). Without inject-only filtering, legacy **`deactivate_all_dynamic_bridges`** still runs for the whole system.
 
 **TG 4000 must never appear** as a dynamic UA chip on the monitor or in `peer_dynamic_tgs`.
+
+**Voice reply (on by default; `TG4000_VOICE: false` on the MASTER turns it off):** when the 4000 over ends (its terminator), the server answers **that hotspot only** about a second later with the link status in the system's `ANNOUNCEMENT_LANGUAGE`: "linked to" and the static TGs the hotspot still has on that slot (its OPTIONS and the MASTER's `TS1_STATIC` / `TS2_STATIC`, up to four), else "linked to *N*" with a `DEFAULT_REFLECTOR`, else "not linked".
+
+- A **group** call to TG 4000 is answered with a group call from the server voice ID to **TG 4000** on that slot: the radio hears it on the contact it just used.
+- A **private** call to ID 4000 is answered with a private call **from ID 4000** to the caller, which hotspot configurations map back to the private contact (e.g. `PCRewrite …,84000,…,4000,…`).
+
+Other hotspots on a shared MASTER do not hear it, it never goes to OpenBridge, and it stops if that hotspot starts receiving another stream on the slot. It is paced on the reactor, one frame every 58 ms. One reply per over; none if the terminator is lost.
+
+**Shared MASTER, legs:** a 4000 never releases a leg that **any** connected hotspot, the sender included, has on that slot as a static (OPTIONS or the MASTER's YAML); another hotspot's dynamic session on it also keeps it. Any other dynamic leg the sender held is set IDLE right away instead of waiting for its timer.
 
 ### `SINGLE_MODE` impact on in-band deactivation
 
@@ -106,7 +115,7 @@ The **audio** is sent with the **configured source ID** and **destination TG 9**
 
 ## Private call to ID 4000
 
-A **unit** call to **4000** is treated as **disconnect dynamics** only; it is **not** routed as a normal private call.
+A **unit** call to **4000** is treated as **disconnect dynamics** only; it is **not** routed as a normal private call. With `TG4000_VOICE` (default `true`) the hotspot also gets the [voice reply](#tg--id-4000--deactivate-dynamic-bridges) as a private call from ID 4000.
 
 ## OpenBridge ingress — group TG filters {#openbridge-ingress--group-tg-filters}
 
@@ -122,8 +131,8 @@ Many small IDs (0–5, 9, etc.) and the **999x service** range are excluded from
 |------------|------|
 | **VOICE.DMR_ID** (source) | Server-generated voice — **caller ID** on receivers (default **1000001**) |
 | **5000** (destination) | No auto user-activated bridge if missing from `BRIDGES` |
-| **4000** (group) | Deactivate dynamic bridges |
-| **4000** (unit) | Disconnect dynamics; not routed as PC |
+| **4000** (group) | Deactivate dynamic bridges; voice status reply on TG 4000 (`TG4000_VOICE`, default `true`) |
+| **4000** (unit) | Disconnect dynamics; not routed as PC; voice status reply from ID 4000 (`TG4000_VOICE`) |
 | **9991–9999** | On-demand / information audio (trigger TG); playback uses `VOICE.DMR_ID` → TG **9** (TS2) |
 | **9** | Service/prompt lane (short server audio); reserved for auto-bridges; internal **TGID** on TS2 legs |
 | **9990** | Echo bridge TG (with ECHO system) |

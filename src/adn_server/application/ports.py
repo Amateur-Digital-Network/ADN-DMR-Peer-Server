@@ -192,13 +192,10 @@ class VoiceProvider(ABC):
         ...
 
     @abstractmethod
-    def pkt_gen(self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any]) -> Any:
-        """Generate HBP voice packets for a phrase (generator). Legacy mk_voice.pkt_gen."""
-        ...
-
-    @abstractmethod
-    def ensure_tts_ambe(self, config: dict[str, Any], item: dict[str, Any], audio_path: str) -> str | None:
-        """TTS to AMBE file; return path or None. Legacy tts_engine.ensure_tts_ambe."""
+    def pkt_gen(
+        self, rf_src: bytes, dst_id: bytes, peer: bytes, slot: int, phrase: list[Any], *, private: bool = False
+    ) -> Any:
+        """Generate HBP voice packets for a phrase (generator). Legacy mk_voice.pkt_gen; ``private``: unit call."""
         ...
 
     def read_single_file(self, audio_path: str, lang: str, file_number: str) -> list:
@@ -296,6 +293,11 @@ class SubscriptionStore(ABC):
 
     @abstractmethod
     def legs_in_table(self, table_key: str) -> tuple["Subscription", ...]:
+        ...
+
+    @abstractmethod
+    def has_table(self, table_key: str) -> bool:
+        """True when at least one leg belongs to ``table_key``; runs per datagram."""
         ...
 
     @abstractmethod

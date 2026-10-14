@@ -153,13 +153,6 @@ class IdentUseCases:
             speech = self._voice.pkt_gen(_source_id, _dst_id, server_id, 1, _say)
 
             time.sleep(1)
-            _slot = protocol.STATUS.get(2)
-            if not _slot:
+            if not protocol.STATUS.get(2):
                 continue
-            _next_time = time.time()
-            for pkt in speech:
-                _next_time += 0.058
-                _delay = _next_time - time.time()
-                if _delay > 0.001:
-                    time.sleep(_delay)
-                self._call_from_reactor(protocol.send_voice_packet, pkt, _source_id, _dst_id, _slot)
+            self._voice.play_on_slot(protocol, system, speech, _source_id, _dst_id)

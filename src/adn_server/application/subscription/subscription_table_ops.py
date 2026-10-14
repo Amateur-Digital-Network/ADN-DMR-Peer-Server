@@ -54,13 +54,12 @@ def _effective_tmout_minutes(tgid_int: int, tmout: float) -> float:
 
 
 def _table_has_legs(store: SubscriptionStore, table_key: str) -> bool:
-    return any(sub.table_key() == table_key for sub in store.snapshot())
+    return store.has_table(table_key)
 
 
 def _remove_table(store: SubscriptionStore, table_key: str) -> None:
-    for sub in list(store.snapshot()):
-        if sub.table_key() == table_key:
-            store.remove(sub.subscription_id)
+    for sub in store.legs_in_table(table_key):
+        store.remove(sub.subscription_id)
 
 
 def _find_leg(
@@ -569,6 +568,37 @@ def deactivate_all_dynamic_relays_store(
             sub.channel.slot,
             int(sub.target_tgid),
         )
+
+
+def release_dynamic_leg_store(
+    store: SubscriptionStore,
+    system_name: str,
+    tgid: int,
+    slot: int,
+) -> bool:
+    """Set one dynamic leg (``tgid`` on ``slot``) of a system IDLE; False when there is none active.
+
+    Used on a shared MASTER when the hotspot that keyed TG/ID 4000 was the only one holding it.
+    Reflector and static legs are never touched.
+    """
+    released = False
+    for sub in list(store.list_by_system(SystemId(system_name))):
+        if int(sub.target_tgid) != int(tgid) or int(sub.channel.slot) != int(slot):
+            continue
+        if sub.table_key().startswith("#") or _legacy_to_type(sub) == "STAT" or not sub.is_active():
+            continue
+        sub.state.phase = SubscriptionPhase.IDLE
+        store.upsert(sub)
+        released = True
+        logger.info(
+            "(ROUTER) Released dynamic bridge after TG/ID 4000, no other hotspot holds it: "
+            "System: %s, Bridge: %s, TS: %s, TGID: %s",
+            system_name,
+            sub.table_key(),
+            slot,
+            int(tgid),
+        )
+    return released
 
 
 def readd_system_after_ua_timer_change_store(

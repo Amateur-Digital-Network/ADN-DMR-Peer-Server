@@ -380,6 +380,53 @@ def test_build_topology_includes_peer_display_fields() -> None:
     assert peer["slots"] == "2"
 
 
+def test_build_topology_includes_peer_coordinates(validator: jsonschema.Draft202012Validator) -> None:
+    systems = {
+        "MASTER-A": {
+            "MODE": "MASTER",
+            "ENABLED": True,
+            "PEERS": {
+                bytes_3(3120001): {
+                    "CONNECTION": "YES",
+                    "CALLSIGN": b"CE5RPY  ",
+                    "LATITUDE": b"-33.4489\x00",
+                    "LONGITUDE": b"-70.6693\x00",
+                    "HEIGHT": b"12\x00",
+                }
+            },
+        }
+    }
+    doc = build_topology(systems, seq=1, ts=1.0)
+    validator.validate(doc)
+    peer = doc["systems"][0]["peers"][0]
+    assert peer["latitude"] == "-33.4489"
+    assert peer["longitude"] == "-70.6693"
+    assert peer["height"] == "12"
+
+
+def test_build_topology_omits_empty_peer_coordinates() -> None:
+    systems = {
+        "MASTER-A": {
+            "MODE": "MASTER",
+            "ENABLED": True,
+            "PEERS": {
+                bytes_3(3120001): {
+                    "CONNECTION": "YES",
+                    "CALLSIGN": b"CE5RPY  ",
+                    "LATITUDE": b"",
+                    "LONGITUDE": b"",
+                    "HEIGHT": b"",
+                }
+            },
+        }
+    }
+    doc = build_topology(systems, seq=1, ts=1.0)
+    peer = doc["systems"][0]["peers"][0]
+    assert "latitude" not in peer
+    assert "longitude" not in peer
+    assert "height" not in peer
+
+
 def test_topology_strips_nul_padded_callsign() -> None:
     systems = {
         "MASTER-A": {

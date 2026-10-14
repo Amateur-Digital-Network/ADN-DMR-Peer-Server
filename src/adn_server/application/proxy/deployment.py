@@ -79,6 +79,35 @@ def config_has_enabled_openbridge(config: dict[str, Any]) -> bool:
     )
 
 
+def openbridge_passphrase_collisions(config: dict[str, Any]) -> list[list[str]]:
+    """Enabled OPENBRIDGE systems grouped by a passphrase more than one of them uses.
+
+    Control frames carry no NETWORK_ID, so on the shared fan-in port the passphrase
+    is what tells two bridges apart when the source address does not. The groups are
+    returned, never the passphrase.
+    """
+    systems = config.get("SYSTEMS", {})
+    if not isinstance(systems, dict):
+        return []
+    by_passphrase: dict[bytes, list[str]] = {}
+    for name, sys_cfg in systems.items():
+        if not isinstance(sys_cfg, dict) or sys_cfg.get("MODE") != "OPENBRIDGE":
+            continue
+        if not sys_cfg.get("ENABLED", True):
+            continue
+        passphrase = sys_cfg.get("PASSPHRASE") or b""
+        if isinstance(passphrase, str):
+            passphrase = passphrase.encode("utf-8")
+        passphrase = bytes(passphrase).strip().rstrip(b"\x00")
+        if not passphrase:
+            continue
+        by_passphrase.setdefault(passphrase, []).append(str(name))
+    return sorted(
+        (sorted(names) for names in by_passphrase.values() if len(names) > 1),
+        key=lambda names: names[0],
+    )
+
+
 def obp_proxy_enabled(config: dict[str, Any]) -> bool:
     """True when OBP proxy manages inbound UDP (default on for OPENBRIDGE configs)."""
     block = _obp_proxy_block(config)

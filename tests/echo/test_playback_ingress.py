@@ -33,7 +33,7 @@ from tests.harness.playback_helpers import (
     send_playback,
 )
 
-from adn_server.application.playback_use_cases import _PLAYBACK_DELAY_S, _RECORD_IDLE_S, PlaybackUseCases
+from adn_server.application.playback_use_cases import PLAYBACK_DELAY_S, _RECORD_IDLE_S, PlaybackUseCases
 
 
 def test_dmrd_received_accepts_ingress_pkt_time_kwarg() -> None:
@@ -82,7 +82,7 @@ def test_ingress_pkt_time_enables_record_to_playback(caplog) -> None:
         with caplog.at_level(logging.INFO, logger="adn_server.application.playback_use_cases"):
             pb._on_record_idle(proto)
 
-    assert any(item[0] == _PLAYBACK_DELAY_S for item in scheduled)
+    assert any(item[0] == PLAYBACK_DELAY_S for item in scheduled)
     assert pb._playback_busy is True
     assert any("*END   RECORDING*" in r.message for r in caplog.records)
     assert not any("unexpected keyword argument" in r.message for r in caplog.records)

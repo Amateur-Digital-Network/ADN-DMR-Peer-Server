@@ -21,6 +21,7 @@ The **ADN DMR Peer Server** is a [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.
 | I want to… | Start here |
 |------------|------------|
 | Run and configure | [Introduction](server/user-guide/introduction.md), [Configuration](server/user-guide/configuration.md) |
+| Write a drop-in plugin | [Plugins](server/user-guide/plugins.md), skeleton `plugins/example/` |
 | TG 4000, 999x, echo | [Special numbers](server/user-guide/special-numbers.md) |
 | Private calls | [Private calls](server/user-guide/private-calls.md) |
 | Voice / TTS | [Voice, announcements, and TTS](server/user-guide/voice-and-tts.md) |

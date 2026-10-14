@@ -8,7 +8,7 @@ Los intervalos forman parte del **comportamiento observable** del producto (oper
 
 ## Visibilidad de la configuración
 
-El estado en tiempo de ejecución vive en un **`config` dict** compartido: opciones de peers, `SUB_MAP`, campos de plano de control OpenBridge (`_bcsq`, `_bcka`), y similares. Los adaptadores actualizan esta estructura; los casos de uso la leen. Así coincide con cómo se inspecciona el proceso en ejecución en logs y escenarios de soporte.
+El estado en tiempo de ejecución vive en un **`config` dict** compartido: opciones de peers, `SUB_MAP` y similares. Los adaptadores actualizan esta estructura; los casos de uso la leen. El estado de cada enlace OpenBridge (keepalive, dirección aprendida del par, tabla de quench) vive en un `ObpBridgeSession` por bridge (`domain/mesh_session.py`), no en la config; en `STATUS` solo queda el flag `_bcsq` por stream (BCSQ ya enviado). Así coincide con cómo se inspecciona el proceso en ejecución en logs y escenarios de soporte.
 
 ## Intervalos clave de temporizadores (contrato operativo)
 
@@ -18,7 +18,7 @@ Los siguientes intervalos forman parte del comportamiento actual en ejecución:
 |------|-----------|-----|
 | `rule_timer` | **52s** | Progresión de timeout y estado on/off de bridges. |
 | `stream_trimmer` | **5s** | Limpieza de streams, manejo de timeout y cierre de estado de llamada. |
-| `bridge_reset` | **6s** | Limpieza de flags de reset y cierre de resets pendientes. |
+| `bridge_reset` | **6s** | Limpieza de flags de reset y cierre de resets pendientes. Un MASTER se marca para reset solo cuando se va su **último** peer, no por un login fallido, un indicativo que no coincide o la salida de un hotspot. |
 | OPTIONS refresh | **por evento** | TG estáticas / reflector vía **RPTO**, **startup/reload** (`apply_startup_bridges`), fallback **dmrd** sin source. Sin loop periódico de 26s (**D-28**). |
 | `dynamic_tg_purge_loop` | **60s** | Purga filas **SINGLE=1** expiradas de `peer_dynamic_tgs` y `_PEER_UA_SESSIONS` en memoria. |
 | `lst_seen` (reconcile self-service) | **120s** | Reconcilia `Clients.logged_in` contra los peers conectados actualmente: los conectados quedan `logged_in=1`, el resto `0`. Corre con `now=True` en el primer tick para limpiar flags obsoletos inmediatamente tras un reinicio del servidor. Evita que el monitor autentique hotspots desconectados vía login-by-IP. |
@@ -49,8 +49,27 @@ No se aplica en rutas VTERM **unit/private**.
 
 ## Notas de comportamiento de packet-control
 
-Comportamiento actual para deduplicación y orden de streams:
+Comportamiento actual para deduplicación y orden de streams (`seq_advance` en `application/routing/helpers.py`, en la entrada OBP y HBP):
 
-- La deduplicación por hash en OBP se evalúa con guardia **`seq > 0`**.
-- En HBP se calcula/guarda CRC también para `seq == 0`, pero la caída por duplicado por CRC sigue guardada por **`seq > 0`**.
-- Esto evita sobre-descartar casos de primer paquete y mantiene protección de duplicados de stream.
+- La secuencia de 8 bits se compara **módulo 256**, así que el paso 255 → 0 es el paquete siguiente.
+- Un salto hacia adelante cuenta como **Loss** cada paquete saltado. La misma secuencia otra vez es un duplicado: se descarta y cuenta como Loss.
+- Un paquete **detrás** del último llega tarde: se descarta, cuenta como Loss y se conserva la última secuencia.
+- Un seq 0 repetido (cabecera de voz) y un reinicio en seq 1 se toman como el paquete siguiente.
+- Tras más de **1 s** de silencio (`SEQ_RESYNC_SILENCE_S`) el stream se resincroniza con la secuencia que llegue.
+- Un **terminador** siempre se acepta, aunque venga detrás (algunas apps cliente lo envían con seq 0), así que la llamada termina en el acto y no al timeout de 5 s del stream.
+- La caída de duplicados por hash del payload sigue con guardia **`seq > 0`** en OBP y HBP (HBP igual guarda el hash de `seq == 0`).
+
+<a id="loop-guard"></a>
+## Loop guard (protección contra bucles)
+
+El control de bucles por stream ID (`*LoopControl*`) solo detecta un stream que vuelve con su propio stream ID. Un puente que transcodifica (YSF2DMR, DVSwitch, pasarelas ASL/EchoLink) vuelve a codificar el audio y abre un stream ID **nuevo**, y cada vuelta reinicia el límite de 180 s. La comprobación de TG ocupado deja pasar a propósito a la misma persona. Así que un bucle a través de puentes (TG A → YSF → TG B → … → TG A) daría vueltas sin fin.
+
+Esos puentes conservan el ID de quien habla, y una persona no puede transmitir desde dos entradas a la vez. Al empezar un stream de voz de grupo, `application/routing/loop_guard.py` lo considera **eco** cuando el mismo `rf_src` tiene otro stream (con otro stream ID) en el **mismo TG** desde **otra entrada** (sistema y peer en HBP; todos los enlaces OPENBRIDGE juntos cuentan como una sola entrada, la malla) que sigue activo o terminó hace menos de `GLOBAL.LOOP_GUARD_HOLD` segundos (1 s por defecto; el eco de un puente empieza con la original aún en el aire, así que la ventana solo tiene que cubrir pasadas muy cortas). El validador mantiene la ventana por debajo de 2,0 s, el retardo fijo del loro (`PLAYBACK_DELAY_S`), así que el loro nunca se detecta se llame como se llame su sistema o TG. Un puente que pasa a **otro** TG no es un bucle y no se toca; un bucle siempre vuelve al TG donde empezó.
+
+- `LOOP_GUARD` por sistema: `true` (por defecto) descarta el eco (en el enrutado y en la reemisión local del MASTER a sus otros peers); `log` escribe un aviso `*LoopGuard*` por stream eco y lo deja pasar; `false` ni comprueba ni registra los streams que entran por ahí (una opción extra para el loro **ECHO**).
+- Exentos: los IDs de voz del servidor (`all_server_voice_ids`, p. ej. 1000001; varios servidores emiten balizas con ellos a la vez) y las tramas de plugins y anuncios.
+- Coste: un veredicto por stream, en su primera trama, cacheado por stream ID. Las tramas de un stream ya asignado a su slot no llegan aquí. El trimmer de streams olvida las entradas a los 300 s.
+- El multipath OBP (la misma llamada por dos caminos OpenBridge) conserva el stream ID y no es eco.
+- La malla es una sola entrada: la siguiente pasada de alguien remoto puede llegar antes por otro enlace OpenBridge, y eso es volver a transmitir, no un eco. Un bucle real se sigue detectando en el servidor donde esa persona es local (HBP frente a un peer puente, o HBP frente a la malla), igual que un peer puente local que devuelve a alguien remoto (la malla frente a HBP).
+
+No cubre: un puente que transmite con **su propio** ID en vez del de quien habla.

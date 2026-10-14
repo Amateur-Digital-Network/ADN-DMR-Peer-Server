@@ -24,6 +24,7 @@ from __future__ import annotations
 from typing import Any
 
 from adn_server.application.proxy.deployment import config_has_enabled_openbridge
+from adn_server.application.routing.loop_guard import MAX_LOOP_GUARD_HOLD_S
 
 from ..domain.errors import ConfigError
 
@@ -149,6 +150,14 @@ def _validate_global(global_cfg: dict[str, Any], errors: list[str]) -> None:
     ):
         if key in global_cfg:
             _expect_bool(f"GLOBAL.{key}", global_cfg[key], errors)
+    if "LOOP_GUARD_HOLD" in global_cfg:
+        hold = global_cfg["LOOP_GUARD_HOLD"]
+        _expect_number("GLOBAL.LOOP_GUARD_HOLD", hold, errors)
+        if isinstance(hold, (int, float)) and not isinstance(hold, bool) and not 0 < hold < MAX_LOOP_GUARD_HOLD_S:
+            errors.append(
+                f"GLOBAL.LOOP_GUARD_HOLD: must be more than 0 and less than {MAX_LOOP_GUARD_HOLD_S:g} "
+                f"seconds (the parrot replays {MAX_LOOP_GUARD_HOLD_S:g} s after an over), got {hold!r}."
+            )
 
     url = global_cfg.get("URL_SECURITY")
     port = global_cfg.get("PORT_SECURITY")
@@ -202,14 +211,14 @@ def _validate_logger(logger_cfg: dict[str, Any], errors: list[str]) -> None:
     _section_string_keys("LOGGER", logger_cfg, LOGGER_STRING_KEYS, errors)
 
 
-def _validate_proxy(proxy_cfg: dict[str, Any] | None, systems: dict[str, Any], errors: list[str]) -> None:
+def _validate_proxy(proxy_cfg: dict[str, Any] | None, systems: dict[str, Any], errors: list[str]) -> int | None:
     from adn_server.application.proxy.deployment import config_has_enabled_master
 
     if not isinstance(systems, dict) or not config_has_enabled_master({"SYSTEMS": systems}):
-        return
+        return None
     if not proxy_cfg or not isinstance(proxy_cfg, dict):
         errors.append("PROXY: required when config has enabled MASTER systems (adn-server).")
-        return
+        return None
     for key in ("DEBUG", "CLIENT_INFO", "STATS"):
         if key in proxy_cfg:
             _expect_bool(f"PROXY.{key}", proxy_cfg[key], errors)
@@ -236,18 +245,19 @@ def _validate_proxy(proxy_cfg: dict[str, Any] | None, systems: dict[str, Any], e
     listen_port = proxy_cfg.get("LISTEN_PORT", 62031)
     if isinstance(listen_port, bool) or not isinstance(listen_port, int) or listen_port < 1:
         errors.append("PROXY.LISTEN_PORT: required >= 1.")
+        listen_port = None
 
     target = proxy_cfg.get("TARGET_SYSTEM")
     if _is_empty(target):
         errors.append("PROXY.TARGET_SYSTEM: required.")
-        return
+        return listen_port
     if not isinstance(systems, dict) or target not in systems:
         errors.append(f"PROXY.TARGET_SYSTEM: unknown system {target!r}.")
-        return
+        return listen_port
     target_cfg = systems[target]
     if not isinstance(target_cfg, dict):
         errors.append(f"SYSTEMS.{target}: expected mapping.")
-        return
+        return listen_port
     if not target_cfg.get("ENABLED", True):
         errors.append(f"PROXY.TARGET_SYSTEM: SYSTEMS.{target} must be ENABLED.")
     if target_cfg.get("MODE") != "MASTER":
@@ -263,17 +273,18 @@ def _validate_proxy(proxy_cfg: dict[str, Any] | None, systems: dict[str, Any], e
         errors.append(
             f"SYSTEMS.{target}.GENERATOR: must be 0 or 1 on proxy target (use MAX_PEERS, not GENERATOR)."
         )
+    return listen_port
 
 
 def _validate_obp_proxy(
     obp_cfg: dict[str, Any] | None,
     systems: dict[str, Any],
     errors: list[str],
-) -> None:
+) -> int | None:
     if isinstance(obp_cfg, dict) and not obp_cfg.get("ENABLED", True):
-        return
+        return None
     if not isinstance(obp_cfg, dict) and not config_has_enabled_openbridge({"SYSTEMS": systems}):
-        return
+        return None
     effective = obp_cfg if isinstance(obp_cfg, dict) else {}
     for key in ("DEBUG", "BIND_LEGACY_PORTS"):
         if key in effective:
@@ -283,12 +294,12 @@ def _validate_obp_proxy(
     listen_port = effective.get("LISTEN_PORT", 62032)
     if isinstance(listen_port, bool) or not isinstance(listen_port, int) or listen_port < 1:
         errors.append("OBP_PROXY.LISTEN_PORT: required >= 1 when ENABLED.")
-        return
+        return None
     bind_legacy = bool(effective.get("BIND_LEGACY_PORTS", True))
     network_ids: dict[Any, str] = {}
     legacy_ports: set[int] = set()
     if not isinstance(systems, dict):
-        return
+        return listen_port
     for name, sys_cfg in systems.items():
         if not isinstance(sys_cfg, dict) or not sys_cfg.get("ENABLED", True):
             continue
@@ -328,6 +339,7 @@ def _validate_obp_proxy(
                             f"SYSTEMS.{name}.PORT: duplicate OPENBRIDGE listen port {legacy_port}."
                         )
                     legacy_ports.add(legacy_port)
+    return listen_port
 
 
 def _config_requires_database(config: dict[str, Any]) -> bool:
@@ -369,9 +381,23 @@ def _validate_system(name: str, sys_cfg: dict[str, Any], errors: list[str]) -> N
     mode = sys_cfg.get("MODE")
     if mode is not None and not _is_empty(mode) and not isinstance(mode, str):
         errors.append(f"{prefix}.MODE: expected string, got {type(mode).__name__} ({mode!r}).")
-    for key in ("ENABLED", "REPEAT", "USE_ACL", "SINGLE_MODE", "VOICE_IDENT", "ALLOW_UNREG_ID", "PROXY_CONTROL", "EXPORT_AMBE", "LOOSE", "RELAX_CHECKS", "ENHANCED_OBP", "BOTH_SLOTS"):
+    for key in ("ENABLED", "REPEAT", "USE_ACL", "SINGLE_MODE", "VOICE_IDENT", "ALLOW_UNREG_ID", "PROXY_CONTROL", "EXPORT_AMBE", "LOOSE", "RELAX_CHECKS", "ENHANCED_OBP", "BOTH_SLOTS", "SUB_MAP_LEARN", "TG4000_VOICE"):
         if key in sys_cfg:
             _expect_bool(f"{prefix}.{key}", sys_cfg[key], errors)
+    # OpenBridge always learns SUB_MAP: whoever is behind the link must stay reachable.
+    if mode == "OPENBRIDGE" and "SUB_MAP_LEARN" in sys_cfg:
+        errors.append(
+            f"{prefix}.SUB_MAP_LEARN: not supported on OPENBRIDGE (an OpenBridge link always "
+            "updates SUB_MAP); remove it."
+        )
+    if mode not in (None, "MASTER") and "TG4000_VOICE" in sys_cfg:
+        errors.append(f"{prefix}.TG4000_VOICE: only on MASTER (it answers its hotspots); remove it.")
+    if "LOOP_GUARD" in sys_cfg and not (
+        isinstance(sys_cfg["LOOP_GUARD"], bool) or sys_cfg["LOOP_GUARD"] == "log"
+    ):
+        errors.append(
+            f"{prefix}.LOOP_GUARD: expected true, false or \"log\", got {sys_cfg['LOOP_GUARD']!r}."
+        )
     for key in (
         "PORT",
         "MASTER_PORT",
@@ -419,13 +445,15 @@ def validate_config(config: dict[str, Any], *, config_path: str | None = None) -
             _validate_system(name, sys_cfg, errors)
 
     proxy_cfg = config.get("PROXY")
-    _validate_proxy(proxy_cfg if isinstance(proxy_cfg, dict) else None, systems if isinstance(systems, dict) else {}, errors)
+    proxy_port = _validate_proxy(proxy_cfg if isinstance(proxy_cfg, dict) else None, systems if isinstance(systems, dict) else {}, errors)
     obp_proxy_cfg = config.get("OBP_PROXY")
-    _validate_obp_proxy(
+    obp_port = _validate_obp_proxy(
         obp_proxy_cfg if isinstance(obp_proxy_cfg, dict) else None,
         systems if isinstance(systems, dict) else {},
         errors,
     )
+    if proxy_port is not None and proxy_port == obp_port:
+        errors.append(f"PROXY.LISTEN_PORT and OBP_PROXY.LISTEN_PORT: both {proxy_port}, would collide on bind.")
     if _config_requires_database(config):
         _validate_database(config.get("DATABASE"), errors)
 

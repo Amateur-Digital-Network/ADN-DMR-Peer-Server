@@ -56,7 +56,7 @@ def test_unit_data_reports_rx_event_when_reporting_enabled() -> None:
 
 @pytest.mark.behavior
 def test_unit_data_csbk_new_stream_is_handled() -> None:
-    """Regression: CSBK dtype 3 on new stream is accepted and reported."""
+    """Regression: CSBK dtype 3 on new stream is accepted but not monitor-reported."""
     scenario = DeterministicScenario(enable_reporting=True)
     base = PacketSpec(call_type="unit", dst_id=5003, stream_id=0x63636363, slot=2)
 
@@ -66,7 +66,8 @@ def test_unit_data_csbk_new_stream_is_handled() -> None:
     )
 
     assert_inject_ok(ok)
-    assert_report_event(scenario, "UNIT CSBK")
+    assert scenario.report_factory is not None
+    assert not any("UNIT CSBK" in ev for ev in scenario.report_factory.events)
     slot = scenario.protocols["MASTER-A"].STATUS.get(2, {})
     assert slot.get("RX_TYPE", HBPF_SLT_VTERM) == HBPF_SLT_VTERM
 

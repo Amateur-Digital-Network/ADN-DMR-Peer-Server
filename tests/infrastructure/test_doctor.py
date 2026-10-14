@@ -91,6 +91,25 @@ def test_collect_findings_peer_mesh_protocol() -> None:
     assert any("MESH_PROTOCOL=dmre_v5" in m for m in peer_msgs)
 
 
+def test_collect_findings_warns_when_two_bridges_share_a_passphrase() -> None:
+    """Without it nothing tells the operator their control frames are only being
+    told apart by source address. The passphrase itself must not be printed."""
+    config = {
+        "GLOBAL": {"SERVER_ID": 7301},
+        "REPORTS": {"REPORT": False},
+        "SYSTEMS": {
+            "OBP-A": {"MODE": "OPENBRIDGE", "ENABLED": True, "NETWORK_ID": 1, "PASSPHRASE": "shared"},
+            "OBP-B": {"MODE": "OPENBRIDGE", "ENABLED": True, "NETWORK_ID": 2, "PASSPHRASE": "shared"},
+        },
+    }
+    findings = collect_findings(config, project_root=".", config_path="cfg.yaml")
+    shared = [f for f in findings if "same PASSPHRASE" in f.message]
+    assert len(shared) == 1
+    assert shared[0].level == "warn"
+    assert "OBP-A, OBP-B" in shared[0].message
+    assert not any("shared" in f.message for f in findings)
+
+
 def test_collect_findings_obp_per_bridge_migration() -> None:
     """7301-style: OBP-CL2 on fan-in 62032; another bridge keeps legacy 62999."""
     config = {

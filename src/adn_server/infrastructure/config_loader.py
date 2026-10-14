@@ -79,6 +79,10 @@ def process_acls(config: dict[str, Any]) -> None:
             sys_cfg["REG_ACL"] = acl_build(sys_cfg.get("REG_ACL", "PERMIT:ALL"), PEER_MAX)
         for key in ("SUB_ACL", "TG1_ACL", "TG2_ACL"):
             acl_key = "TGID_TS1_ACL" if key == "TG1_ACL" else ("TGID_TS2_ACL" if key == "TG2_ACL" else key)
+            # OpenBridge has one TG ACL, TGID_ACL, checked on ingress and egress (legacy
+            # FreeDMR); TGID_TS1_ACL belongs to MASTER/PEER slots and does not apply there.
+            if key == "TG1_ACL" and sys_cfg.get("MODE") == "OPENBRIDGE" and "TGID_ACL" in sys_cfg:
+                acl_key = "TGID_ACL"
             sys_cfg[key] = acl_build(sys_cfg.get(acl_key, sys_cfg.get(key, "PERMIT:ALL")), ID_MAX)
 
 
@@ -110,6 +114,13 @@ class YamlConfigLoader:
             "DATABASE": data.get("DATABASE", {}),
             "SELF_SERVICE": data.get("SELF_SERVICE", {}),
         }
+        # OBP_PROXY is optional: keep it only when present so callers can tell
+        # "absent" (defaults apply) from "present but disabled".
+        if isinstance(data.get("OBP_PROXY"), dict):
+            config["OBP_PROXY"] = data["OBP_PROXY"]
+        # PLUGINS (directory, master_kill, overrides, send) is read by the plugin manager.
+        if isinstance(data.get("PLUGINS"), dict):
+            config["PLUGINS"] = data["PLUGINS"]
         apply_proxy_env_overrides(config)
         # Ensure REPORT_CLIENTS is list
         if "REPORT_CLIENTS" in config["REPORTS"] and isinstance(config["REPORTS"]["REPORT_CLIENTS"], str):

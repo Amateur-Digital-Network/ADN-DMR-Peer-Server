@@ -136,6 +136,19 @@ stateDiagram-v2
 **VTERM perdido:** si el MMDVM nunca envía el terminator, la sesión per-peer
 expira tras `_STALE_PEER_SESSION_TIMEOUT` (5 s), liberando el slot.
 
+**Hotspots simultáneos en un slot del MASTER:** los hotspots del MASTER
+compartido comparten un mismo `STATUS[slot]`, así que además cada stream de
+entrada se sigue por separado (`RX_STREAMS`: peer, origen, TG, inicio, último
+frame). Cada uno vence por su cuenta a los 5 s, recibe su propio END RX con su
+duración real y su START no se repite.
+
+**Avisos del servidor:** el ident de voz, los 999x a demanda y el aviso de
+desconexión ocupan el **TS2** de su MASTER mientras suenan (una radio u otro
+stream en el slot los corta). Solo la voz propia de este servidor vuelve a
+aplicar la reserva del slot del MASTER; el anuncio de otro servidor que llega
+por OpenBridge es voz normal de la malla (`TX_FROM_MESH`) y pasa por los
+controles por hotspot.
+
 ---
 
 ## SINGLE=1 vs SINGLE=0 (escucha exclusiva)
@@ -170,7 +183,9 @@ flowchart LR
 ### Excepciones a SINGLE
 
 - **TG 9990 (eco):** **no** crea lock SINGLE. El eco vuelve siempre al llamante.
-- **TG 4000:** **no** crea sesión UA. Es sólo comando de reset.
+- **TG 4000:** **no** crea sesión UA. Es sólo comando de reset; con
+  `TG4000_VOICE` (por defecto `true`) el hotspot además recibe la respuesta de
+  estado por voz.
 - **TG 9991–9999 (bajo demanda):** no crean lock SINGLE.
 - **UA session propia:** un peer SINGLE=1 que activó el TG T dinámicamente
   **debe** recibir downlink de T (no se auto-bloquea).
@@ -193,6 +208,10 @@ Origen de los TG estáticos:
 - **OPTIONS al login (RPTO)** — el hotspot reporta su línea.
 - **Self-service (panel web)** — el usuario cambia sus TG desde el navegador;
   el servidor envía un `RPTO` actualizado al MASTER.
+- **`TS1_STATIC` / `TS2_STATIC` del MASTER** — se suman a los estáticos de cada
+  hotspot conectado, además de sus OPTIONS (se ignoran los TG 0–5, 9 y
+  9990–9999); un `SIGHUP` actualiza los hotspots conectados y las piernas del
+  MASTER.
 - **Startup/reload** — `apply_startup_bridges` aplica los TG al arranque y en
   `SIGHUP`.
 - **D-28 (divergencia):** **no** hay loop periódico de 26 s

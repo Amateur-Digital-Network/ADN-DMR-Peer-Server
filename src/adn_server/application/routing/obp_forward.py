@@ -49,12 +49,19 @@ from hashlib import blake2b
 from time import perf_counter
 from typing import Any
 
-from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, int_id
+from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, int_id
 from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
-from .helpers import group_voice_tg_ingress_collision
+from ..subscription.obp_source_ops import ensure_obp_source_for_tg_store, obp_source_needs_ensure
+from ..subscription.subscription_queries import store_has_table
+from .helpers import group_voice_tg_ingress_collision, obp_is_canonical_ingress, seq_advance, unit_data_reportable
+from .loop_guard import loop_guard_drops
 
 logger = logging.getLogger(__name__)
+
+# Idle time before another destination may take over a stream_id. The trimmer only
+# drops a row after 180s; well above one voice frame so interleaved streams keep theirs.
+OBP_REUSED_STREAM_IDLE_S = 2.0
 
 
 class ObpForwardMixin:
@@ -81,11 +88,6 @@ class ObpForwardMixin:
             return
         if not (79 <= dst_int < 9990 or dst_int > 9999):
             return
-        from ..subscription.obp_source_ops import (
-            ensure_obp_source_for_tg_store,
-            obp_source_needs_ensure,
-        )
-
         store = self._subscription_store
         if not obp_source_needs_ensure(store, system_name, relay_table_key, dst_int):
             return
@@ -152,6 +154,7 @@ class ObpForwardMixin:
         stream_id: bytes,
         data: bytes,
         obp_hops: bytes,
+        synthetic_announcement: bool = False,
     ) -> bool:
         """Port of bridge_master.routerOBP.dmrd_received group/vcsbk (~2269-2411). False = drop packet."""
         pkt_time = time.time()
@@ -169,7 +172,31 @@ class ObpForwardMixin:
         if status is None:
             return True
 
+        # A peer reusing a stream_id for another destination is starting a new call,
+        # not continuing the one the row describes. to_target already evicts on a
+        # forward leg; without the same here loop control refuses the new call.
+        _prev = status.get(stream_id)
+        if isinstance(_prev, dict) and _prev.get("TGID") != dst_id:
+            _idle = pkt_time - _prev.get("LAST", _prev.get("START", pkt_time))
+            if _idle >= OBP_REUSED_STREAM_IDLE_S:
+                logger.info(
+                    "(%s) stream %s reused for TG %s (was TG %s, idle %.1fs): starting a new call",
+                    system_name,
+                    int_id(stream_id),
+                    int_id(dst_id),
+                    int_id(_prev.get("TGID", b"\x00\x00\x00")),
+                    _idle,
+                )
+                del status[stream_id]
+
         if stream_id not in status:
+            # Echo of the same caller on the same TG from another ingress: see loop_guard.
+            if not synthetic_announcement and loop_guard_drops(
+                self._config, protocols,
+                system_name=system_name, peer_id=peer_id, slot=slot, rf_src=rf_src,
+                dst_id=dst_id, stream_id=stream_id, pkt_time=pkt_time,
+            ):
+                return False
             if group_voice_tg_ingress_collision(
                 protocols, systems_cfg, dst_id, stream_id, rf_src, pkt_time,
             ):
@@ -221,6 +248,23 @@ class ObpForwardMixin:
                         system_name, int_id(stream_id), int_id(peer_id), int_id(rf_src), slot, int_id(dst_id)
                     )
                 )
+            bridge = self._voice_plugin_bridge
+            if bridge is not None and bridge.has_subscribers() and obp_is_canonical_ingress(
+                protocols, systems_cfg, system_name, stream_id, dst_id, rf_src,
+            ) and bridge.emit_group_voice_start(
+                    system_name=system_name,
+                    peer_id=peer_id,
+                    rf_src=rf_src,
+                    dst_id=dst_id,
+                    slot=slot,
+                    stream_id=stream_id,
+                    pkt_time=pkt_time,
+                    source_is_obp=True,
+                    obp_hops=obp_hops if obp_hops else b"",
+                    synthetic_announcement=synthetic_announcement,
+                    voice_phase="INGRESS",
+                ):
+                status[stream_id]["_plugin_voice"] = True
         else:
             st = status[stream_id]
             if "packets" in st:
@@ -248,7 +292,6 @@ class ObpForwardMixin:
 
             # Legacy routerOBP ~2409: LoopControl only on 2nd+ packet (else branch).
             hr_times: dict[str, float] = {}
-            _sysslot_last = 0
             for other_name, proto in (protocols or {}).items():
                 omode = systems_cfg.get(other_name, {}).get("MODE")
                 if other_name != system_name and omode != "OPENBRIDGE":
@@ -256,7 +299,6 @@ class ObpForwardMixin:
                     if not ostatus:
                         continue
                     for _sysslot in ostatus:
-                        _sysslot_last = _sysslot if isinstance(_sysslot, int) else _sysslot_last
                         slot_st = ostatus.get(_sysslot)
                         if not isinstance(slot_st, dict):
                             continue
@@ -285,15 +327,16 @@ class ObpForwardMixin:
                         hr_times[other_name] = obp_status[stream_id]["1ST"]
 
             fi = min(hr_times, key=hr_times.get, default=False)
-            hr_times.clear()
             if not fi:
-                logger.warning(
-                    "(%s) OBP *LoopControl* fi is empty for some reason : STREAM ID: %s, TG: %s, TS: %s",
-                    system_name,
-                    int_id(stream_id),
-                    int_id(dst_id),
-                    _sysslot_last,
-                )
+                if not st.get("LOOPLOG"):
+                    logger.warning(
+                        "(%s) OBP *LoopControl* no bridge holds stream %s for TG %s, dropping",
+                        system_name,
+                        int_id(stream_id),
+                        int_id(dst_id),
+                    )
+                    st["LOOPLOG"] = True
+                st["LAST"] = pkt_time
                 return False
             if system_name != fi:
                 if "LOOPLOG" not in st or not st["LOOPLOG"]:
@@ -351,7 +394,11 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
                 return False
-            if seq and seq == st["lastSeq"]:
+            _step = seq_advance(
+                st["lastSeq"], seq, pkt_time - st.get("lastSeqTime", pkt_time),
+                terminator=frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM,
+            )
+            if _step == 0:
                 st["loss"] += 1
                 logger.debug(
                     "(%s) *PacketControl* Duplicate sequence number %s, disgarding. Stream ID:, %s TGID: %s, LOSS: %.2f%%",
@@ -362,7 +409,7 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
                 return False
-            if seq and st["lastSeq"] and (seq != 1) and (seq < st["lastSeq"]):
+            if _step < 0:
                 st["loss"] += 1
                 logger.debug(
                     "(%s) *PacketControl* Out of order packet - last SEQ: %s, this SEQ: %s,  disgarding. Stream ID:, %s TGID: %s, LOSS: %.2f%%",
@@ -387,8 +434,8 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
                 return False
-            if seq and st["lastSeq"] and seq > (st["lastSeq"] + 1):
-                st["loss"] += 1
+            if _step > 1:
+                st["loss"] += _step - 1  # every packet the jump skipped, not one per jump
                 logger.debug(
                     "(%s) *PacketControl* Missed packet(s) - last SEQ: %s, this SEQ: %s. Stream ID:, %s TGID: %s , LOSS: %.2f%%",
                     system_name,
@@ -399,6 +446,7 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
             st["lastSeq"] = seq
+            st["lastSeqTime"] = pkt_time
             st["lastData"] = data
 
         # Canonical START,RX for monitor CTABLE (OpenBridge / Linked / Active QSO) after loop win; INGRESS was debug-only.
@@ -413,13 +461,16 @@ class ObpForwardMixin:
 
         st = status[stream_id]
         st["crcs"].add(_pkt_crc)
+        # Longest silence inside the stream: frames held back and released in a burst
+        # keep their sequence numbers, so Loss alone does not show them.
+        _gap = pkt_time - st.get("LAST", pkt_time)
+        if _gap > st.get("MAX_GAP", 0.0):
+            st["MAX_GAP"] = _gap
         st["LAST"] = pkt_time
 
         if self._config.get("GLOBAL", {}).get("GEN_STAT_BRIDGES"):
             _di = int_id(dst_id)
             _bk = str(_di)
-            from ..subscription.subscription_queries import store_has_table
-
             if _di >= 5 and _di != 9 and not store_has_table(self._subscription_store, _bk):
                 logger.debug("(%s) Bridge for STAT TG %s does not exist. Creating", system_name, _di)
                 self.ensure_stat_relay(dst_id)
@@ -448,7 +499,7 @@ class ObpForwardMixin:
         """Legacy sendDataToOBP: forward a unit-data packet to an OPENBRIDGE target."""
         systems_cfg = self._config.get("SYSTEMS", {})
         _target_system = systems_cfg.get(target, {})
-        if _target_system.get("ENHANCED_OBP") and "_bcka" in _target_system and _target_system["_bcka"] < pkt_time - 60:
+        if _target_system.get("ENHANCED_OBP") and self._obp_session(target).keepalive_stale(pkt_time):
             return
         protocols = self._get_protocols() if self._get_protocols else {}
         target_proto = protocols.get(target)
@@ -473,8 +524,10 @@ class ObpForwardMixin:
             logger.warning("(%s) send_data_to_obp %s failed: %s", source_system, target, exc)
             return
         logger.debug("(%s) UNIT Data Bridged to OBP System: %s DST_ID: %s", source_system, target, int_id(dst_id))
-        self._send_routing_event(
-            "UNIT DATA,DATA,TX,{},{},{},{},{},{}".format(
-                target, int_id(stream_id), int_id(peer_id), int_id(rf_src), 1, int_id(dst_id),
+        _dtype_vseq = data[15] & 0xF if len(data) > 15 else 0
+        if unit_data_reportable(_dtype_vseq):
+            self._send_routing_event(
+                "UNIT DATA,DATA,TX,{},{},{},{},{},{}".format(
+                    target, int_id(stream_id), int_id(peer_id), int_id(rf_src), 1, int_id(dst_id),
+                )
             )
-        )

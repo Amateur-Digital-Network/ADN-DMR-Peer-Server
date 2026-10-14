@@ -1,5 +1,7 @@
 # Voice, announcements, and TTS
 
+> **Scheduled announcements and TTS are a plugin** — `plugins/voice-announcements/`, enabled by default. Configuration is unchanged (this file); the plugin follows it every 15 s and the server grants it exactly the talkgroups and DMR IDs its items use (override with `PLUGINS.send.voice-announcements`, see [Plugins](plugins.md#sending-unit-data-and-group-voice-opt-in)). Voice ident, on-demand 999x and disconnected prompts stay in the core.
+
 ## Configuration files
 
 - **`adn-voice.yaml`** (optional, not committed) — merged into `config["VOICE"]`.
@@ -60,9 +62,11 @@ Configure **`TTS_VOCODER_CMD`** or **`TTS_AMBESERVER_HOST`** / **`TTS_AMBESERVER
 
 ## Anti-collision (QSO) with announcements
 
-When scheduling announcements, the server may **wait** if target slots are busy, **drop** targets if a live QSO appears mid-stream, and only mark **hourly** announcement state after a successful target list — this avoids clobbering live traffic.
+The plugin plays **one announcement per TG at a time**; others for the same TG wait in order, 1.5 s apart. An item that fires while its TG is on air is retried every 3 s. The slot comes from `voice_slot_for_tg` (where the TG has a dynamic session or an active bridge leg on the MASTER, then TS2, then TS1); while every slot is busy it retries every 5 s, up to 60 times, then skips that playback. Frames are paced at 58 ms after a 0.5 s start delay.
 
-Scheduled and TTS broadcasts inject each frame as a **synthetic hotspot PTT** on `PROXY.TARGET_SYSTEM` (the same MASTER used by the integrated proxy). Routing fans out to bridged hotspots and OPENBRIDGE legs; local peers on that MASTER still receive frames via `send_system`.
+The plugin sends each frame through `send_dmrd`, which the core injects as a **synthetic hotspot PTT** on `PROXY.TARGET_SYSTEM` (the same MASTER used by the integrated proxy). Routing fans out to bridged hotspots and OPENBRIDGE legs; local peers on that MASTER still receive frames via `send_system`. Routed voice may still take the slot's TX leg (each hotspot keeps the stream it hears first); only a radio or another plugin stream on the RX leg stops the announcement. A frame routing refuses is still played to the MASTER's hotspots, with one WARNING per stream.
+
+Server prompts from the core (voice ident, on-demand 999x, the disconnected prompt) hold **TS2** while they play; a radio or another stream on the slot stops them. An announcement from another server arriving over OpenBridge is ordinary mesh voice and does not get this hold.
 
 ## Broadcast queue
 

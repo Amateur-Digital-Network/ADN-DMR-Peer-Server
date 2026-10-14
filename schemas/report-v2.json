@@ -230,6 +230,7 @@
             "properties": {
               "id": { "$ref": "#/$defs/dmr_id" },
               "connected": { "type": "boolean" },
+              "connected_at": { "type": "integer", "description": "Unix time the peer completed its login." },
               "ip": { "type": "string" },
               "port": { "type": "integer", "minimum": 0, "maximum": 65535 },
               "callsign": { "type": "string" },
@@ -243,15 +244,19 @@
               "software_id": { "type": "string" },
               "colorcode": { "type": "string" },
               "tx_power": { "type": "string" },
+              "latitude": { "type": "string", "description": "Latitude as sent by the peer in RPTC (decimal degrees)." },
+              "longitude": { "type": "string", "description": "Longitude as sent by the peer in RPTC (decimal degrees)." },
+              "height": { "type": "string", "description": "Antenna height above ground as sent by the peer in RPTC (metres)." },
+              "options": { "type": "string", "description": "The peer's OPTIONS with every static TG it actually receives (its own plus the MASTER's YAML statics), PASS= removed." },
               "ts1_static": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Slot-1 static TGs from this peer's RPTO OPTIONS."
+                "description": "Slot-1 static TGs this peer receives: the MASTER's YAML statics first, then its OPTIONS."
               },
               "ts2_static": {
                 "type": "array",
                 "items": { "type": "string" },
-                "description": "Slot-2 static TGs from this peer's RPTO OPTIONS."
+                "description": "Slot-2 static TGs this peer receives: the MASTER's YAML statics first, then its OPTIONS."
               },
               "single_mode": {
                 "type": "boolean",

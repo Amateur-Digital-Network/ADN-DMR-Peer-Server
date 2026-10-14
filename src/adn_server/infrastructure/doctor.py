@@ -35,6 +35,7 @@ from adn_server.application.proxy.deployment import (
     normalize_proxy_target,
     obp_bridge_legacy_listen_port,
     obp_proxy_enabled,
+    openbridge_passphrase_collisions,
     proxy_target_system,
 )
 from adn_server.domain.errors import ConfigError
@@ -230,6 +231,16 @@ def collect_findings(
                 )
         else:
             findings.append(Finding("warn", "systems", f"{name}: unknown MODE={mode}"))
+
+    for shared in openbridge_passphrase_collisions(config):
+        findings.append(
+            Finding(
+                "warn",
+                "peer",
+                f"{', '.join(shared)}: same PASSPHRASE — a control frame from an address "
+                "none of them is configured with goes to whichever is registered first",
+            )
+        )
 
     if not echo:
         reports = config.get("REPORTS", {})

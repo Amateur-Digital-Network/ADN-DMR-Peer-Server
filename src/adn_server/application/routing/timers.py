@@ -49,6 +49,7 @@ from typing import Any
 
 from ...domain import HBPF_SLT_VTERM, int_id
 from .helpers import obp_clear_deferred_bridge_tx_leg
+from .loop_guard import loop_guard
 
 logger = logging.getLogger(__name__)
 
@@ -251,6 +252,7 @@ class RoutingTimerMixin:
         protocols = self._get_protocols() if self._get_protocols else {}
         systems_cfg = self._config.get("SYSTEMS", {})
         now = time.time()
+        loop_guard(self._config).trim(now)
         for system_name, protocol in protocols.items():
             if not getattr(protocol, "STATUS", None):
                 continue
@@ -283,54 +285,77 @@ class RoutingTimerMixin:
                         # Forward legs (H_LC): no END,RX and no cross-leg END,TX cascade.
                         if "_to" not in st and "_fin" not in st and last < now - 5:
                             if _obp_status_is_forward_leg(st):
-                                if st.get("_end_tx_sent") or st.get("_bcsq_quenched"):
-                                    st["_to"] = True
+                                # Idle forward leg: mark for removal even if VTERM never arrived,
+                                # otherwise one row per forwarded call stays here forever.
+                                st["_to"] = True
                                 continue
                             rfs = st.get("RFS", b"\x00\x00\x00")
                             peer = st.get("RX_PEER", b"\x00\x00\x00\x00")
                             tgid = st.get("TGID", b"\x00\x00\x00")
                             start = st.get("START", now)
                             duration = max(0.0, last - start)
+                            # Over that lost its terminator: it ended at its last frame.
+                            if hasattr(self, "_note_tg_heard"):
+                                self._note_tg_heard(tgid, last)
                             self._send_routing_event(
                                 "GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}".format(
                                     system_name, int_id(stream_id), int_id(peer), int_id(rfs), 1, int_id(tgid), duration
                                 )
                             )
+                            bridge = self._voice_plugin_bridge
+                            if st.get("_plugin_voice") and bridge is not None:
+                                bridge.emit_group_voice_end(
+                                    system_name=system_name,
+                                    peer_id=peer,
+                                    rf_src=rfs,
+                                    dst_id=tgid,
+                                    slot=1,
+                                    stream_id=stream_id,
+                                    pkt_time=last,
+                                    duration_s=duration,
+                                    source_is_obp=True,
+                                )
+                                st.pop("_plugin_voice", None)
                             st["_to"] = True
                             self._obp_emit_end_tx_for_forward_legs(stream_id, system_name, now)
                             continue
                     for stream_id in to_remove:
-                        _syscfg = systems_cfg.get(system_name, {})
-                        _bmap = _syscfg.get("_bcsq")
-                        if isinstance(_bmap, dict):
-                            for _tgid_k, _sid in list(_bmap.items()):
-                                if _sid == stream_id:
-                                    _bmap.pop(_tgid_k, None)
+                        self._obp_session(system_name).release_stream(stream_id)
                         st_rem = obp_status.get(stream_id)
                         if isinstance(st_rem, dict) and _obp_status_is_forward_leg(st_rem):
                             self._obp_emit_end_tx_forward_leg(system_name, stream_id, st_rem, now)
                         elif isinstance(st_rem, dict) and _obp_status_is_ingress(st_rem):
                             self._obp_emit_end_tx_for_forward_legs(stream_id, system_name, now)
                         obp_status.pop(stream_id, None)
+                        # Per-stream TA state (DMRA/embedded buffers, relay dedupe) is only
+                        # released on HBP VTERM; OBP streams must be freed here.
+                        self.clear_talker_alias_stream(system_name, stream_id)
+                    if to_remove:
+                        self._forget_ingress_drop_logs(system_name, to_remove)
+                if hasattr(protocol, "trim_dmra_streams"):
+                    protocol.trim_dmra_streams()
                 continue
             for slot in (1, 2):
                 _slot = protocol.STATUS.get(slot)
                 if not _slot:
                     continue
+                ended: set[bytes] = set()
+                for stream_id, (peer, rfs, tgid, start, last) in list(_slot.get("RX_STREAMS", {}).items()):
+                    if last < now - 5:
+                        del _slot["RX_STREAMS"][stream_id]
+                        ended.add(stream_id)
+                        if hasattr(self, "_note_tg_heard"):  # hotspot over without a terminator
+                            self._note_tg_heard(tgid, last)
+                        self._report_rx_timeout(system_name, slot, stream_id, peer, rfs, tgid, start, last)
                 if _slot.get("RX_TYPE") != HBPF_SLT_VTERM and _slot.get("RX_TIME", 0) < now - 5:
                     _slot["RX_TYPE"] = HBPF_SLT_VTERM
-                    logger.info(
-                        "(%s) *TIME OUT*  RX STREAM ID: %s SUB: %s TGID %s, TS %s, Duration: %.2f",
-                        system_name, int_id(_slot.get("RX_STREAM_ID", b"")), int_id(_slot.get("RX_RFS", b"")),
-                        int_id(_slot.get("RX_TGID", b"")), slot, _slot.get("RX_TIME", 0) - _slot.get("RX_START", 0),
-                    )
-                    self._send_routing_event(
-                        "GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}".format(
-                            system_name, int_id(_slot.get("RX_STREAM_ID", b"")), int_id(_slot.get("RX_PEER", b"")),
-                            int_id(_slot.get("RX_RFS", b"")), slot, int_id(_slot.get("RX_TGID", b"")),
-                            _slot.get("RX_TIME", 0) - _slot.get("RX_START", 0),
+                    stream_id = _slot.get("RX_STREAM_ID", b"\x00")
+                    if stream_id not in ended:  # not a tracked hotspot stream (plugin voice, suppressed uplink…)
+                        self._report_rx_timeout(
+                            system_name, slot, stream_id, _slot.get("RX_PEER", b"\x00\x00\x00\x00"),
+                            _slot.get("RX_RFS", b"\x00\x00\x00"), _slot.get("RX_TGID", b"\x00\x00\x00"),
+                            _slot.get("RX_START", 0), _slot.get("RX_TIME", 0),
                         )
-                    )
                 if _slot.get("RX_TIME", 0) < now - 60:
                     _slot["RX_STREAM_ID"] = b"\x00"
                 tx_streams = _slot.get("TX_STREAMS")
@@ -383,6 +408,32 @@ class RoutingTimerMixin:
                             hbp_status.pop(_k, None)
             if hasattr(protocol, "trim_dmra_streams"):
                 protocol.trim_dmra_streams()
+
+    def _report_rx_timeout(
+        self, system_name: str, slot: int, stream_id: bytes, peer: bytes, rfs: bytes, tgid: bytes, start: float, last: float
+    ) -> None:
+        logger.info(
+            "(%s) *TIME OUT*  RX STREAM ID: %s SUB: %s TGID %s, TS %s, Duration: %.2f",
+            system_name, int_id(stream_id), int_id(rfs), int_id(tgid), slot, last - start,
+        )
+        self._send_routing_event(
+            "GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}".format(
+                system_name, int_id(stream_id), int_id(peer), int_id(rfs), slot, int_id(tgid), last - start,
+            )
+        )
+        bridge = self._voice_plugin_bridge
+        if bridge is not None:
+            bridge.emit_group_voice_end(
+                system_name=system_name,
+                peer_id=peer,
+                rf_src=rfs,
+                dst_id=tgid,
+                slot=slot,
+                stream_id=stream_id,
+                pkt_time=last,
+                duration_s=last - start,
+                source_is_obp=False,
+            )
 
     def subscription_reset_loop(self) -> None:
         """Bridge reset iteration (legacy bridge_reset, 6s). Clear _reset and remove_bridge_system."""

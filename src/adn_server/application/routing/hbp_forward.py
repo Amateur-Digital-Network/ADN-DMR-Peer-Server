@@ -52,8 +52,11 @@ from .helpers import (
     hbp_ingress_downlink_session_blocks_tx,
     hbp_ingress_new_stream_collision,
     master_per_peer_slot_contention,
+    seq_advance,
     tg_has_active_conversation,
+    unit_data_reportable,
 )
+from .loop_guard import loop_guard_drops
 from .peer_downlink_index import count_connected_peers
 
 logger = logging.getLogger(__name__)
@@ -132,6 +135,15 @@ class HbpForwardMixin:
             self._silent_activation_log_key(system_name, peer_id, dst_id),
         )
 
+    def _forget_ingress_drop_logs(self, system_name: str, stream_ids: list[bytes]) -> None:
+        """Drop log-once keys of streams the trimmer removed (OBP has no per-slot VTERM hook)."""
+        cache = getattr(self, "_ingress_drop_logged", None)
+        if not cache:
+            return
+        gone = set(stream_ids)
+        for key in [k for k in cache if len(k) > 4 and k[1] == system_name and k[4] in gone]:
+            cache.discard(key)
+
     def _clear_ingress_drop_log(
         self,
         system_name: str,
@@ -160,11 +172,15 @@ class HbpForwardMixin:
         stream_id: bytes,
         data: bytes,
         pkt_time: float,
+        *,
+        loop_guard_check: bool = True,
+        terminator: bool = False,
     ) -> bool:
         """Legacy routerHBP group/vcsbk packet control (~3270-3399).
 
         Returns True when the packet may proceed to bridge routing; False when dropped.
         Uses ingress ``pkt_time`` (UDP receive time) for rate/timeout parity with legacy.
+        ``loop_guard_check`` is False for plugin / server announcement frames.
         """
         protocols = self._get_protocols() if self._get_protocols else {}
         src_proto = protocols.get(system_name)
@@ -176,6 +192,14 @@ class HbpForwardMixin:
         if _is_new_stream:
             _slot_st.pop("_suppress_uplink", None)
             _slot_st.pop("_silent_activation_tg", None)
+            # Echo of the same caller on the same TG from another ingress (transcoding
+            # bridge loop): stream-ID loop control below cannot see it.
+            if loop_guard_check and loop_guard_drops(
+                self._config, protocols,
+                system_name=system_name, peer_id=peer_id, slot=slot, rf_src=rf_src,
+                dst_id=dst_id, stream_id=stream_id, pkt_time=pkt_time,
+            ):
+                return False
             sys_cfg = systems_cfg.get(system_name, {})
             peers = getattr(src_proto, "_peers", None) or sys_cfg.get("PEERS", {})
             connected = count_connected_peers(peers) if isinstance(peers, dict) else 0
@@ -320,10 +344,11 @@ class HbpForwardMixin:
                             src_proto._obp_send_bcsq(dst_id, stream_id)
                         _slot_st["_bcsq"] = True
                     return False
-        if seq and seq == _slot_st.get("lastSeq"):
-            _slot_st["loss"] = _slot_st.get("loss", 0) + 1
-            return False
-        if seq and _slot_st.get("lastSeq") and seq != 1 and seq < _slot_st.get("lastSeq", 0):
+        _step = seq_advance(
+            _slot_st.get("lastSeq"), seq, pkt_time - _slot_st.get("lastSeqTime", pkt_time),
+            terminator=terminator,
+        )
+        if _step <= 0:  # same sequence again, or a late / out-of-order packet
             _slot_st["loss"] = _slot_st.get("loss", 0) + 1
             return False
         _h = blake2b(digest_size=16)
@@ -332,9 +357,10 @@ class HbpForwardMixin:
         if seq > 0 and "crcs" in _slot_st and _pkt_crc in _slot_st["crcs"]:
             _slot_st["loss"] = _slot_st.get("loss", 0) + 1
             return False
-        if seq and _slot_st.get("lastSeq") and seq > (_slot_st.get("lastSeq", 0) + 1):
-            _slot_st["loss"] = _slot_st.get("loss", 0) + 1
+        if _step > 1:
+            _slot_st["loss"] = _slot_st.get("loss", 0) + _step - 1
         _slot_st["lastSeq"] = seq
+        _slot_st["lastSeqTime"] = pkt_time
         _slot_st["lastData"] = data
         if "crcs" in _slot_st:
             _slot_st["crcs"].add(_pkt_crc)
@@ -384,8 +410,10 @@ class HbpForwardMixin:
                 "(%s) UNIT trace -> %s stream=%s payload33=%s",
                 source_system, d_system, int_id(stream_id), dmrpkt.hex(),
             )
-        self._send_routing_event(
-            "UNIT DATA,DATA,TX,{},{},{},{},{},{}".format(
-                d_system, int_id(stream_id), int_id(peer_id), int_id(rf_src), 1, int_id(dst_id),
+        _dtype_vseq = data[15] & 0xF if len(data) > 15 else 0
+        if unit_data_reportable(_dtype_vseq):
+            self._send_routing_event(
+                "UNIT DATA,DATA,TX,{},{},{},{},{},{}".format(
+                    d_system, int_id(stream_id), int_id(peer_id), int_id(rf_src), 1, int_id(dst_id),
+                )
             )
-        )

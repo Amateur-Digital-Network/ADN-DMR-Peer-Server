@@ -29,6 +29,7 @@ import time
 from typing import Any
 
 from twisted.internet import reactor, task, threads
+from twisted.python.threadable import isInIOThread
 
 from adn_server.application import (
     IdentUseCases,
@@ -38,6 +39,13 @@ from adn_server.application import (
     VoiceUseCases,
 )
 from adn_server.application.dynamic_tg_use_cases import DynamicTgUseCases
+from adn_server.application.plugins.application.bus import PluginBus
+from adn_server.application.plugins.application.context import ServerContext
+from adn_server.application.plugins.application.data_bridge import DataPluginBridge
+from adn_server.application.plugins.application.ingress import PluginIngress
+from adn_server.application.plugins.application.manager import PluginManager
+from adn_server.application.plugins.application.sender import PluginDmrdSender
+from adn_server.application.plugins.application.voice_bridge import VoicePluginBridge
 from adn_server.application.proxy.deployment import (
     is_obp_proxy_managed,
     is_proxy_inject_only,
@@ -47,6 +55,7 @@ from adn_server.application.proxy.deployment import (
     proxy_target_system,
 )
 from adn_server.application.report.queue import BoundedReportQueue, QueuedReportSender
+from adn_server.application.routing.sub_map_learning import purge_non_learning_systems
 from adn_server.application.runtime_context import (
     ConfigProxy,
     RuntimeContext,
@@ -58,6 +67,7 @@ from adn_server.application.subscription.echo_seed import seed_echo_routing_tabl
 from adn_server.application.subscription.store_sync import replace_store_from_routing_table
 from adn_server.domain import bytes_4
 from adn_server.domain.dmr.bptc import encode_emblc
+from adn_server.domain.mesh_session import mesh_sessions
 from adn_server.infrastructure.acl_router import InMemoryAclRouter
 from adn_server.infrastructure.config_normalizer import (
     ensure_system_runtime_config as _ensure_system_runtime_config,
@@ -73,7 +83,7 @@ from adn_server.infrastructure.config_normalizer import (
 )
 from adn_server.infrastructure.config_reload import BindSpec, reload_server_config
 from adn_server.infrastructure.logging_config import reopen_file_handlers
-from adn_server.infrastructure.persistence import PickleSubMapStore
+from adn_server.infrastructure.persistence import PickleSubMapStore, SubMapSaver
 from adn_server.infrastructure.persistence.alias_loader import DefaultAliasLoader
 from adn_server.infrastructure.persistence.database_config import database_settings
 from adn_server.infrastructure.persistence.dynamic_tg_repository import MysqlDynamicTgRepository
@@ -200,6 +210,13 @@ def _resolve_alias_poll_interval(aliases_cfg: dict[str, Any], logger: logging.Lo
     return value
 
 
+def _purge_sub_map_of_quiet_systems(config: Any, logger: logging.Logger) -> None:
+    """Forget subscribers last heard on a system with SUB_MAP_LEARN: false (persisted SUB_MAP)."""
+    dropped = purge_non_learning_systems(config)
+    if dropped:
+        logger.info("(SUBSCRIBER) Dropped %s SUB_MAP entries of systems with SUB_MAP_LEARN: false", dropped)
+
+
 def _log_alias_health(config: Any, systems_cfg: dict[str, Any], logger: logging.Logger) -> None:
     """Warn loudly when peer/subscriber/server ID tables are empty and would fail-closed.
 
@@ -289,6 +306,7 @@ def run_peer_server(
     sub_map_store = PickleSubMapStore()
     sub_map = sub_map_store.load(sub_map_path)
     config["_SUB_MAP"] = sub_map
+    sub_map_saver = SubMapSaver(sub_map_store, sub_map_path, sub_map)
 
     # Generator: expand MASTER systems with GENERATOR > 1 into SYSTEM-0, SYSTEM-1, ... (legacy)
     _expand_generator(config, logger)
@@ -297,6 +315,7 @@ def run_peer_server(
     _normalize_peer_config(config)
     _normalize_obp_config(config)
     normalize_obp_proxy_targets(config)
+    _purge_sub_map_of_quiet_systems(config, logger)
 
     runtime_holder = RuntimeContextHolder(RuntimeContext(config=config, config_path=config_path))
     config = ConfigProxy(runtime_holder)
@@ -405,24 +424,15 @@ def run_peer_server(
         voice_provider = DefaultVoiceProvider()
     else:
         voice_provider = StubVoiceProvider()
-    def _start_voice_loop(fn, interval: float, now: bool):
-        lc = task.LoopingCall(fn)
-        d = lc.start(interval, now=now)
-        d.addErrback(_looping_errback, logger)
-        return lc
-
+    # Scheduled announcements and TTS: plugins/voice-announcements (via PLUGINS.send).
     voice_use_cases = VoiceUseCases(
         voice_provider,
         config,
         get_protocols=lambda: protocols,
         call_from_reactor=reactor.callFromThread,
         audio_path=audio_path,
-        routing_table_for_report=lambda: {},
         call_later=reactor.callLater,
-        start_looping_call=_start_voice_loop,
-        defer_to_thread=threads.deferToThread,
     )
-    voice_use_cases.apply_voice_config()
     ident_use_cases = IdentUseCases(
         config,
         voice_use_cases,
@@ -430,6 +440,37 @@ def run_peer_server(
         get_protocols=lambda: protocols,
         call_from_reactor=reactor.callFromThread,
     )
+
+    plugin_bus = PluginBus()
+    plugin_bus.set_call_later(reactor.callLater)
+    server_ctx = ServerContext(
+        config=config,
+        project_root=project_root,
+        defer_to_thread=threads.deferToThread,
+        call_from_reactor=reactor.callFromThread,
+        call_later=reactor.callLater,
+    )
+    def _send_local(system: str, pkt: bytes) -> None:
+        send_system = getattr(protocols.get(system), "send_system", None)
+        if callable(send_system):
+            send_system(pkt)
+
+    plugin_ingress = PluginIngress(  # routing set below
+        None, config, lambda: protocols, _send_local, send_routing_event=reporting_use_cases.send_routing_event,
+    )
+
+    plugin_manager = PluginManager(
+        plugin_bus,
+        server_ctx,
+        project_root,
+        sender_factory=lambda name: PluginDmrdSender(
+            name, config, plugin_ingress.deliver, reactor.callFromThread,
+            in_reactor_thread=isInIOThread, slot_for_tg=plugin_ingress.voice_slot_for_tg,
+            quiet_for_tg=plugin_ingress.tg_quiet_for,
+        ),
+    )
+    voice_plugin_bridge = VoicePluginBridge(plugin_bus, config, get_dmra_blocks=get_dmra_blocks)
+    data_plugin_bridge = DataPluginBridge(plugin_bus, config)
 
     routing_use_cases = RoutingUseCases(
         acl_router,
@@ -445,43 +486,18 @@ def run_peer_server(
         call_later=reactor.callLater,
         encode_emblc=encode_emblc,
         ta_emblc_encoder=default_ta_emblc_encoder,
+        voice_plugin_bridge=voice_plugin_bridge,
+        data_plugin_bridge=data_plugin_bridge,
     )
+    plugin_ingress.set_routing(routing_use_cases)
+    plugin_manager.discover_and_load(config)
+    reactor.addSystemEventTrigger("before", "shutdown", plugin_manager.shutdown_all)
     routing_use_cases.apply_startup_subscriptions()
     dynamic_tg_uc = DynamicTgUseCases(
         dynamic_tg_store,
         on_restored=routing_use_cases.sync_restored_dynamic_tgs,
     )
     routing_table_for_report = routing_use_cases.routing_table_for_report
-    voice_use_cases._routing_table_for_report = routing_table_for_report
-    from adn_server.application.routing.announcement_ptt_inject import (
-        announcement_ptt_system,
-        inject_announcement_ptt,
-    )
-
-    _ptt_system = announcement_ptt_system(config)
-
-    def _inject_announcement_ptt(pkt: bytes, pkt_time: float) -> bool | None:
-        if not _ptt_system:
-            return False
-        server_id = config.get("GLOBAL", {}).get("SERVER_ID", b"\x00\x00\x00\x00")
-        if not isinstance(server_id, bytes):
-            server_id = bytes_4(int(server_id or 0) & 0xFFFFFFFF)
-        accepted = inject_announcement_ptt(
-            routing_use_cases,
-            _ptt_system,
-            pkt,
-            pkt_time=pkt_time,
-            server_id=server_id,
-        )
-        proto = protocols.get(_ptt_system)
-        send_system = getattr(proto, "send_system", None) if proto is not None else None
-        if callable(send_system):
-            send_system(pkt)
-        return accepted
-
-    voice_use_cases._inject_announcement_ptt = _inject_announcement_ptt
-    voice_use_cases._announcement_ptt_system = _ptt_system
-    voice_use_cases._send_routing_event = reporting_use_cases.send_routing_event
     report_factory.set_routing_table(routing_table_for_report())
     report_factory.set_systems(config.get("SYSTEMS", {}))
 
@@ -563,11 +579,18 @@ def run_peer_server(
             )
         alias_reload_state["pending"] = True
         logger.debug("(ALIAS) starting alias thread (gen %s)", my_generation)
-        # Downloads run in the thread pool (blocking HTTP would stall hotspot pings);
-        # the config swap is applied back on the reactor thread.
-        d = threads.deferToThread(alias_loader.load_aliases, config)
+        # Downloads and parsing run in the thread pool; only the config swap comes
+        # back to the reactor thread.
+        def _load_off_reactor():
+            loaded = alias_loader.load_aliases(config)
+            if isinstance(alias_loader, DefaultAliasLoader):
+                return loaded, alias_loader.load_subscriber_profiles(config)
+            return loaded, None
 
-        def _apply(loaded):
+        d = threads.deferToThread(_load_off_reactor)
+
+        def _apply(result):
+            loaded, profiles = result
             if my_generation != alias_reload_state["generation"]:
                 logger.info(
                     "(ALIAS) discarding alias download result from a superseded attempt "
@@ -577,7 +600,9 @@ def run_peer_server(
                 )
                 return
             alias_reload_state["pending"] = False
-            DefaultAliasLoader.merge_reload_into_config(config, alias_loader, *loaded)
+            DefaultAliasLoader.merge_reload_into_config(
+                config, alias_loader, *loaded, profiles=profiles
+            )
             _log_alias_health(config, config.get("SYSTEMS", {}), logger)
 
         def _fail(failure):
@@ -592,7 +617,9 @@ def run_peer_server(
 
     task.LoopingCall(alias_reload_loop).start(alias_poll_interval).addErrback(_looping_errback, logger)
 
-    # SubMapTrimmer (3600s) + save
+    # SubMapTrimmer + save. Every 300s, but it writes only when a route changed: a
+    # restart used to lose up to an hour of routes (Docker rarely delivers the
+    # signal that triggers the shutdown save), leaving private calls with no target.
     def sub_map_trimmer_loop():
         logger.debug("(SUBSCRIBER) Subscriber Map trimmer loop started")
         now = time.time()
@@ -601,12 +628,12 @@ def run_peer_server(
             sub_map.pop(k, None)
         if aliases_cfg.get("SUB_MAP_FILE"):
             try:
-                sub_map_store.save(sub_map_path, sub_map)
-                logger.info("(SUBSCRIBER) Writing SUB_MAP to disk")
+                if sub_map_saver.save_if_changed():
+                    logger.info("(SUBSCRIBER) Writing SUB_MAP to disk")
             except Exception as e:
                 logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
 
-    task.LoopingCall(sub_map_trimmer_loop).start(3600).addErrback(_looping_errback, logger)
+    task.LoopingCall(sub_map_trimmer_loop).start(300).addErrback(_looping_errback, logger)
 
     # Kill switch + shutdown (legacy kill_server every 5s; SIGTERM/SIGINT trigger _KILL_SERVER)
     config.setdefault("GLOBAL", {})["_KILL_SERVER"] = False
@@ -621,7 +648,7 @@ def run_peer_server(
                 if reactor.running:
                     reactor.stop()
                 if aliases_cfg.get("SUB_MAP_FILE"):
-                    sub_map_store.save(sub_map_path, sub_map)
+                    sub_map_saver.save()
                 try:
                     keys_store.save(keys_path, keys)
                     logger.info("(KEYS) saved system keys to keystore")
@@ -636,7 +663,7 @@ def run_peer_server(
         """On reactor shutdown: save SUB_MAP and keys."""
         if aliases_cfg.get("SUB_MAP_FILE"):
             try:
-                sub_map_store.save(sub_map_path, config["_SUB_MAP"])
+                sub_map_saver.save()
                 logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (shutdown)")
             except Exception as e:
                 logger.warning("(SUBSCRIBER) Cannot write SUB_MAP on shutdown: %s", e)
@@ -663,19 +690,22 @@ def run_peer_server(
         n = reopen_file_handlers()
         logger.info("(LOGGER) Reopened %s file log handler(s) after SIGUSR2", n)
 
-    def _create_hbp_protocol(system_name: str) -> Any:
+    def _create_hbp_protocol(system_name: str, system_config: dict[str, Any] | None = None) -> Any:
+        # Reload passes the config it is building: a system added there is not in the live one yet.
         return HBPProtocolFactory(
             system_name,
-            config,
+            config if system_config is None else system_config,
             report_sender,
             router=acl_router,
             dmrd_received=routing_use_cases.dmrd_received,
             get_user_password_callback=user_passwords_loader.get_user_password,
             on_play_file_request=voice_use_cases.play_file_on_request,
+            on_tg4000_voice=voice_use_cases.tg4000_voice,
             on_handle_recording=recording_handler.handle_recording,
             on_in_band_signalling=routing_use_cases.apply_in_band_signalling,
             on_options_received=routing_use_cases.options_config_for_system,
             on_deactivate_dynamic_relays=routing_use_cases.deactivate_all_dynamic_relays,
+            on_release_dynamic_leg=routing_use_cases.release_dynamic_leg,
             on_obp_bcsq_received=routing_use_cases.on_obp_bcsq_received,
             on_talker_alias_repeat_prepare=routing_use_cases.prepare_talker_alias_local_repeat,
             on_talker_alias_repeat_burst=routing_use_cases.rewrite_repeat_voice_burst,
@@ -721,6 +751,10 @@ def run_peer_server(
         swap_runtime_config(runtime_holder, new_config, config_path=config_path)
         normalize_proxy_target(config)
         normalize_obp_proxy_targets(config)
+        # Follow the new YAML: refresh configured peers, drop sessions of dead links.
+        mesh_sessions(config).sync(config)
+        # A system switched to SUB_MAP_LEARN: false keeps no stale entries.
+        _purge_sub_map_of_quiet_systems(config, logger)
         report_factory.set_config(config)
         mqtt_after = mqtt_settings_from_config(config)
         report_mqtt = reconcile_mqtt_publisher(
@@ -729,6 +763,7 @@ def run_peer_server(
             mqtt_before,
             mqtt_after,
             report_enabled=config.get("REPORTS", {}).get("REPORT", True),
+            sessions=mesh_sessions(config),
         )
         if proxy_state is not None:
             apply_proxy_config_reload(proxy_state, config, logger=logger)
@@ -756,6 +791,9 @@ def run_peer_server(
             obp_proxy_state = start_obp_proxy_service(config, protocols, logger=logger)
         if result.added or result.removed or result.updated or result.rebound:
             _on_config_systems_changed()
+        voice_plugin_bridge.update_config(config)
+        data_plugin_bridge.update_config(config)
+        plugin_manager.rescan(config)
 
     def _do_config_reload() -> None:
         nonlocal report_mqtt, proxy_state, obp_proxy_state
@@ -788,7 +826,7 @@ def run_peer_server(
         logger.info("(CONFIG-RELOAD) SIGHUP received, scheduling reload")
         if aliases_cfg.get("SUB_MAP_FILE"):
             try:
-                sub_map_store.save(sub_map_path, sub_map)
+                sub_map_saver.save()
                 logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (SIGHUP)")
             except Exception as e:
                 logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
@@ -822,8 +860,7 @@ def run_peer_server(
                     return
                 voice_config_mtime = mtime
                 logger.info("(VOICE-RELOAD) config file change detected, reloading configuration...")
-            loader.reload_voice_config(config, voice_config_path)
-            voice_use_cases.apply_voice_config()
+            loader.reload_voice_config(config, voice_config_path)  # voice-announcements follows config["VOICE"]
             if voice_config_path and voice_config_mtime:
                 logger.info("(VOICE-RELOAD) config reload completed")
         except Exception as e:

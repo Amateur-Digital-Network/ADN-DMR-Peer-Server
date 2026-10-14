@@ -54,6 +54,12 @@ class TgId:
         return self.value
 
 
+# (callsign, fname, surname, talker_alias). The subscriber file holds over 300k of these:
+# a dict each costs twice the memory, and a NamedTuple stays tracked by the garbage
+# collector, adding ~40 ms to every full collection on the reactor thread.
+SubscriberProfile = tuple[str | None, str, str, str]
+
+
 Slot = Literal[1, 2]
 """Timeslot 1 or 2."""
 

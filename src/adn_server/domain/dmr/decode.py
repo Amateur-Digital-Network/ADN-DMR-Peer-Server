@@ -94,6 +94,13 @@ def voice(_string):
     return {'AMBE': ambe, 'CC': cc, 'LCSS': lcss, 'EMBED': embed}
 
 
+def voice_embed(_string):
+    """Bits 116-148 of a voice burst (``voice()['EMBED']``), from the 5 bytes that hold them."""
+    bits = bitarray(endian='big')
+    bits.frombytes(_string[14:19])
+    return bits[4:36]
+
+
 def to_bytes(_bits):
     add_bits = 8 - (len(_bits) % 8)
     if add_bits < 8:

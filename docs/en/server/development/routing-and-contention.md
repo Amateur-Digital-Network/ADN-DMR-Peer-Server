@@ -135,6 +135,18 @@ stateDiagram-v2
 **Lost VTERM:** if the MMDVM never sends a terminator, the per-peer session
 expires after `_STALE_PEER_SESSION_TIMEOUT` (5 s), freeing the slot.
 
+**Concurrent hotspots on one MASTER slot:** hotspots of the shared MASTER
+share one `STATUS[slot]`, so each ingress stream is also tracked on its own
+(`RX_STREAMS`: peer, source, TG, start, last frame). Each times out by itself
+after 5 s, gets its own END RX with its real duration, and its START is not
+repeated.
+
+**Server prompts:** voice ident, on-demand 999x and the disconnected prompt
+hold **TS2** of their MASTER while they play (a radio or another stream on
+the slot stops them). Only this server's own voice re-applies the MASTER
+slot hold; another server's announcement arriving over OpenBridge is
+ordinary mesh voice (`TX_FROM_MESH`) and goes through the per-hotspot checks.
+
 ---
 
 ## SINGLE=1 vs SINGLE=0 (exclusive listen)
@@ -170,7 +182,9 @@ flowchart LR
 
 - **TG 9990 (echo):** does **not** create a SINGLE lock. Echo always returns to
   the caller.
-- **TG 4000:** does **not** create a UA session. It is a reset command only.
+- **TG 4000:** does **not** create a UA session. It is a reset command only;
+  with `TG4000_VOICE` (default `true`) the hotspot also gets the voice status
+  reply.
 - **TG 9991–9999 (on-demand):** do not create a SINGLE lock.
 - **Own UA session:** a SINGLE=1 peer that activated TG T dynamically **must**
   receive downlink for T (it does not self-block).
@@ -193,6 +207,9 @@ Origins of static TGs:
 - **OPTIONS at login (RPTO)** — the hotspot reports its line.
 - **Self-service (web panel)** — the user changes TGs from the browser; the
   server sends an updated `RPTO` to the MASTER.
+- **MASTER `TS1_STATIC` / `TS2_STATIC`** — added to every connected hotspot's
+  statics on top of its OPTIONS (TGs 0–5, 9 and 9990–9999 ignored); a `SIGHUP`
+  updates connected hotspots and the MASTER's legs.
 - **Startup/reload** — `apply_startup_bridges` applies TGs at start and on
   `SIGHUP`.
 - **D-28 (divergence):** there is **no** periodic 26 s loop

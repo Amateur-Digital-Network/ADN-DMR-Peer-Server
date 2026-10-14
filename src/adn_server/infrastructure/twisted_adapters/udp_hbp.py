@@ -52,13 +52,16 @@ from ...application.routing.downlink import (
 from ...application.routing.helpers import (
     clear_peer_rx_status_slots,
     clear_peer_ua_sessions,
+    derive_peer_rf_mode,
     hbp_master_ingress_repeat_allowed,
     is_on_demand_service_dst,
     is_server_originated_voice,
     is_special_tg,
     is_unit_data_ingress,
+    master_dynamic_tg_slots,
     parse_dmrd_route_fields,
     peer_downlink_voice_slot,
+    peer_is_simplex,
     peer_matches_rf_source,
     peer_should_receive_group_voice,
     peer_single_exclusive_tgid,
@@ -68,18 +71,38 @@ from ...application.routing.helpers import (
     synthetic_group_dmrd_burst_packet,
     synthetic_group_dmrd_route_packet,
     tg4000_reset_on_vhead,
+    track_rx_stream,
 )
 from ...application.routing.peer_downlink_index import (
     build_peer_downlink_index,
+    cached_peer_static_tgs,
     count_connected_peers,
     invalidate_peer_options_cache,
 )
+from ...application.routing.sub_map_learning import system_learns_sub_map
 from ...application.server_voice import all_server_voice_ids
 from ...domain import bytes_3, bytes_4, int_id
 from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
 from ...domain.hbp_protocol import normalize_fixed_width_ascii, normalize_fixed_width_bytes
+from ...domain.mesh_admission import AclRules, AdmissionContext, Rejection, server_prefix
 from ...domain.mesh_routing import MeshEgress, MeshIngress, PeerMeshConfig
+from ...domain.mesh_engine import (
+    BridgePolicy,
+    Deliver,
+    Effect,
+    Log,
+    NoteStream,
+    Reject,
+    RequestVersion,
+    StoreTalkerAlias,
+    accepts_source,
+    ingest_dmrd_v1,
+    ingest_dmre_v5,
+    reject_v1_protocol,
+    server_id_bytes,
+)
+from ...domain.mesh_session import ObpBridgeSession, obp_session
 from ...domain.talker_alias import (
     DMRA_PACKET_LEN,
     decode_ta_from_blocks,
@@ -138,6 +161,14 @@ logger = logging.getLogger(__name__)
 
 _DEFAULT_MESH_REGISTRY = MeshCodecRegistry()
 
+_NO_SERVER_IDS: frozenset[str] = frozenset()
+
+OBP_DNS_REFRESH_S = 300.0
+# Floor for on-demand lookups: unknown traffic must not drive one per packet.
+OBP_DNS_MIN_INTERVAL_S = 15.0
+# How often a refused source is named again, per address and frame type.
+OBP_FOREIGN_LOG_INTERVAL_S = 60.0
+
 
 def get_user_password(radio_id: int):
     """Legacy get_user_password (hblink.py). Stub: returns None (no individual passwords)."""
@@ -169,6 +200,7 @@ def _make_slot_status() -> dict[str, Any]:
         "RX_SEQ": 0,
         "RX_RFS": b"\x00",
         "TX_RFS": b"\x00",
+        "TX_FROM_MESH": False,
         "RX_PEER": b"\x00",
         "TX_PEER": b"\x00",
         "RX_STREAM_ID": b"\x00",
@@ -202,10 +234,12 @@ class HBPProtocol(DatagramProtocol):
         dmrd_received: Callable[..., None] | None = None,
         get_user_password_callback: Callable[[int], bytes | None] | None = None,
         on_play_file_request: Callable[[str, str], None] | None = None,
+        on_tg4000_voice: Callable[..., None] | None = None,
         on_handle_recording: Callable[..., None] | None = None,
         on_in_band_signalling: Callable[[str, int, bytes, float], None] | None = None,
         on_options_received: Callable[..., None] | None = None,
         on_deactivate_dynamic_relays: Callable[[str], None] | None = None,
+        on_release_dynamic_leg: Callable[[str, int, int], bool] | None = None,
         on_obp_bcsq_received: Callable[[str, bytes, bytes], None] | None = None,
         on_talker_alias_local_repeat: Callable[[str, bytes, bytes, bytes], None] | None = None,
         on_talker_alias_repeat_prepare: Callable[[str, bytes, bytes, bytes, int, bytes, str], None] | None = None,
@@ -226,10 +260,13 @@ class HBPProtocol(DatagramProtocol):
         self._dmrd_received = dmrd_received
         self._get_user_password = get_user_password_callback if get_user_password_callback is not None else get_user_password
         self._on_play_file_request = on_play_file_request
+        self._on_tg4000_voice = on_tg4000_voice
+        self._tg4000_answered: dict[bytes, float] = {}  # stream ID -> time: one voice reply per over
         self._on_handle_recording = on_handle_recording
         self._on_in_band_signalling = on_in_band_signalling
         self._on_options_received = on_options_received
         self._on_deactivate_dynamic_relays = on_deactivate_dynamic_relays
+        self._on_release_dynamic_leg = on_release_dynamic_leg
         self._on_obp_bcsq_received = on_obp_bcsq_received
         self._on_talker_alias_local_repeat = on_talker_alias_local_repeat
         self._on_talker_alias_repeat_prepare = on_talker_alias_repeat_prepare
@@ -239,6 +276,10 @@ class HBPProtocol(DatagramProtocol):
         self._mesh_registry = mesh_registry if mesh_registry is not None else _DEFAULT_MESH_REGISTRY
         self._dynamic_tg_uc = dynamic_tg_uc
         self._config = config.get("SYSTEMS", {}).get(system_name, {})
+        # SUB_MAP_LEARN, decided once per config (ingress checks it on every frame)
+        self._learns_sub_map = system_learns_sub_map(self._config)
+        self._obp_policy_cache: tuple[Any, BridgePolicy] | None = None
+        self._peer_mesh_config_cache: PeerMeshConfig | None = None
         if self._config.get("MODE") == "OPENBRIDGE":
             self._laststrid = deque([], 20)
             # Legacy parity: routerOBP.__init__ uses a flat dict keyed by stream_id
@@ -247,6 +288,9 @@ class HBPProtocol(DatagramProtocol):
             # cleaned uniformly. No pre-seed of slot keys here.
             self.STATUS: dict[Any, Any] = {}
             self._bcsq_log_once: deque = deque(maxlen=1024)
+            self._obp_target_sync_log_once: deque = deque(maxlen=1024)
+            self._obp_foreign_bcka_log_once: deque = deque(maxlen=1024)
+            self._obp_foreign_source_seen: dict[tuple[Any, bytes], float] = {}
         else:
             self._laststrid = {1: b"", 2: b""}
             self.STATUS = {1: _make_slot_status(), 2: _make_slot_status()}
@@ -267,12 +311,12 @@ class HBPProtocol(DatagramProtocol):
             self._dmra_by_stream: dict[bytes, dict[str, Any]] = {}
             self._dmra_rf_stream: dict[tuple[bytes, bytes], bytes] = {}
             self._ta_voice_acc: dict[bytes, dict[int, Any]] = {}
-            self._ta_decoded_logged: set[bytes] = set()
+            self._ta_complete: set[bytes] = set()
         else:
             self._dmra_by_stream = {}
             self._dmra_rf_stream = {}
             self._ta_voice_acc = {}
-            self._ta_decoded_logged = set()
+            self._ta_complete = set()
         if self._config.get("MODE") == "PEER":
             self._dmra_downlink: dict[bytes, dict[str, Any]] = {}
         if self._config.get("MODE") == "PEER":
@@ -285,15 +329,17 @@ class HBPProtocol(DatagramProtocol):
             if getattr(self, "_obp_protocol_started", False):
                 return
             self._obp_protocol_started = True
+            _peer = self._session.peer
             logger.info(
                 "(%s) Starting OBP. TARGET_IP: %s, TARGET_PORT: %s",
                 self._system,
-                self._config.get("TARGET_IP", ""),
-                self._config.get("TARGET_PORT", ""),
+                _peer[0] or "",
+                _peer[1],
             )
-            # bridge_master.routerOBP.to_target skips ENHANCED targets when '_bcka' not in SYSTEMS[name].
-            # Seed so cross-OBP forwarding works before the first inbound BCKA/DMR on *this* leg.
-            self._config["_bcka"] = time.time()
+            # bridge_master.routerOBP.to_target skips ENHANCED targets when the keepalive
+            # was never seen. Seed it so cross-OBP forwarding works before the first
+            # inbound BCKA/DMR on *this* leg.
+            self._session.note_keepalive(time.time())
             if self._config.get("ENHANCED_OBP"):
                 self._bcka_loop = task.LoopingCall(self._obp_send_bcka)
                 _bcka_d = self._bcka_loop.start(10)
@@ -301,6 +347,10 @@ class HBPProtocol(DatagramProtocol):
                 self._bcve_loop = task.LoopingCall(self._obp_send_bcve)
                 _bcve_d = self._bcve_loop.start(60)
                 _bcve_d.addErrback(self._looping_err_handle)
+            if self._session.dns_anchored:
+                self._dns_loop = task.LoopingCall(self._obp_resolve_target)
+                _dns_d = self._dns_loop.start(OBP_DNS_REFRESH_S, now=False)
+                _dns_d.addErrback(self._looping_err_handle)
         elif self._config.get("MODE") == "MASTER":
             ping_time = self._CONFIG.get("GLOBAL", {}).get("PING_TIME", 10)
             self._maintenance_loop = task.LoopingCall(self._master_maintenance_loop)
@@ -317,8 +367,13 @@ class HBPProtocol(DatagramProtocol):
         self._CONFIG = config
         sys_cfg = config.get("SYSTEMS", {}).get(self._system, {})
         self._config = sys_cfg
+        self._learns_sub_map = system_learns_sub_map(sys_cfg)
+        self._obp_policy_cache = None
+        self._peer_mesh_config_cache = None
         if sys_cfg.get("MODE") == "MASTER":
             self._peers = sys_cfg.setdefault("PEERS", {})
+            for peer in self._peers.values():
+                peer["_SYSTEM_STATIC"] = sys_cfg.get("_YAML_STATIC")
             self._refresh_connected_peer_count()
             self._mark_downlink_index_dirty()
 
@@ -486,6 +541,14 @@ class HBPProtocol(DatagramProtocol):
             del sub_map[rf_src]
 
     def _peer_mesh_config(self) -> PeerMeshConfig:
+        cached = self._peer_mesh_config_cache
+        if cached is not None:
+            return cached
+        cached = self._build_peer_mesh_config()
+        self._peer_mesh_config_cache = cached
+        return cached
+
+    def _build_peer_mesh_config(self) -> PeerMeshConfig:
         _global = self._CONFIG.get("GLOBAL", {})
         _sid = _global.get("SERVER_ID", b"\x00\x00\x00\x00")
         _server_id = (
@@ -579,17 +642,25 @@ class HBPProtocol(DatagramProtocol):
         rf_src: bytes,
         stream_id: bytes,
     ) -> None:
-        """Clear per-peer UA dynamics and stale STATUS; deactivate bridges on 4000."""
+        """Clear the sender's UA dynamics and stale STATUS on TG/ID 4000.
+
+        A MASTER of its own also runs the in-band 4000 signalling and deactivates all its
+        dynamic bridges; a shared MASTER (proxy target) does not, its legs belong to every
+        hotspot on it.
+        """
         peer = self._peers.get(peer_id, {})
+        held_by_sender = self._peer_dynamic_tg_slots(peer_id)
         clear_peer_ua_sessions(peer, self._config, peer_id)
         clear_peer_rx_status_slots(self.STATUS, peer_id)
         if self._dynamic_tg_uc is not None:
             self._dynamic_tg_uc.delete_peer(peer_id, self._system)
         self._emit_tg4000_routing_event(peer_id, rf_src, stream_id, slot)
-        if self._on_in_band_signalling:
-            self._on_in_band_signalling(self._system, slot, bytes_3(4000), time.time())
         _kind = "Private call to ID" if call_type == "unit" else "Group call to TG"
         if self._inject_multi_peer_options_filter():
+            # The MASTER's legs are shared by every hotspot on it: in-band 4000 signalling would
+            # set all of them IDLE on this slot (dynamics and OPTIONS statics of the others).
+            # This peer's own dynamics are what was cleared above; a leg only it held goes too.
+            self._release_legs_nobody_else_holds(peer_id, held_by_sender)
             self._mark_downlink_index_dirty()
             self._push_config_to_monitor()
             logger.info(
@@ -597,12 +668,54 @@ class HBPProtocol(DatagramProtocol):
                 self._system, _kind, slot, int_id(peer_id),
             )
             return
+        if self._on_in_band_signalling:
+            self._on_in_band_signalling(self._system, slot, bytes_3(4000), time.time())
         if self._on_deactivate_dynamic_relays:
             logger.info(
                 "(%s) %s 4000 received on TS %s — deactivating all dynamic bridges",
                 self._system, _kind, slot,
             )
             self._on_deactivate_dynamic_relays(self._system)
+
+    def _peer_dynamic_tg_slots(self, peer_id: bytes) -> set[tuple[int, int]]:
+        """(TG, slot) pairs this hotspot holds as dynamic UA sessions (SINGLE=1 and SINGLE=0)."""
+        pk = bytes_4(int_id(peer_id))
+        held: set[tuple[int, int]] = set()
+        single = (self._config.get("_PEER_UA_SESSIONS") or {}).get(pk)
+        if isinstance(single, dict):
+            for slot, entry in single.items():
+                if isinstance(entry, dict) and int(entry.get("tgid", 0) or 0):
+                    held.add((int(entry["tgid"]), int(slot)))
+        multi = (self._config.get("_PEER_UA_MULTI_TGS") or {}).get(pk)
+        if isinstance(multi, dict):
+            for slot, tgs in multi.items():
+                for tg in tgs or ():
+                    held.add((int(tg), int(slot)))
+        return held
+
+    def _peer_static_tgs_on_slot(self, peer: dict[str, Any], slot: int) -> tuple[int, ...]:
+        """A hotspot's static TGs on ``slot``: its MASTER's TS1/TS2_STATIC and its OPTIONS (both lists if simplex)."""
+        ts1, ts2 = cached_peer_static_tgs(peer)
+        listed = (*ts1, *ts2) if peer_is_simplex(peer) else (ts1 if int(slot) == 1 else ts2)
+        return tuple(dict.fromkeys(int(tg) for tg in listed if str(tg).isdigit() and int(tg) > 0))
+
+    def _release_legs_nobody_else_holds(self, peer_id: bytes, held_by_sender: set[tuple[int, int]]) -> None:
+        """After a 4000 on a shared MASTER, set IDLE the dynamic legs only the sender was using.
+
+        A 4000 clears dynamics, never a static: a leg stays while any connected hotspot, the
+        sender included, has that TG on that slot as a static (OPTIONS or YAML), or another one
+        holds it as a dynamic session (the sender's were cleared before this runs).
+        """
+        if not held_by_sender or self._on_release_dynamic_leg is None:
+            return
+        now = time.time()
+        connected = [p for p in self._peers.values() if isinstance(p, dict) and p.get("CONNECTION") == "YES"]
+        for tgid, slot in sorted(held_by_sender):
+            if slot in master_dynamic_tg_slots(self._config, tgid, now=now):
+                continue
+            if any(tgid in self._peer_static_tgs_on_slot(p, slot) for p in connected):
+                continue
+            self._on_release_dynamic_leg(self._system, tgid, slot)
 
     def _handle_tg4000_packet(
         self,
@@ -616,12 +729,34 @@ class HBPProtocol(DatagramProtocol):
         rf_src: bytes,
         stream_id: bytes,
     ) -> bool:
-        """Legacy early return for TG/ID 4000; reset once per PTT on voice header only."""
+        """Legacy early return for TG/ID 4000; reset once per PTT on voice header only.
+
+        Unless ``TG4000_VOICE: false``, the terminator of the over also queues one voice reply to this
+        hotspot (``VoiceUseCases.tg4000_voice``): a group 4000 on TG 4000, a private 4000 as a
+        private call from ID 4000 to the caller, naming the statics it still has on that slot.
+        """
         if int_dst_id != 4000:
             return False
         if tg4000_reset_on_vhead(int_dst_id, frame_type, dtype_vseq):
             self._apply_tg4000_reset(
                 peer_id, slot, call_type, rf_src=rf_src, stream_id=stream_id,
+            )
+        elif (
+            frame_type == HBPF_DATA_SYNC
+            and dtype_vseq == HBPF_SLT_VTERM
+            and self._on_tg4000_voice is not None
+            and self._config.get("TG4000_VOICE", True) is True
+            and stream_id not in self._tg4000_answered
+        ):
+            now = time.time()
+            for sid in [k for k, t in self._tg4000_answered.items() if now - t > 60]:
+                del self._tg4000_answered[sid]
+            self._tg4000_answered[stream_id] = now
+            reactor.callInThread(
+                self._on_tg4000_voice, self._system, peer_id, slot,
+                rf_src=rf_src,
+                private=call_type == "unit",
+                linked=self._peer_static_tgs_on_slot(self._peers.get(peer_id, {}), slot),
             )
         return True
 
@@ -832,6 +967,32 @@ class HBPProtocol(DatagramProtocol):
                 )
         self.transport.write(_packet, self._peers[_peer]["SOCKADDR"])
 
+    def send_prompt_to_peer(self, peer_id: bytes, packet: bytes) -> bool:
+        """One frame of a server prompt for one hotspot only (the TG/ID 4000 voice reply, group or private).
+
+        The hotspot did not subscribe to the prompt's TG, so the OPTIONS filter does not
+        apply; its own slot gate does: False (frame not sent) when it is busy with another
+        stream on that slot or no longer connected. The MASTER slot rows are not touched,
+        so nobody else on a shared MASTER is held off.
+        """
+        peer = self._peers.get(peer_id)
+        if not isinstance(peer, dict) or peer.get("CONNECTION") != "YES":
+            return False
+        packet = b"".join([packet[:11], peer_id, packet[15:]])
+        bits = packet[15]
+        slot = 2 if bits & 0x80 else 1
+        # The slot gate and tracking are per TG: a private reply (from ID 4000) is checked and
+        # tracked as TG 4000 on its slot, so routed group voice does not start under it.
+        gate = packet if not bits & 0x40 else synthetic_group_dmrd_burst_packet(
+            slot, 4000, packet[16:20], frame_type=(bits >> 4) & 0x3, dtype_vseq=bits & 0xF,
+        )
+        ctx = self._downlink_ctx()
+        if not peer_accepts_group_dmrd_packet(ctx, peer_id, peer, gate, routed=True):
+            return False
+        track_peer_group_dmrd(ctx, peer_id, gate, peer, from_ingress=False, voice_slot=slot)
+        self.transport.write(packet, peer["SOCKADDR"])
+        return True
+
     def _ta_buffer_enabled(self) -> bool:
         return self._config.get("MODE") in ("MASTER", "OPENBRIDGE")
 
@@ -900,19 +1061,24 @@ class HBPProtocol(DatagramProtocol):
             return
         if not self._CONFIG.get("GLOBAL", {}).get("TALKER_ALIAS", False):
             return
-        entry = self._dmra_by_stream.setdefault(
-            stream_id,
-            {"blocks": {}, "rf_src": rf_src, "peer": peer_id, "last": time.time()},
-        )
+        entry = self._dmra_by_stream.get(stream_id)
+        if entry is None:
+            entry = self._dmra_by_stream[stream_id] = {
+                "blocks": {}, "rf_src": rf_src, "peer": peer_id, "last": time.time()
+            }
+        elif stream_id in self._ta_complete:
+            # A stream's alias does not change once decoded; only keep it from expiring.
+            entry["last"] = time.time()
+            return
         acc = self._ta_voice_acc.setdefault(stream_id, {})
         if try_buffer_ta_from_voice_fragments(acc, vseq, dmrpkt, entry["blocks"]):
             entry["last"] = time.time()
             entry["rf_src"] = rf_src
             entry["peer"] = peer_id
-            if stream_id not in self._ta_decoded_logged:
+            if stream_id not in self._ta_complete:
                 text = decode_ta_from_blocks(entry["blocks"])
                 if text:
-                    self._ta_decoded_logged.add(stream_id)
+                    self._ta_complete.add(stream_id)
                     logger.debug(
                         "(%s) *TALKER ALIAS* decoded '%s' from embedded voice (src %s stream %s)",
                         self._system, text, int_id(rf_src), int_id(stream_id),
@@ -923,7 +1089,7 @@ class HBPProtocol(DatagramProtocol):
     def clear_ta_stream_buffer(self, stream_id: bytes) -> None:
         self._dmra_by_stream.pop(stream_id, None)
         self._ta_voice_acc.pop(stream_id, None)
-        self._ta_decoded_logged.discard(stream_id)
+        self._ta_complete.discard(stream_id)
 
     def copy_ta_stream_buffer(self, from_stream: bytes, to_stream: bytes) -> None:
         """Carry decoded TA blocks from recording stream to echo playback stream."""
@@ -955,7 +1121,7 @@ class HBPProtocol(DatagramProtocol):
             if self._dmra_by_stream[stream_id].get("last", 0) < cutoff:
                 del self._dmra_by_stream[stream_id]
                 self._ta_voice_acc.pop(stream_id, None)
-                self._ta_decoded_logged.discard(stream_id)
+                self._ta_complete.discard(stream_id)
 
     def send_dmra_to_peers(
         self,
@@ -1026,14 +1192,15 @@ class HBPProtocol(DatagramProtocol):
         if self._config.get("MODE") == "MASTER":
             self.send_peers(_packet, _hops, _ber, _rssi, _source_server, _source_rptr)
         elif self._config.get("MODE") == "OPENBRIDGE":
-            # Global STUN (config) or per-system BCST (hblink sets _config['_STUN'] on BCST RX)
-            if "STUN" in self._CONFIG or self._config.get("_STUN"):
+            # Global STUN (operator, in the config) or this bridge's own BCST
+            if "STUN" in self._CONFIG or self._session.stunned:
                 logger.info("(%s) Bridge STUNned, discarding", self._system)
                 return
             if not _hops:
                 _hops = (1).to_bytes(1, "big")
-            if _packet[:3] == DMR and self._config.get("TARGET_IP"):
-                _target_addr = (self._config["TARGET_IP"], self._config["TARGET_PORT"])
+            _session = self._session
+            if _packet[:3] == DMR and _session.peer_known:
+                _target_addr = _session.peer
                 _ver_cfg = self._config.get("VER")
                 if "VER" in self._config and _ver_cfg in (2, 3):
                     logger.error("(%s) protocol version %s no longer supported", self._system, _ver_cfg)
@@ -1049,7 +1216,7 @@ class HBPProtocol(DatagramProtocol):
                     if _wire is not None:
                         self.transport.write(_wire, _target_addr)
             else:
-                if not self._config.get("TARGET_IP"):
+                if not _session.peer_known:
                     logger.debug("(%s) Not sent packet as TARGET_IP not currently known", self._system)
                 else:
                     logger.error("(%s) OpenBridge system was asked to send non DMR packet with send_system(): %s", self._system, _packet)
@@ -1189,18 +1356,27 @@ class HBPProtocol(DatagramProtocol):
             )
             self.transport.write(b"".join([MSTCL, peer]), self._peers[peer]["SOCKADDR"])
             self._remove_peer(peer)
-            if not self._peers:
-                sys_cfg = self._CONFIG["SYSTEMS"][self._system]
-                if "OPTIONS" in sys_cfg:
-                    if "_default_options" in sys_cfg:
-                        logger.info("(%s) Setting default Options: %s", self._system, sys_cfg["_default_options"])
-                        sys_cfg["OPTIONS"] = sys_cfg["_default_options"]
-                    else:
-                        del sys_cfg["OPTIONS"]
-                        logger.info("(%s) Deleting HBP Options", self._system)
-                sys_cfg["_reset"] = True
+            self._reset_if_no_peers()
         if remove_list:
             self._push_config_to_monitor()
+
+    def _reset_if_no_peers(self) -> None:
+        """Last peer gone: restore default OPTIONS and let BRIDGERESET clear this system's legs.
+
+        The legs and OPTIONS belong to every hotspot on this MASTER, so a failed login or one
+        peer leaving must not reset them while others are still connected.
+        """
+        if self._peers:
+            return
+        sys_cfg = self._CONFIG.setdefault("SYSTEMS", {}).setdefault(self._system, {})
+        if "OPTIONS" in sys_cfg:
+            if "_default_options" in sys_cfg:
+                logger.info("(%s) Setting default Options: %s", self._system, sys_cfg["_default_options"])
+                sys_cfg["OPTIONS"] = sys_cfg["_default_options"]
+            else:
+                del sys_cfg["OPTIONS"]
+                logger.info("(%s) Deleting HBP Options", self._system)
+        sys_cfg["_reset"] = True
 
     def _on_peer_disconnected(self, peer_id: bytes) -> None:
         """Drop stale slot STATUS when a hotspot leaves; keep persisted UA state in sys_cfg."""
@@ -1219,6 +1395,46 @@ class HBPProtocol(DatagramProtocol):
         self._peers.pop(peer_id, None)
         self._refresh_connected_peer_count()
         self._mark_downlink_index_dirty()
+
+    def _acl_rejects_dmrd(
+        self,
+        rf_src: bytes,
+        dst_id: bytes,
+        slot: int,
+        stream_id: bytes,
+        unit_service_dst: bool,
+    ) -> bool:
+        """Legacy DMRD ACL gate: global rules, then this system's own.
+
+        The MASTER and PEER ingress paths ran identical copies of this. Order,
+        the per-slot ``_laststrid`` guard that logs a rejected call once per
+        stream, and the messages themselves are the legacy ones; on-demand unit
+        services stay exempt from the TG lists but not from the subscriber ACL.
+        """
+        if not self._router:
+            return False
+        for scope, cfg in (("GLOBAL", self._CONFIG.get("GLOBAL", {})), ("SYSTEM", self._config)):
+            if not cfg.get("USE_ACL"):
+                continue
+            if not self._router.acl_check(rf_src, cfg.get("SUB_ACL", (True, []))):
+                if self._laststrid[slot] != stream_id:
+                    logger.info(
+                        "(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY %s ACL",
+                        self._system, int_id(stream_id), int_id(rf_src), scope,
+                    )
+                    self._laststrid[slot] = stream_id
+                return True
+            if unit_service_dst:
+                continue
+            if not self._router.acl_check(dst_id, cfg.get(f"TG{slot}_ACL", (True, []))):
+                if self._laststrid[slot] != stream_id:
+                    logger.info(
+                        "(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY %s TS%s ACL",
+                        self._system, int_id(stream_id), int_id(dst_id), scope, slot,
+                    )
+                    self._laststrid[slot] = stream_id
+                return True
+        return False
 
     def _master_datagram_received(self, _data: bytes, _sockaddr: tuple[str, int]) -> None:
         """Direct port of hblink.py master_datagramReceived (lines 888-1146)."""
@@ -1263,45 +1479,19 @@ class HBPProtocol(DatagramProtocol):
                 pkt_time = time.time()
                 _int_dst_id = int_id(_dst_id)
                 _unit_service_dst = _call_type == "unit" and is_on_demand_service_dst(_int_dst_id)
+                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
+                _rx_type_before = self.STATUS.get(_slot, {}).get("RX_TYPE") if _unit_service_dst else None
                 # ACL (legacy order and _laststrid)
-                if self._router and _global.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, _global.get("SUB_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 1 and not self._router.acl_check(_dst_id, _global.get("TG1_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 2 and not self._router.acl_check(_dst_id, _global.get("TG2_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS2 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                if self._router and self._config.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, self._config.get("SUB_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 1 and not self._router.acl_check(_dst_id, self._config.get("TG1_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 2 and not self._router.acl_check(_dst_id, self._config.get("TG2_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS2 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
+                if self._acl_rejects_dmrd(_rf_src, _dst_id, _slot, _stream_id, _unit_service_dst):
+                    return
                 # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
                 # (peer_id) is new — lets same-system private-call repeat target
                 # the exact hotspot instead of broadcasting to every peer.
-                sub_map = self._CONFIG.get("_SUB_MAP")
-                if sub_map is not None:
-                    sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
+                # Skipped on systems with SUB_MAP_LEARN: false.
+                if self._learns_sub_map:
+                    sub_map = self._CONFIG.get("_SUB_MAP")
+                    if sub_map is not None:
+                        sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
                 self.note_dmrd_stream(_peer_id, _rf_src, _stream_id)
                 if (
                     _call_type in ("group", "vcsbk")
@@ -1377,6 +1567,9 @@ class HBPProtocol(DatagramProtocol):
                             and _dtype_vseq == HBPF_SLT_VTERM
                         ),
                         system_cfg=self._config,
+                        config=self._CONFIG,
+                        system_name=self._system,
+                        slot=_slot,
                     )
                 )
                 if (
@@ -1506,6 +1699,11 @@ class HBPProtocol(DatagramProtocol):
                             self.STATUS[_slot]["RX_TYPE"] = _dtype_vseq
                             self.STATUS[_slot]["RX_TGID"] = _dst_id
                             self.STATUS[_slot]["RX_TIME"] = pkt_time
+                            if _call_type in ("group", "vcsbk"):
+                                track_rx_stream(
+                                    self.STATUS[_slot], _stream_id, _peer_id, _rf_src, _dst_id, pkt_time,
+                                    ended=_frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM,
+                                )
                         # Always track RX_STREAM_ID so subsequent frames of a suppressed
                         # stream are not re-evaluated as a new stream (which would clear
                         # _suppress_uplink and leak the uplink to the network).
@@ -1519,8 +1717,7 @@ class HBPProtocol(DatagramProtocol):
                     and not _unit_data
                     and _frame_type == HBPF_DATA_SYNC
                     and _dtype_vseq == HBPF_SLT_VTERM
-                    and _slot in self.STATUS
-                    and self.STATUS[_slot].get("RX_TYPE") != HBPF_SLT_VTERM
+                    and _rx_type_before not in (None, HBPF_SLT_VTERM)
                     and 9991 <= _int_dst_id <= 9999
                     and self._on_play_file_request
                 ):
@@ -1603,7 +1800,7 @@ class HBPProtocol(DatagramProtocol):
                     if self._config.get("PROXY_CONTROL"):
                         self.proxy_IPBlackList(_peer_id, _sockaddr)
                     logger.warning("(%s) Invalid Login from %s Radio ID: %s Denied by Registation ACL or not registered ID", self._system, _sockaddr[0], int_id(_peer_id))
-                    if self._CONFIG.get("SYSTEMS", {}).get(self._system):
+                    if self._CONFIG.get("SYSTEMS", {}).get(self._system) and not self._peers:
                         self._CONFIG["SYSTEMS"][self._system]["_reset"] = True
             else:
                 self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
@@ -1654,15 +1851,7 @@ class HBPProtocol(DatagramProtocol):
                     logger.info("(%s) Peer is closing down: %s (%s)", self._system, _rptc_field_str(self._peers[_peer_id]["CALLSIGN"]), int_id(_peer_id))
                     self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
                     self._remove_peer(_peer_id)
-                    sys_cfg = self._CONFIG.get("SYSTEMS", {}).get(self._system, {})
-                    if "OPTIONS" in sys_cfg:
-                        if "_default_options" in sys_cfg:
-                            sys_cfg["OPTIONS"] = sys_cfg["_default_options"]
-                            logger.info("(%s) Setting default Options: %s", self._system, sys_cfg["_default_options"])
-                        else:
-                            logger.info("(%s) Deleting HBP Options", self._system)
-                            del sys_cfg["OPTIONS"]
-                    sys_cfg["_reset"] = True
+                    self._reset_if_no_peers()
                     self._push_config_to_monitor()
             else:
                 _peer_id = _data[4:8]
@@ -1670,6 +1859,7 @@ class HBPProtocol(DatagramProtocol):
                     _this_peer = self._peers[_peer_id]
                     _this_peer["CONNECTION"] = "YES"
                     _this_peer["CONNECTED"] = time.time()
+                    _this_peer["_SYSTEM_STATIC"] = self._config.get("_YAML_STATIC")
                     _this_peer["LAST_PING"] = time.time()
                     _this_peer["CALLSIGN"] = _data[8:16]
                     _this_peer["RX_FREQ"] = _data[16:25]
@@ -1685,13 +1875,19 @@ class HBPProtocol(DatagramProtocol):
                     _this_peer["URL"] = _data[98:222]
                     _this_peer["SOFTWARE_ID"] = _data[222:262]
                     _this_peer["PACKAGE_ID"] = _data[262:302]
+                    # RPTC carries the only inputs simplex/duplex depends on (SLOTS and
+                    # the two frequencies), so classify here instead of on every frame:
+                    # peer_rf_mode() reads this and the downlink path asks it three
+                    # times per voice frame.
+                    _this_peer["RF_MODE"] = derive_peer_rf_mode(_this_peer)
                     _sent_call = _rptc_field_str(_this_peer["CALLSIGN"])
                     if ("ALLOW_UNREG_ID" in self._config and not self._config["ALLOW_UNREG_ID"]) and _sent_call != self.validate_id(_peer_id):
                         self._remove_peer(_peer_id)
                         if self._config.get("PROXY_CONTROL"):
                             self.proxy_IPBlackList(_peer_id, _sockaddr)
                         self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
-                        self._CONFIG.setdefault("SYSTEMS", {}).setdefault(self._system, {})["_reset"] = True
+                        if not self._peers:
+                            self._CONFIG.setdefault("SYSTEMS", {}).setdefault(self._system, {})["_reset"] = True
                         logger.info("(%s) Callsign does not match subscriber database: ID: %s, Sent Call: %s, DB call %s", self._system, int_id(_peer_id), _sent_call, self.validate_id(_peer_id))
                     else:
                         self.send_peer(_peer_id, b"".join([RPTACK, _peer_id]))
@@ -1864,45 +2060,17 @@ class HBPProtocol(DatagramProtocol):
                     return
                 pkt_time = time.time()
                 _int_dst_id = int_id(_dst_id)
-                _global = self._CONFIG.get("GLOBAL", {})
                 _unit_service_dst = _call_type == "unit" and is_on_demand_service_dst(_int_dst_id)
-                if self._router and _global.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, _global.get("SUB_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 1 and not self._router.acl_check(_dst_id, _global.get("TG1_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 2 and not self._router.acl_check(_dst_id, _global.get("TG2_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS2 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                if self._router and self._config.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, self._config.get("SUB_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 1 and not self._router.acl_check(_dst_id, self._config.get("TG1_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
-                    if not _unit_service_dst and _slot == 2 and not self._router.acl_check(_dst_id, self._config.get("TG2_ACL", (True, []))):
-                        if self._laststrid[_slot] != _stream_id:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM TS2 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._laststrid[_slot] = _stream_id
-                        return
+                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
+                _rx_type_before = self.STATUS.get(_slot, {}).get("RX_TYPE") if _unit_service_dst else None
+                if self._acl_rejects_dmrd(_rf_src, _dst_id, _slot, _stream_id, _unit_service_dst):
+                    return
                 # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
                 # (peer_id) is new — see the MASTER-mode write site for why.
-                sub_map = self._CONFIG.get("_SUB_MAP")
-                if sub_map is not None:
-                    sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
+                if self._learns_sub_map:
+                    sub_map = self._CONFIG.get("_SUB_MAP")
+                    if sub_map is not None:
+                        sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
                 # TG 4000: reset after ACL/SUB_MAP (legacy order — routerHBP.dmrd_received)
                 if self._handle_tg4000_packet(
                     _peer_id, _slot, _int_dst_id, _call_type, _frame_type, _dtype_vseq,
@@ -1951,8 +2119,7 @@ class HBPProtocol(DatagramProtocol):
                     and not _unit_data
                     and _frame_type == HBPF_DATA_SYNC
                     and _dtype_vseq == HBPF_SLT_VTERM
-                    and _slot in self.STATUS
-                    and self.STATUS[_slot].get("RX_TYPE") != HBPF_SLT_VTERM
+                    and _rx_type_before not in (None, HBPF_SLT_VTERM)
                     and 9991 <= _int_dst_id <= 9999
                     and self._on_play_file_request
                 ):
@@ -2094,54 +2261,244 @@ class HBPProtocol(DatagramProtocol):
         logger.error("(%s) Unhandled error in timed loop.\n %s", self._system, failure)
 
     def _obp_send_bcka(self) -> None:
-        """Legacy send_bcka: BCKA + HMAC-SHA1 to TARGET. Uses TARGET_SOCK (IP only; hostnames resolved at startup or on first peer packet)."""
-        _addr = self._config.get("TARGET_SOCK")
-        if _addr and _addr[0]:
+        """Legacy send_bcka: BCKA + HMAC-SHA1 to the peer (hostnames resolved at startup)."""
+        _session = self._session
+        _addr = _session.peer
+        if _session.peer_known:
             self.transport.write(build_bcka(_get_passphrase_bytes(self._config)), _addr)
         else:
             logger.debug("(%s) *BridgeControl* not sending KeepAlive, TARGET not currently known", self._system)
 
     def _obp_send_bcve(self) -> None:
-        """Legacy send_bcve: BCVE + VER byte + HMAC-SHA1. Uses TARGET_SOCK (IP only)."""
-        _addr = self._config.get("TARGET_SOCK")
-        if self._config.get("ENHANCED_OBP") and _addr and _addr[0]:
+        """Legacy send_bcve: BCVE + VER byte + HMAC-SHA1 to the peer."""
+        _session = self._session
+        _addr = _session.peer
+        if self._config.get("ENHANCED_OBP") and _session.peer_known:
             self.transport.write(build_bcve(VER, _get_passphrase_bytes(self._config)), _addr)
         else:
             logger.debug("(%s) *BridgeControl* not sending BCVE, TARGET not currently known", self._system)
 
-    def _obp_sync_target_sock_from_peer(self, _sockaddr: tuple[str, int]) -> None:
-        """If RELAX_CHECKS accepted traffic from a different IP:port than TARGET_SOCK, sync (same idea as BCKA).
-        Ensures BCSQ and outbound DMR go to the peer address we actually receive from."""
+    def _obp_sync_target_sock_from_peer(
+        self,
+        _sockaddr: tuple[str, int],
+        _stream_id: bytes | None = None,
+        _session: ObpBridgeSession | None = None,
+    ) -> None:
+        """Learn the address RELAX_CHECKS just accepted, so replies go back to it.
+
+        The configured peer stays where the operator put it; only the session
+        moves. A peer behind per-packet load-balanced NAT can flip source address
+        on every frame of the same call, so the log is debug and capped to once
+        per stream_id (same _log_once deque idiom as _bcsq_log_once above).
+        """
         if self._config.get("MODE") != "OPENBRIDGE" or not self._config.get("RELAX_CHECKS"):
             return
-        if not _sockaddr or not _sockaddr[0]:
-            return
-        cur = self._config.get("TARGET_SOCK")
+        if _session is None:
+            _session = self._session
+        cur = _session.peer
         if cur == _sockaddr:
+            return  # already where we send: learn_peer would refuse it anyway
+        if not _session.learn_peer(_sockaddr, at=time.time()):
             return
-        h, p = _sockaddr[0], int(_sockaddr[1])
-        logger.info(
-            "(%s) *BridgeControl* OBP peer address sync to %s:%s (RELAX_CHECKS; was %s:%s)",
-            self._system,
-            h,
-            p,
-            (cur[0] if cur and cur[0] else "?"),
-            (cur[1] if cur and len(cur) > 1 else "?"),
+        _once = getattr(self, "_obp_target_sync_log_once", None)
+        if _stream_id is None or not isinstance(_once, deque) or _stream_id not in _once:
+            logger.debug(
+                "(%s) *BridgeControl* OBP peer address sync to %s:%s (RELAX_CHECKS; was %s:%s)",
+                self._system,
+                _sockaddr[0],
+                int(_sockaddr[1]),
+                (cur[0] if cur and cur[0] else "?"),
+                (cur[1] if cur and len(cur) > 1 else "?"),
+            )
+            if _stream_id is not None and isinstance(_once, deque):
+                _once.append(_stream_id)
+
+    def _obp_reject_source(self, _opcode: bytes, _sockaddr: tuple[str, int]) -> None:
+        """Refuse a frame from an address this peer's name does not resolve to.
+
+        A peer that really moved looks exactly like this, so the refusal asks DNS
+        again. Counting is explicit because refusing here never reaches the engine,
+        which is what tallies every other reason.
+        """
+        self._session.count_drop("source-not-peer")
+        self._obp_resolve_target()
+        _seen = getattr(self, "_obp_foreign_source_seen", None)
+        if isinstance(_seen, dict):
+            _key = (_sockaddr, _opcode)
+            _now = time.time()
+            if _now - _seen.get(_key, 0.0) < OBP_FOREIGN_LOG_INTERVAL_S:
+                return
+            if len(_seen) > 256:
+                _seen.clear()
+            _seen[_key] = _now
+        _peer = self._session.peer
+        _why = (
+            f"{self._session.dns_host} resolves to {_peer[0]}:{_peer[1]}"
+            if self._session.dns_anchored
+            else f"this bridge's peer is {_peer[0]}:{_peer[1]}"
         )
-        self._config["TARGET_IP"] = h
-        self._config["TARGET_PORT"] = p
-        self._config["TARGET_SOCK"] = (h, p)
+        logger.info(
+            "(%s) *BridgeControl* %s from %s:%s discarded: %s",
+            self._system,
+            _opcode.decode("ascii", errors="replace"),
+            _sockaddr[0],
+            int(_sockaddr[1]),
+            _why,
+        )
+
+    def _obp_resolve_target(self) -> None:
+        """Ask DNS where this peer is now, off the datagram path and rate limited."""
+        _session = self._session
+        if not _session.dns_anchored:
+            return
+        _now = time.time()
+        if _now - _session.dns_checked_at < OBP_DNS_MIN_INTERVAL_S:
+            return
+        _session.dns_checked_at = _now
+        _d = reactor.resolve(_session.dns_host)
+        _d.addCallback(self._obp_target_resolved)
+        _d.addErrback(self._obp_target_resolve_failed)
+
+    def _obp_target_resolved(self, _host: str) -> None:
+        _session = self._session
+        _was = _session.peer
+        if _session.adopt_resolved((_host, int(_session.configured_peer[1])), at=time.time()):
+            logger.info(
+                "(%s) *BridgeControl* OBP peer moved: %s now resolves to %s (was %s:%s)",
+                self._system,
+                _session.dns_host,
+                _host,
+                _was[0],
+                _was[1],
+            )
+            _seen = getattr(self, "_obp_foreign_source_seen", None)
+            if isinstance(_seen, dict):
+                _seen.clear()
+
+    def _obp_target_resolve_failed(self, _failure: Any) -> None:
+        """Keep the address we have: a name server hiccup must not drop the link."""
+        logger.debug(
+            "(%s) *BridgeControl* could not resolve %s, keeping %s:%s",
+            self._system,
+            self._session.dns_host,
+            self._session.peer[0],
+            self._session.peer[1],
+        )
+
+    @property
+    def _session(self) -> ObpBridgeSession:
+        """Live state of this OpenBridge link (peer, keepalive, quench)."""
+        return obp_session(self._CONFIG, self._system)
+
+    def _obp_admission_context(self) -> AdmissionContext:
+        """Snapshot of everything the admission rules need, read once per frame."""
+        _global = self._CONFIG.get("GLOBAL", {})
+        return AdmissionContext(
+            stunned="STUN" in self._CONFIG,
+            acl_check=self._router.acl_check if self._router else None,
+            global_rules=AclRules(
+                enabled=bool(_global.get("USE_ACL")),
+                sub_acl=_global.get("SUB_ACL", (True, [])),
+                tg1_acl=_global.get("TG1_ACL", (True, [])),
+            ),
+            system_rules=AclRules(
+                enabled=bool(self._config.get("USE_ACL")),
+                sub_acl=self._config.get("SUB_ACL", (True, [])),
+                tg1_acl=self._config.get("TG1_ACL", (True, [])),
+            ),
+            server_id=server_prefix(_global.get("SERVER_ID", 0)),
+            validate_server_ids=bool(_global.get("VALIDATE_SERVER_IDS")),
+            known_server_prefixes=self._CONFIG.get("_SERVER_IDS", _NO_SERVER_IDS),
+            resolve_server_id=self.validate_obp_source_server_id,
+        )
+
+    def _obp_policy(self) -> BridgePolicy:
+        """This bridge's rules, handed to the engine.
+
+        Everything here comes from configuration, so it is built once and kept until
+        a reload swaps the dicts (``apply_system_config``) or an alias refresh swaps
+        ``_SERVER_IDS`` under us, which is the one input that moves on its own.
+        """
+        server_ids = self._CONFIG.get("_SERVER_IDS", _NO_SERVER_IDS)
+        cached = self._obp_policy_cache
+        if cached is not None and cached[0] is server_ids:
+            return cached[1]
+        policy = self._build_obp_policy()
+        self._obp_policy_cache = (server_ids, policy)
+        return policy
+
+    def _build_obp_policy(self) -> BridgePolicy:
+        return BridgePolicy(
+            system=self._system,
+            network_id=self._config.get("NETWORK_ID", b""),
+            proto_ver=self._config.get("VER"),
+            relax_checks=bool(self._config.get("RELAX_CHECKS")),
+            server_id=server_id_bytes(self._CONFIG.get("GLOBAL", {}).get("SERVER_ID", 0)),
+            admission=self._obp_admission_context(),
+        )
+
+    def _obp_apply(self, effects: list[Effect] | None) -> None:
+        """Carry out what the engine decided, in order.
+
+        Branches are mutually exclusive, so they run most-frequent-first.
+        """
+        if not effects:
+            return
+        for effect in effects:
+            if isinstance(effect, Deliver):
+                if self._dmrd_received:
+                    self._dmrd_received(
+                        self._system,
+                        effect.peer_id,
+                        effect.rf_src,
+                        effect.dst_id,
+                        effect.seq,
+                        effect.slot,
+                        effect.call_type,
+                        effect.frame_type,
+                        effect.dtype_vseq,
+                        effect.stream_id,
+                        effect.frame,
+                        obp_use_parsed=True,
+                        obp_hops=effect.hops,
+                        obp_source_server=effect.source_server,
+                        obp_ber=effect.ber,
+                        obp_rssi=effect.rssi,
+                        obp_source_rptr=effect.source_rptr,
+                    )
+            elif isinstance(effect, NoteStream):
+                self.note_dmrd_stream(effect.peer_id, effect.rf_src, effect.stream_id)
+            elif isinstance(effect, StoreTalkerAlias):
+                self.store_ta_from_voice_burst(
+                    effect.peer_id,
+                    effect.rf_src,
+                    effect.stream_id,
+                    effect.dtype_vseq,
+                    effect.burst,
+                )
+            elif isinstance(effect, Log):
+                logger.log(effect.level, effect.message, *effect.args)
+            elif isinstance(effect, Reject):
+                self._obp_reject(effect.rejection, effect.dst_id, effect.stream_id)
+                self._session.count_drop(effect.reason)
+            elif isinstance(effect, RequestVersion):
+                self._obp_send_bcve()
+
+    def _obp_reject(self, rejection: Rejection, _dst_id: bytes, _stream_id: bytes) -> None:
+        """Apply one admission decision: log it (once per stream) and quench the peer."""
+        if rejection.log_once:
+            if _stream_id in self._laststrid:
+                return
+            self._laststrid.append(_stream_id)
+        logger.log(rejection.level, rejection.message, *rejection.args)
+        if rejection.quench:
+            self._obp_send_bcsq(_dst_id, _stream_id)
 
     def _obp_send_bcsq(self, _tgid: bytes, _stream_id: bytes) -> None:
-        """Legacy send_bcsq: BCSQ + tgid + stream_id + HMAC-SHA1. Uses TARGET_SOCK (IP only)."""
-        _addr = self._config.get("TARGET_SOCK")
-        if not _addr or not _addr[0]:
-            tip = self._config.get("TARGET_IP")
-            tport = int(self._config.get("TARGET_PORT", 62044))
-            if tip:
-                _addr = (tip, tport)
-                self._config["TARGET_SOCK"] = _addr
-        if _addr and _addr[0]:
+        """Legacy send_bcsq: BCSQ + tgid + stream_id + HMAC-SHA1 to the peer."""
+        _session = self._session
+        _addr = _session.peer
+        if _session.peer_known:
             self.transport.write(
                 build_bcsq(_tgid, _stream_id, _get_passphrase_bytes(self._config)),
                 _addr,
@@ -2153,318 +2510,93 @@ class HBPProtocol(DatagramProtocol):
             )
 
     def _obp_datagram_received(self, _packet: bytes, _sockaddr: tuple[str, int]) -> None:
-        """Port of hblink.py OPENBRIDGE.datagramReceived: DMRD v1 (53+HMAC), BCKA, BCVE."""
+        """OpenBridge ingress: verify, hand to the engine, apply what it answers."""
         if _packet[:3] == DMR and _packet[:4] == DMRD and len(_packet) >= 73:
-            _data = _packet[:53]
-            _stream_id = _data[16:20]
-            if self._config.get("VER", 5) > 1:
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) *ProtoControl* Version 1 protocol prohibited by PROTO_VER, Ver: %s", self._system, self._config.get("VER"))
-                    self._laststrid.append(_stream_id)
-                self._obp_send_bcve()
+            _policy = self._obp_policy()
+            _stream_id = _packet[16:20]
+            if _policy.rejects_v1:
+                self._obp_apply(reject_v1_protocol(_stream_id, policy=_policy))
                 return
             _ingress = self._try_decode_mesh_ingress(_packet)
-            if _ingress is not None and _ingress.codec == "obp_v1" and (_sockaddr == self._config.get("TARGET_SOCK") or self._config.get("RELAX_CHECKS")):
-                _data = _ingress.voice_frame
-                self._obp_sync_target_sock_from_peer(_sockaddr)
-                _peer_id = _data[11:15]
-                if self._config.get("NETWORK_ID") != _peer_id:
-                    if _stream_id not in self._laststrid:
-                        logger.error("(%s) OpenBridge packet discarded because NETWORK_ID: %s Does not match sent Peer ID: %s", self._system, int_id(self._config.get("NETWORK_ID", b"")), int_id(_peer_id))
-                        self._laststrid.append(_stream_id)
-                    return
-                _seq = _data[4]
-                _rf_src = _data[5:8]
-                _dst_id = _data[8:11]
-                _bits = _data[15]
-                _slot = 2 if (_bits & 0x80) else 1
-                if _bits & 0x40:
-                    _call_type = "unit"
-                elif (_bits & 0x23) == 0x23:
-                    _call_type = "vcsbk"
-                else:
-                    _call_type = "group"
-                _frame_type = (_bits & 0x30) >> 4
-                _dtype_vseq = _bits & 0xF
-                if _slot != 1:
-                    logger.error("(%s) OpenBridge packet discarded because it was not received on slot 1. SID: %s, TGID %s", self._system, int_id(_rf_src), int_id(_dst_id))
-                    return
-                if "STUN" in self._CONFIG:
-                    if _stream_id not in self._laststrid:
-                        logger.warning("(%s) Bridge STUNned, discarding", self._system)
-                        self._laststrid.append(_stream_id)
-                    return
-                _int_dst_id = int_id(_dst_id)
-                if _call_type != "unit":
-                    if _int_dst_id <= 79 or (_int_dst_id >= 9990 and _int_dst_id <= 9999) or (_int_dst_id >= 92 and _int_dst_id <= 199) or _int_dst_id == 900999:
-                        if _stream_id not in self._laststrid:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY GLOBAL TG FILTER", self._system, int_id(_stream_id), _int_dst_id)
-                            self._obp_send_bcsq(_dst_id, _stream_id)
-                            self._laststrid.append(_stream_id)
-                        return
-                _global = self._CONFIG.get("GLOBAL", {})
-                if self._router and _global.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, _global.get("SUB_ACL", (True, []))):
-                        if _stream_id not in self._laststrid:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._obp_send_bcsq(_dst_id, _stream_id)
-                            self._laststrid.append(_stream_id)
-                        return
-                    if _slot == 1 and not self._router.acl_check(_dst_id, _global.get("TG1_ACL", (True, []))):
-                        if _stream_id not in self._laststrid:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._obp_send_bcsq(_dst_id, _stream_id)
-                            self._laststrid.append(_stream_id)
-                        return
-                if self._router and self._config.get("USE_ACL"):
-                    if not self._router.acl_check(_rf_src, self._config.get("SUB_ACL", (True, []))):
-                        if _stream_id not in self._laststrid:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                            self._obp_send_bcsq(_dst_id, _stream_id)
-                            self._laststrid.append(_stream_id)
-                        return
-                    if not self._router.acl_check(_dst_id, self._config.get("TG1_ACL", (True, []))):
-                        if _stream_id not in self._laststrid:
-                            logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                            self._obp_send_bcsq(_dst_id, _stream_id)
-                            self._laststrid.append(_stream_id)
-                        return
-                if _call_type == "group" and _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD:
-                    logger.info(
-                        "(%s) CALL RX (OBP) src %s -> TG %s slot %s",
-                        self._system, int_id(_rf_src), int_id(_dst_id), _slot,
+            _session = self._session
+            if _ingress is not None and _ingress.codec == "obp_v1" and not accepts_source(
+                _sockaddr, policy=_policy, session=_session
+            ):
+                self._obp_reject_source(_packet[:4], _sockaddr)
+                return
+            if _ingress is not None and _ingress.codec == "obp_v1":
+                self._obp_sync_target_sock_from_peer(_sockaddr, _stream_id, _session)
+                self._obp_apply(
+                    ingest_dmrd_v1(
+                        _ingress,
+                        _sockaddr,
+                        policy=_policy,
+                        session=_session,
+                        now=time.time(),
                     )
-                self.note_dmrd_stream(_peer_id, _rf_src, _stream_id)
-                if (
-                    _call_type in ("group", "vcsbk")
-                    and _frame_type != HBPF_DATA_SYNC
-                    and _dtype_vseq in (1, 2, 3, 4)
-                    and len(_data) >= 53
-                ):
-                    self.store_ta_from_voice_burst(
-                        _peer_id, _rf_src, _stream_id, _dtype_vseq, _data[20:53],
-                    )
-                # Group/vcsbk stream state, LC, duplicates: routing_use_cases._obp_group_voice_router_obp (legacy routerOBP.dmrd_received)
-                if self._dmrd_received:
-                    # Legacy hblink DMRD v1: SERVER_ID + default rptr/hops/ber/rssi (`hblink.py` ~338–345, ~416)
-                    _global = self._CONFIG.get("GLOBAL", {})
-                    _sid = _global.get("SERVER_ID", b"\x00\x00\x00\x00")
-                    _obp_ss = (
-                        _sid
-                        if isinstance(_sid, bytes) and len(_sid) >= 4
-                        else bytes_4(int(_sid) & 0xFFFFFFFF if isinstance(_sid, int) else 0)
-                    )
-                    self._dmrd_received(
-                        self._system,
-                        _peer_id,
-                        _rf_src,
-                        _dst_id,
-                        _seq,
-                        _slot,
-                        _call_type,
-                        _frame_type,
-                        _dtype_vseq,
-                        _stream_id,
-                        _data,
-                        obp_use_parsed=True,
-                        obp_hops=b"",
-                        obp_source_server=_obp_ss,
-                        obp_ber=b"\x00",
-                        obp_rssi=b"\x00",
-                        obp_source_rptr=b"\x00\x00\x00\x00",
-                    )
-                self._config["_bcka"] = time.time()
+                )
             else:
                 logger.warning("(%s) OpenBridge HMAC failed, packet discarded - OPCODE: %s SRC: %s", self._system, _packet[:4], _sockaddr)
         elif _packet[:4] == DMRE:
-            # Legacy hblink.py OPENBRIDGE: DMRE (v5) incoming – 89-byte or 85-byte format, BLAKE2b
             _ingress = self._try_decode_mesh_ingress(_packet)
             if _ingress is None or _ingress.codec != "dmre_v5":
                 return
-            if not (_sockaddr == self._config.get("TARGET_SOCK") or self._config.get("RELAX_CHECKS")):
-                logger.warning("(%s) OpenBridge DMRE BLAKE2b failed, packet discarded - SRC: %s", self._system, _sockaddr)
+            _policy = self._obp_policy()
+            _session = self._session
+            # None means the engine refused the source; it checks, so we do not.
+            _effects = ingest_dmre_v5(
+                _ingress,
+                _sockaddr,
+                policy=_policy,
+                session=_session,
+                timestamp_ns=int.from_bytes(_ingress.timestamp, "big"),
+                now=time.time(),
+            )
+            if _effects is None:
+                self._obp_reject_source(_packet[:4], _sockaddr)
                 return
-            _data = _ingress.voice_frame
-            _ber = _ingress.ber
-            _rssi = _ingress.rssi
-            _embedded_version = _ingress.embedded_ver if _ingress.embedded_ver is not None else self._config.get("VER", 5)
-            _source_server = _ingress.source_server
-            _source_rptr = _ingress.source_rptr
-            _hops = _ingress.hops
-            _trailer = parse_dmre_trailer(_packet)
-            _timestamp = _trailer.timestamp if _trailer is not None else b"\x00" * 8
-            _stream_id = _data[16:20]
-            self._obp_sync_target_sock_from_peer(_sockaddr)
-            _peer_id = _data[11:15]
-            if self._config.get("NETWORK_ID") != _peer_id:
-                if _stream_id not in self._laststrid:
-                    logger.error("(%s) OpenBridge DMRE discarded because NETWORK_ID: %s Does not match sent Peer ID: %s", self._system, int_id(self._config.get("NETWORK_ID", b"")), int_id(_peer_id))
-                    self._laststrid.append(_stream_id)
-                return
-            _seq = _data[4]
-            _rf_src = _data[5:8]
-            _dst_id = _data[8:11]
-            _int_dst_id = int_id(_dst_id)
-            _bits = _data[15]
-            _slot = 2 if (_bits & 0x80) else 1
-            if self._config.get("MODE") == "OPENBRIDGE":
-                # Legacy bridge_master: OpenBridge streams are effectively TS1 (DMRD v1 rejects slot != 1).
-                # DMRE can still carry TS2 in bits; BRIDGES use TS:1 for OBP — normalize before STATUS/dmrd.
-                _slot = 1
-            if _bits & 0x40:
-                _call_type = "unit"
-            elif (_bits & 0x23) == 0x23:
-                _call_type = "vcsbk"
-            else:
-                _call_type = "group"
-            _frame_type = (_bits & 0x30) >> 4
-            _dtype_vseq = _bits & 0xF
-            if "STUN" in self._CONFIG:
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) Bridge STUNned, discarding", self._system)
-                    self._laststrid.append(_stream_id)
-                return
-            _ts_sec = int.from_bytes(_timestamp, "big") / 1_000_000_000
-            if _ts_sec < (time.time() - 5):
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) Packet from server %s more than 5s old!, discarding", self._system, int.from_bytes(_source_server, "big"))
-                    self._obp_send_bcsq(_dst_id, _stream_id)
-                    self._laststrid.append(_stream_id)
-                return
-            _src_srv_int = int.from_bytes(_source_server, "big")
-            _src_srv_str = str(_src_srv_int)
-            _src_srv_len = len(_src_srv_str)
-            if _src_srv_len < 4 or _src_srv_len > 7:
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) Source Server should be between 4 and 7 digits, discarding Src: %s", self._system, _src_srv_int)
-                    self._obp_send_bcsq(_dst_id, _stream_id)
-                    self._laststrid.append(_stream_id)
-                return
-            _global = self._CONFIG.get("GLOBAL", {})
-            _server_ids = self._CONFIG.get("_SERVER_IDS", set())
-            if _global.get("VALIDATE_SERVER_IDS") and _src_srv_len in (4, 5) and (_src_srv_str[:4] not in _server_ids):
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) Source Server ID is 4 or 5 digits but not in list: %s", self._system, _src_srv_int)
-                    self._obp_send_bcsq(_dst_id, _stream_id)
-                    self._laststrid.append(_stream_id)
-                return
-            if _src_srv_len > 5 and not self.validate_obp_source_server_id(_source_server):
-                if _stream_id not in self._laststrid:
-                    logger.warning("(%s) Source Server 6 or 7 digits but not a valid DMR ID, discarding Src: %s", self._system, _src_srv_int)
-                    self._obp_send_bcsq(_dst_id, _stream_id)
-                    self._laststrid.append(_stream_id)
-                return
-            _inthops = (_hops if isinstance(_hops, int) else int.from_bytes(_hops, "big")) + 1
-            if _inthops > 10:
-                logger.debug(
-                    "(%s) MAX HOPS exceed, dropping. Hops: %s, DST: %s, SRC: %s",
-                    self._system,
-                    _inthops,
-                    _int_dst_id,
-                    _src_srv_int,
-                )
-                self._obp_send_bcsq(_dst_id, _stream_id)
-                return
-            if _call_type != "unit":
-                if _int_dst_id <= 79:
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s BY GLOBAL TG FILTER (local to repeater)", self._system, int_id(_stream_id), _int_dst_id)
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-                if (_int_dst_id >= 9990 and _int_dst_id <= 9999) or _int_dst_id == 900999:
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s BY GLOBAL TG FILTER (local to server)", self._system, int_id(_stream_id), _int_dst_id)
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-                _sid = _global.get("SERVER_ID", 0)
-                _our_srv = int(str(_sid)[:4]) if isinstance(_sid, int) else int(str(int.from_bytes(_sid, "big"))[:4])
-                if (_int_dst_id >= 92 and _int_dst_id <= 199) and int(_src_srv_str[:4]) != _our_srv:
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s BY GLOBAL TG FILTER (local to server main ID)", self._system, int_id(_stream_id), _int_dst_id)
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-                if ((_int_dst_id >= 80 and _int_dst_id <= 89) or (_int_dst_id >= 800 and _int_dst_id <= 899)) and int(_src_srv_str[:3]) != int(str(_our_srv)[:3]):
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s BY GLOBAL TG FILTER (local to MCC)", self._system, int_id(_stream_id), _int_dst_id)
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-            if _global.get("USE_ACL") and self._router:
-                if not self._router.acl_check(_rf_src, _global.get("SUB_ACL", (True, []))):
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-                if _slot == 1 and not self._router.acl_check(_dst_id, _global.get("TG1_ACL", (True, []))):
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY GLOBAL TS1 ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-            if self._config.get("USE_ACL") and self._router:
-                if not self._router.acl_check(_rf_src, self._config.get("SUB_ACL", (True, []))):
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s FROM SUBSCRIBER %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_rf_src))
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-                if not self._router.acl_check(_dst_id, self._config.get("TG1_ACL", (True, []))):
-                    if _stream_id not in self._laststrid:
-                        logger.info("(%s) CALL DROPPED WITH STREAM ID %s ON TGID %s BY SYSTEM ACL", self._system, int_id(_stream_id), int_id(_dst_id))
-                        self._obp_send_bcsq(_dst_id, _stream_id)
-                        self._laststrid.append(_stream_id)
-                    return
-            self.note_dmrd_stream(_peer_id, _rf_src, _stream_id)
-            if (
-                _call_type in ("group", "vcsbk")
-                and _frame_type != HBPF_DATA_SYNC
-                and _dtype_vseq in (1, 2, 3, 4)
-                and len(_data) >= 53
-            ):
-                self.store_ta_from_voice_burst(
-                    _peer_id, _rf_src, _stream_id, _dtype_vseq, _data[20:53],
-                )
-            _data_dmrd = DMRD + _data[4:]
-            _hops_out = _inthops.to_bytes(1, "big")
-            if self._dmrd_received:
-                # Legacy hblink DMRE: same fields passed to dmrd_received as after increment (`hblink.py` ~592–596)
-                self._dmrd_received(
-                    self._system,
-                    _peer_id,
-                    _rf_src,
-                    _dst_id,
-                    _seq,
-                    _slot,
-                    _call_type,
-                    _frame_type,
-                    _dtype_vseq,
-                    _stream_id,
-                    _data_dmrd,
-                    obp_use_parsed=True,
-                    obp_hops=_hops_out,
-                    obp_source_server=_source_server,
-                    obp_ber=_ber,
-                    obp_rssi=_rssi,
-                    obp_source_rptr=_source_rptr,
-                )
-            self._config["_bcka"] = time.time()
+            self._obp_sync_target_sock_from_peer(_sockaddr, _ingress.voice_frame[16:20], _session)
+            self._obp_apply(_effects)
         elif _packet[:4] == EOBP:
             logger.warning("(%s) *ProtoControl* KF7EEL EOBP protocol not supported", self._system)
         elif self._config.get("ENHANCED_OBP") and _packet[:2] == BC:
+            # No NETWORK_ID here, so the source address is all that tells senders apart.
+            if not accepts_source(_sockaddr, policy=self._obp_policy(), session=self._session):
+                self._obp_reject_source(_packet[:4], _sockaddr)
+                return
             _passphrase = _get_passphrase_bytes(self._config)
             if _packet[:4] == BCKA and len(_packet) >= 24:
                 if verify_bcka(_packet, _passphrase):
-                    self._config["_bcka"] = time.time()
-                    if _sockaddr != self._config.get("TARGET_SOCK"):
-                        logger.info("(%s) *BridgeControl* Source IP and Port has changed for OBP from %s:%s to %s:%s, updating", self._system, self._config.get("TARGET_IP"), self._config.get("TARGET_PORT"), _sockaddr[0], _sockaddr[1])
-                        self._config["TARGET_IP"] = _sockaddr[0]
-                        self._config["TARGET_PORT"] = _sockaddr[1]
-                        self._config["TARGET_SOCK"] = _sockaddr
-                    self._config.pop("_no_target_log_time", None)  # reset so next "no target" logs once
+                    _session = self._session
+                    _now = time.time()
+                    _session.note_keepalive(_now)
+                    # Anyone with the passphrase can send one, so it may bootstrap a peer
+                    # we have no address for, never move one we have. DMRD/DMRE do that.
+                    if _session.dns_anchored:
+                        # accepts_source vetted the host above, so this only refines the port.
+                        _session.learn_peer(_sockaddr, at=_now)
+                    elif not _session.peer_known:
+                        if _session.learn_peer(_sockaddr, at=_now):
+                            logger.info(
+                                "(%s) *BridgeControl* OBP peer address learned from keepalive: %s:%s",
+                                self._system,
+                                _sockaddr[0],
+                                _sockaddr[1],
+                            )
+                    elif _sockaddr != _session.peer:
+                        _once = getattr(self, "_obp_foreign_bcka_log_once", None)
+                        if not isinstance(_once, deque) or _sockaddr not in _once:
+                            if isinstance(_once, deque):
+                                _once.append(_sockaddr)
+                            logger.debug(
+                                "(%s) *BridgeControl* BCKA from %s:%s is not this bridge's peer %s:%s "
+                                "(keepalive only; a second instance of the peer, or another bridge sharing the passphrase)",
+                                self._system,
+                                _sockaddr[0],
+                                _sockaddr[1],
+                                _session.peer[0],
+                                _session.peer[1],
+                            )
                 else:
                     logger.info("(%s) *BridgeControl* BCKA invalid KeepAlive, packet discarded", self._system)
             # Source quench — legacy hblink.py OPENBRIDGE ~629-639 (sets CONFIG['_bcsq'][tgid]=stream_id)
@@ -2473,9 +2605,7 @@ class HBPProtocol(DatagramProtocol):
                 if _bcsq is not None:
                     _tgid_bcsq = _bcsq.tgid
                     _stream_bcsq = _bcsq.stream_id
-                    if "_bcsq" not in self._config:
-                        self._config["_bcsq"] = {}
-                    self._config["_bcsq"][_tgid_bcsq] = _stream_bcsq
+                    self._session.quench(_tgid_bcsq, _stream_bcsq)
                     if self._config.get("MODE") == "OPENBRIDGE":
                         _key = (_stream_bcsq, _tgid_bcsq)
                         _once = getattr(self, "_bcsq_log_once", None)
@@ -2503,7 +2633,7 @@ class HBPProtocol(DatagramProtocol):
             if _packet[:4] == BCST and len(_packet) >= 24:
                 if verify_bcst(_packet, _passphrase):
                     logger.trace("(%s) *BridgeControl* BCST STUN request received", self._system)
-                    self._config["_STUN"] = True
+                    self._session.stun()
                 else:
                     logger.warning(
                         "(%s) *BridgeControl* BCST invalid STUN, packet discarded - SRC: %s",
@@ -2534,10 +2664,12 @@ def HBPProtocolFactory(
     dmrd_received: Callable[..., None] | None = None,
     get_user_password_callback: Callable[[int], bytes | None] | None = None,
     on_play_file_request: Callable[[str, str], None] | None = None,
+    on_tg4000_voice: Callable[..., None] | None = None,
     on_handle_recording: Callable[..., None] | None = None,
     on_in_band_signalling: Callable[[str, int, bytes, float], None] | None = None,
     on_options_received: Callable[..., None] | None = None,
     on_deactivate_dynamic_relays: Callable[[str], None] | None = None,
+    on_release_dynamic_leg: Callable[[str, int, int], bool] | None = None,
     on_obp_bcsq_received: Callable[[str, bytes, bytes], None] | None = None,
     on_talker_alias_local_repeat: Callable[[str, bytes, bytes, bytes], None] | None = None,
     on_talker_alias_repeat_prepare: Callable[[str, bytes, bytes, bytes, int, bytes, str], None] | None = None,
@@ -2558,10 +2690,12 @@ def HBPProtocolFactory(
         dmrd_received,
         get_user_password_callback=get_user_password_callback,
         on_play_file_request=on_play_file_request,
+        on_tg4000_voice=on_tg4000_voice,
         on_handle_recording=on_handle_recording,
         on_in_band_signalling=on_in_band_signalling,
         on_options_received=on_options_received,
         on_deactivate_dynamic_relays=on_deactivate_dynamic_relays,
+        on_release_dynamic_leg=on_release_dynamic_leg,
         on_obp_bcsq_received=on_obp_bcsq_received,
         on_talker_alias_local_repeat=on_talker_alias_local_repeat,
         on_talker_alias_repeat_prepare=on_talker_alias_repeat_prepare,

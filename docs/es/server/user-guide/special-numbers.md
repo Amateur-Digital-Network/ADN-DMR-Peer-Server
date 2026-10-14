@@ -67,13 +67,22 @@ La activación/desactivación in-band de bridges se aplica sobre **voice termina
 - Limpia sesiones UA del peer en memoria (**todos los slots** de ese peer).
 - Borra filas correspondientes en **`peer_dynamic_tgs`** (MariaDB).
 - Limpia campos RX obsoletos en **STATUS** para que un **RPTO** posterior no re-sembré el TG antiguo.
-- Ejecuta **desactivación in-band** de bridges en el slot (como legacy).
+- En un MASTER propio, ejecuta **desactivación in-band** de bridges en el slot (como legacy). En un MASTER **inject-only** compartido no: sus patas son de todos los hotspots, y el 4000 in-band las pondría todas en IDLE en ese slot (los dinámicos y los estáticos OPTIONS de los demás).
 - Envía **`GROUP VOICE,INGRESS,RX,…,4000`** al monitor (no **START**) para que los chips **SINGLE=0** se limpien **sin** encender TX en vivo.
 - En MASTER **inject-only**, empuja **CONFIG_SND** actualizado al monitor.
 
 **Inject-only frente a global:** Con **`PROXY`** integrado, el reset es **por peer** (solo los dinámicos de ese hotspot). Sin filtro inject-only, sigue aplicándose legacy **`deactivate_all_dynamic_bridges`** a todo el system.
 
 **TG 4000 no debe aparecer** como chip UA dinámico en el monitor ni en `peer_dynamic_tgs`.
+
+**Respuesta de voz (activa por defecto; `TG4000_VOICE: false` en el MASTER la desactiva):** al terminar la pasada al 4000 (su terminador), el servidor responde **solo a ese hotspot**, alrededor de un segundo después, con el estado de enlace en el `ANNOUNCEMENT_LANGUAGE` del sistema: «enlazado a» y los TG estáticos que el hotspot conserva en ese slot (sus OPTIONS y los `TS1_STATIC` / `TS2_STATIC` del MASTER, hasta cuatro); si no tiene, «enlazado a *N*» si hay `DEFAULT_REFLECTOR`; si no, «no enlazado».
+
+- Una llamada de **grupo** al TG 4000 se responde con una llamada de grupo del ID de voz del servidor al **TG 4000** por ese slot: la radio la oye en el contacto que acaba de usar.
+- Una llamada **privada** al ID 4000 se responde con una llamada privada **desde el ID 4000** a quien llamó, que las configuraciones de los hotspots devuelven al contacto privado (p. ej. `PCRewrite …,84000,…,4000,…`).
+
+Los demás hotspots de un MASTER compartido no la oyen, nunca sale por OpenBridge y se corta si ese hotspot empieza a recibir otro stream por ese slot. Se reproduce en el reactor, una trama cada 58 ms. Una respuesta por pasada; ninguna si se pierde el terminador.
+
+**MASTER compartido, patas:** un 4000 nunca libera una pata que **cualquier** hotspot conectado, incluido el que lo envía, tiene en ese slot como estático (de OPTIONS o del YAML del MASTER); la sesión dinámica de otro hotspot en ella también la mantiene. Cualquier otra pata dinámica que tenía el que envía el 4000 pasa a IDLE en el momento, sin esperar a su temporizador.
 
 ### Impacto de `SINGLE_MODE` en la lógica de desactivación
 
@@ -106,7 +115,7 @@ El **audio** se envía con el **ID de fuente configurado** y **TG de destino 9**
 
 ## Llamada privada al ID 4000
 
-Una llamada **unitaria** a **4000** se trata solo como **desconexión de dinámicos**; **no** se enruta como llamada privada normal.
+Una llamada **unitaria** a **4000** se trata solo como **desconexión de dinámicos**; **no** se enruta como llamada privada normal. Con `TG4000_VOICE` (por defecto `true`) el hotspot además recibe la [respuesta por voz](#tg--id-4000--desactivar-bridges-dinamicos) como llamada privada desde el ID 4000.
 
 ## Ingreso OpenBridge — filtros de TG de grupo {#openbridge-ingress--group-tg-filters}
 
@@ -122,8 +131,8 @@ Muchos IDs pequeños (0–5, 9, etc.) y el rango de **servicio 999x** quedan exc
 |------------|-----|
 | **VOICE.DMR_ID** (fuente) | Voz generada por el servidor — **ID de llamada** en receptores (predeterminado **1000001**) |
 | **5000** (destino) | Sin bridge UA automático si falta en `BRIDGES` |
-| **4000** (grupo) | Desactivar bridges dinámicos |
-| **4000** (unitaria) | Desconectar dinámicos; no enrutada como PC |
+| **4000** (grupo) | Desactivar bridges dinámicos; respuesta de estado por voz en el TG 4000 (`TG4000_VOICE`, por defecto `true`) |
+| **4000** (unitaria) | Desconectar dinámicos; no enrutada como PC; respuesta de estado por voz desde el ID 4000 (`TG4000_VOICE`) |
 | **9991–9999** | Audio informativo / bajo demanda (TG de disparo); reproducción usa `VOICE.DMR_ID` → TG **9** (TS2) |
 | **9** | Carril de servicio/mensajes (audio corto del servidor); reservada para auto-bridges; **TGID** interno en patas TS2 |
 | **9990** | TG de bridge de eco (con sistema ECHO) |

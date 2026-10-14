@@ -66,3 +66,20 @@ def decrypt_password(encrypted_password: Optional[str], key_path: str = "config/
         return decrypted.decode("utf-8")
     except Exception:
         return encrypted_password
+
+
+def decrypt_passwords(
+    encrypted: dict[str, str], key_path: str = "config/encryption_key.secret"
+) -> dict[str, str]:
+    """Decrypt a whole table on one Fernet: the key is read once, not once per entry."""
+    fernet = get_fernet(key_path)
+    decrypted: dict[str, str] = {}
+    for radio_id, password in encrypted.items():
+        if not password:
+            decrypted[str(radio_id)] = ""
+            continue
+        try:
+            decrypted[str(radio_id)] = fernet.decrypt(password.encode("utf-8")).decode("utf-8")
+        except Exception:
+            decrypted[str(radio_id)] = password
+    return decrypted

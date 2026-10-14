@@ -8,7 +8,7 @@ Intervals are part of the **observable behaviour** of the product (operators and
 
 ## Configuration visibility
 
-Runtime state lives in a shared **`config`** dict: options from peers, `SUB_MAP`, OpenBridge control-plane fields (`_bcsq`, `_bcka`), and similar. Adapters update this structure; use cases read it. This matches how the running process is inspected in logs and support scenarios.
+Runtime state lives in a shared **`config`** dict: options from peers, `SUB_MAP`, and similar. Adapters update this structure; use cases read it. OpenBridge link state (keepalive, learned peer address, quench table) lives in one `ObpBridgeSession` per bridge (`domain/mesh_session.py`), not in the config; only the per-stream `_bcsq` flag (BCSQ already sent) remains in `STATUS`. This matches how the running process is inspected in logs and support scenarios.
 
 ## Core timer intervals (operational contract)
 
@@ -18,7 +18,7 @@ The following intervals are part of the current runtime behavior:
 |------|----------|------|
 | `rule_timer` | **52s** | Bridge timeout/on-off state progression. |
 | `stream_trimmer` | **5s** | Stream cleanup, timeout handling, end-of-call state trimming. |
-| `bridge_reset` | **6s** | Bridge reset flag cleanup and pending reset completion. |
+| `bridge_reset` | **6s** | Bridge reset flag cleanup and pending reset completion. A MASTER is flagged for reset only when its **last** peer is gone, not on a failed login, a callsign mismatch or one hotspot leaving. |
 | OPTIONS refresh | **event-driven** | Static TG / reflector from **RPTO**, **startup/reload** (`apply_startup_bridges`), **dmrd** no-source fallback. No periodic 26s loop (**D-28**). |
 | `dynamic_tg_purge_loop` | **60s** | Purge expired **SINGLE=1** rows from `peer_dynamic_tgs` and in-memory `_PEER_UA_SESSIONS`. |
 | `lst_seen` (self-service reconcile) | **120s** | Reconcile `Clients.logged_in` against currently connected peers: connected peers get `logged_in=1`, the rest `0`. Runs with `now=True` on first tick so stale flags clear immediately after a server restart. Prevents the monitor from authenticating disconnected hotspots via login-by-IP. |
@@ -49,8 +49,27 @@ It is not applied on **unit/private** VTERM paths.
 
 ## Packet-control behavior notes
 
-Current packet-control behavior for stream dedup and ordering:
+Current packet-control behavior for stream dedup and ordering (`seq_advance` in `application/routing/helpers.py`, on OBP and HBP ingress):
 
-- OBP hash duplicate-drop checks are evaluated with **`seq > 0`** guard.
-- HBP still computes/stores CRC for `seq == 0`, while duplicate-drop by CRC remains guarded by **`seq > 0`**.
-- This avoids over-dropping first-packet edge cases while preserving stream duplicate protection.
+- The 8-bit sequence is compared **modulo 256**, so the wrap 255 → 0 is the next packet.
+- A forward jump counts every skipped packet as **Loss**. The same sequence again is a duplicate: dropped and counted as Loss.
+- A packet **behind** the last one is late: dropped, counted as Loss, and the last sequence is kept.
+- A repeated seq 0 (voice header) and a seq 1 restart are taken as the next packet.
+- After more than **1 s** of silence (`SEQ_RESYNC_SILENCE_S`) the stream resyncs to whatever sequence arrives.
+- A **terminator** is always accepted, even when behind (some client apps send it with seq 0), so the call ends at once instead of on the 5 s stream timeout.
+- The payload-hash duplicate drop stays guarded by **`seq > 0`** on OBP and HBP (HBP still stores the hash of `seq == 0`).
+
+<a id="loop-guard"></a>
+## Loop guard
+
+Stream-ID loop control (`*LoopControl*`) only catches a stream that comes back with its own stream ID. A transcoding bridge (YSF2DMR, DVSwitch, ASL/EchoLink gateways) re-encodes the audio and starts a **new** stream ID, and each lap restarts the 180 s source timeout. The TG-busy check also lets the same caller through on purpose. So a loop through bridges (TG A → YSF → TG B → … → TG A) would otherwise go round indefinitely.
+
+Those bridges keep the caller's ID, and one person cannot transmit from two ingress points at once. When a group voice stream starts, `application/routing/loop_guard.py` calls it an **echo** when the same `rf_src` has another stream (different stream ID) on the **same TG** from **another ingress** (system and peer on HBP; all OPENBRIDGE links together count as one ingress, the mesh) that is active or ended less than `GLOBAL.LOOP_GUARD_HOLD` seconds ago (default 1 s; a bridge echo starts while the original is still on air, so the hold only has to cover very short overs). The validator keeps the hold under 2.0 s, the parrot's fixed replay delay (`PLAYBACK_DELAY_S`), so the parrot is never matched whatever its system or TG is called. A bridge that relays to **another** TG is not a loop and is left alone; a loop always comes back to the TG it started on.
+
+- Per system `LOOP_GUARD`: `true` (default) drops the echo (routing, and the MASTER's local REPEAT to its other peers); `log` writes one `*LoopGuard*` warning per echo stream and lets it through; `false` neither checks nor records streams entering there (an extra option for the **ECHO** parrot).
+- Exempt: server voice IDs (`all_server_voice_ids`, e.g. 1000001; several servers run beacons with them at once) and plugin / announcement frames.
+- Cost: one verdict per stream, on its first frame, cached by stream ID. Frames of a stream already bound to its slot never reach it. The stream trimmer forgets entries after 300 s.
+- OBP multipath (the same call over two OpenBridge paths) keeps its stream ID and is not an echo.
+- The mesh is one ingress: a remote caller's next over may reach this server first over another OpenBridge link, and that is a re-key, not an echo. A real loop is still caught on the server where the caller is local (HBP vs a bridge peer, or HBP vs the mesh), and so is a local bridge peer echoing a remote caller (the mesh vs HBP).
+
+Not covered: a bridge that transmits with **its own** ID instead of the caller's.

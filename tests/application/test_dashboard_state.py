@@ -29,6 +29,7 @@ import jsonschema
 import pytest
 
 from adn_server.application.report.dashboard_state import build_dashboard_state
+from adn_server.domain.mesh_session import MeshSessionStore
 from adn_server.domain.value_objects import bytes_4
 
 _SCHEMA_PATH = Path(__file__).resolve().parents[2] / "schemas" / "report-v2.json"
@@ -115,11 +116,12 @@ def test_openbridge_connected_true_when_bcka_fresh() -> None:
             "ENABLED": True,
             "NETWORK_ID": 73010,
             "ENHANCED_OBP": True,
-            "_bcka": now - 10,
             "PEERS": {},
         },
     }
-    state = build_dashboard_state(systems, ts=now)
+    sessions = MeshSessionStore()
+    sessions.session("OBP-CL").note_keepalive(now - 10)
+    state = build_dashboard_state(systems, ts=now, sessions=sessions)
     assert state["ctable"]["OPENBRIDGES"]["OBP-CL"]["connected"] is True
 
 
@@ -131,11 +133,12 @@ def test_openbridge_connected_false_when_bcka_stale() -> None:
             "ENABLED": True,
             "NETWORK_ID": 73010,
             "ENHANCED_OBP": True,
-            "_bcka": now - 61,
             "PEERS": {},
         },
     }
-    state = build_dashboard_state(systems, ts=now)
+    sessions = MeshSessionStore()
+    sessions.session("OBP-CL").note_keepalive(now - 61)
+    state = build_dashboard_state(systems, ts=now, sessions=sessions)
     assert state["ctable"]["OPENBRIDGES"]["OBP-CL"]["connected"] is False
 
 

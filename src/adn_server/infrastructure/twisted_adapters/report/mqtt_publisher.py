@@ -29,6 +29,7 @@ from typing import Any
 
 from adn_server.application.ports import ReportMqttPublisher, ReportWireEncoder
 from adn_server.application.report.dashboard_state import build_dashboard_state
+from adn_server.domain.mesh_session import MeshSessionStore
 
 from .mqtt_config import MQTT_PUBLISH_VOICE_EVENT, MqttSettings, mqtt_settings_from_config
 from .mqtt_topics import frame_message_type, mqtt_shared_state_topic, topic_for_frame
@@ -63,8 +64,9 @@ class NullReportMqttPublisher(ReportMqttPublisher):
 class PahoReportMqttPublisher(ReportMqttPublisher):
     """Publish retained shared ``state`` and live ``voice_event`` only."""
 
-    def __init__(self, settings: MqttSettings) -> None:
+    def __init__(self, settings: MqttSettings, sessions: MeshSessionStore | None = None) -> None:
         self._settings = settings
+        self._sessions = sessions
         self._client: Any = None
         self._connected = False
         self._get_systems: Callable[[], dict[str, Any]] | None = None
@@ -131,7 +133,11 @@ class PahoReportMqttPublisher(ReportMqttPublisher):
     ) -> None:
         if not self._connected or self._client is None:
             return
-        payload = build_dashboard_state(systems, server_id=_server_id_from_settings(self._settings))
+        payload = build_dashboard_state(
+            systems,
+            server_id=_server_id_from_settings(self._settings),
+            sessions=self._sessions,
+        )
         body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
         content_key = json.dumps(
             {"ctable": payload.get("ctable"), "server_id": payload.get("server_id")},
@@ -232,6 +238,7 @@ def reconcile_mqtt_publisher(
     after: MqttSettings | None,
     *,
     report_enabled: bool,
+    sessions: MeshSessionStore | None = None,
 ) -> ReportMqttPublisher | None:
     """Stop/start MQTT client after SIGHUP when REPORTS.MQTT settings change."""
     if before == after and (current is not None) == (after is not None):
@@ -246,7 +253,7 @@ def reconcile_mqtt_publisher(
         if before is not None:
             logger.info("(REPORT) MQTT disconnected (disabled in config reload)")
         return None
-    publisher = create_report_mqtt_publisher_from_settings(after)
+    publisher = create_report_mqtt_publisher_from_settings(after, sessions=sessions)
     factory.set_mqtt(publisher)
     if publisher is None:
         logger.warning("(REPORT) MQTT enabled in config but publisher could not start")
@@ -258,14 +265,16 @@ def reconcile_mqtt_publisher(
     return publisher
 
 
-def create_report_mqtt_publisher_from_settings(settings: MqttSettings) -> ReportMqttPublisher | None:
+def create_report_mqtt_publisher_from_settings(
+    settings: MqttSettings, *, sessions: MeshSessionStore | None = None
+) -> ReportMqttPublisher | None:
     if mqtt is None:
         logger.error(
             "(REPORT) MQTT enabled but paho-mqtt is missing; "
             "install with: pip install 'adn-server[mqtt]'"
         )
         return None
-    return PahoReportMqttPublisher(settings)
+    return PahoReportMqttPublisher(settings, sessions)
 
 
 def create_report_mqtt_publisher(config: dict[str, Any]) -> ReportMqttPublisher | None:

@@ -30,14 +30,27 @@ Helpers live in application/routing/ (timers, OBP/HBP forward, LC/TA, subscripti
 from __future__ import annotations
 
 import logging
+import math
 import time
 from time import perf_counter
 from typing import Any
 
 from bitarray import bitarray
 
-from ..domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, STREAM_TO, bytes_3, bytes_4, int_id
+from ..domain import (
+    HBPF_DATA_SYNC,
+    HBPF_SLT_VHEAD,
+    HBPF_SLT_VTERM,
+    HBPF_VOICE,
+    HBPF_VOICE_SYNC,
+    STREAM_TO,
+    bytes_3,
+    bytes_4,
+    int_id,
+)
 from ..domain.dmr import bptc
+from ..domain.mesh_session import ObpBridgeSession, obp_session
+from .plugins.domain.send import is_plugin_sendable
 from .ports import AclRouter, DmrEmbeddedLcEncoder, SubscriptionStore, TalkerAliasEmblcEncoder
 from .reporting_use_cases import ReportingUseCases
 from .routing.hbp_forward import HbpForwardMixin
@@ -51,23 +64,36 @@ from .routing.helpers import (
     obp_deferred_bridge_tx_leg,
     obp_flat_bridge_tx_idle,
     obp_publish_flat_bridge_tx,
+    obp_status_plugin_voice,
     obp_sync_flat_bridge_tx_times,
-    obp_target_bcsq_quenches_stream,
     resolve_voice_peer_id,
     slot_has_active_voice,
+    tg_has_active_conversation,
     unit_data_hbp_target_idle,
+    unit_data_reportable,
 )
 from .routing.lc_ta import LcTaMixin
 from .routing.obp_forward import ObpForwardMixin
 from .routing.peer_downlink_index import count_connected_peers
 from .routing.store_authority_mixin import StoreAuthorityMixin
+from .routing.sub_map_learning import learn_sub_map
 from .routing.subscription_table import SubscriptionTableMixin
 from .routing.timers import RoutingTimerMixin
 from .routing.voice_subscription import VoiceSubscriptionMixin
 from .server_voice import all_server_voice_ids
+from .subscription.subscription_queries import store_has_table
 from .talker_alias_use_cases import TalkerAliasUseCases
 
 logger = logging.getLogger(__name__)
+
+# A SUB_MAP entry younger than this (seconds) on a non-OPENBRIDGE system means the unit is
+# served by this server, so unit data to it is not fanned out to OpenBridges.
+UNIT_DATA_LOCAL_SUB_MAX_AGE = 900.0
+
+
+def _is_origin_peer(system_name: str, peer_id: bytes, d_system: str, d_peer_id: bytes | None) -> bool:
+    """True when a unit-data target is the very hotspot the frame came from."""
+    return d_peer_id is not None and d_system == system_name and d_peer_id == peer_id
 
 
 class RoutingUseCases(
@@ -80,6 +106,10 @@ class RoutingUseCases(
     VoiceSubscriptionMixin,
 ):
     """Use cases for subscription-based voice routing."""
+
+    def _obp_session(self, system_name: str) -> ObpBridgeSession:
+        """Live state of an OPENBRIDGE leg (peer, keepalive, quench)."""
+        return obp_session(self._config, system_name)
 
     def __init__(
         self,
@@ -96,16 +126,22 @@ class RoutingUseCases(
         call_later: Any = None,
         encode_emblc: DmrEmbeddedLcEncoder | None = None,
         ta_emblc_encoder: TalkerAliasEmblcEncoder | None = None,
+        voice_plugin_bridge: Any = None,
+        data_plugin_bridge: Any = None,
     ) -> None:
         self._acl_router = acl_router
         self._config = config
         self._subscription_store = subscription_store
         self._subscription_router = None
+        self._forward_plan_cache = {}  # see VoiceSubscriptionMixin._group_voice_forward_plan
+        self._lc_set_cache = {}  # see LcTaMixin._encode_lc_set
         self._routing_table_legacy_view = None
         self._send_to_system = send_to_system  # (system_name, packet, **kwargs) -> None
         self._get_protocols = get_protocols  # () -> dict[str, protocol]
         self._reporting = reporting
         self._on_relay_deactivated = on_relay_deactivated  # (system_name: str) -> None; legacy disconnectedVoice
+        # TG -> when an over on it last started or ended (any ingress, not the server's own voice).
+        self._tg_last_heard: dict[int, float] = {}
         self._send_bcsq = send_bcsq  # (system_name, tgid, stream_id) -> None; legacy OBP send_bcsq from router
         self._send_dmra_to_system = send_dmra_to_system
         self._get_dmra_blocks = get_dmra_blocks
@@ -114,6 +150,8 @@ class RoutingUseCases(
             raise TypeError("encode_emblc and ta_emblc_encoder are required (wire from main.py)")
         self._encode_emblc = encode_emblc
         self._talker_alias = TalkerAliasUseCases(config, ta_emblc_encoder=ta_emblc_encoder)
+        self._voice_plugin_bridge = voice_plugin_bridge
+        self._data_plugin_bridge = data_plugin_bridge
         # (source_system, stream_id) -> {rf_src, peer, targets, timer}
         self._both_ta_wait: dict[tuple[str, bytes], dict[str, Any]] = {}
         # Passthrough DMRA/embed relay already applied for this source stream.
@@ -153,6 +191,46 @@ class RoutingUseCases(
         return self._acl_router.acl_check(id_val, acl)
 
 
+    _TG_LAST_HEARD_MAX = 2048
+    _TG_LAST_HEARD_KEEP_S = 600.0
+
+    def _note_tg_heard(self, dst_id: bytes, pkt_time: float) -> None:
+        """Start or end of an over on a talkgroup: voice header / terminator, or the stream's
+        last frame when it times out without a terminator. Never moves the record back."""
+        heard = self._tg_last_heard
+        tg = int_id(dst_id)
+        if pkt_time > heard.get(tg, 0.0):
+            heard[tg] = pkt_time
+        if len(heard) > self._TG_LAST_HEARD_MAX:
+            for tg in [t for t, at in heard.items() if pkt_time - at > self._TG_LAST_HEARD_KEEP_S]:
+                del heard[tg]
+
+    def tg_quiet_for(self, tg: int, now: float | None = None) -> float:
+        """Seconds talkgroup ``tg`` has been quiet: 0.0 while a stream on it is live anywhere
+        (any MASTER/PEER slot or OpenBridge stream), else the time since an over on it last
+        started or ended; ``math.inf`` if never heard. The server's own voice (announcements,
+        plugin frames) is not counted, so a plugin waiting on it is not held by itself.
+        """
+        now = time.time() if now is None else now
+        protocols = self._get_protocols() if self._get_protocols else {}
+        systems_cfg = self._config.get("SYSTEMS", {})
+        if tg_has_active_conversation(protocols, systems_cfg, bytes_3(int(tg)), b"", b"\x00\x00\x00", now):
+            return 0.0
+        # On a shared MASTER the slot's flat RX fields only hold the last frame received: each
+        # hotspot stream keeps its own [peer, rf_src, tgid, start, last] in RX_STREAMS (#129).
+        for sys_name, proto in protocols.items():
+            if systems_cfg.get(sys_name, {}).get("MODE") not in ("MASTER", "PEER"):
+                continue
+            status = getattr(proto, "STATUS", None)
+            for slot in (1, 2):
+                slot_st = status.get(slot) if isinstance(status, dict) else None
+                streams = slot_st.get("RX_STREAMS") if isinstance(slot_st, dict) else None
+                for entry in (streams or {}).values():
+                    if int_id(entry[2]) == int(tg) and now - float(entry[4]) < STREAM_TO:
+                        return 0.0
+        last = self._tg_last_heard.get(int(tg))
+        return math.inf if last is None else max(0.0, now - last)
+
     def dmrd_received(
         self,
         system_name: str,
@@ -175,6 +253,7 @@ class RoutingUseCases(
         obp_rssi: bytes = b"\x00",
         obp_source_rptr: bytes = b"\x00\x00\x00\x00",
         synthetic_announcement: bool = False,
+        plugin_origin: str | None = None,
     ) -> bool:
         """Called by UDP when DMRD is received. Forward to other systems in same bridge (to_target).
 
@@ -191,6 +270,14 @@ class RoutingUseCases(
         fuzzy fallback must be skipped: matching the announcement's spoofed rf_src
         against a real connected peer's ID would misattribute the call (TX state,
         dynamic TG) to that peer.
+
+        ``plugin_origin`` names the plugin that sent the frame through
+        ``ServerContext.send_dmrd``. Unit data is delivered by the unit data path
+        alone (SUB_MAP / hotspot ID, never the private call path, so SUB_MAP never
+        learns its source), stays on this server (no OpenBridge or DATA-GATEWAY
+        fan-out), and reaches plugins as synthetic events. Group voice comes with
+        ``synthetic_announcement=True`` and is routed exactly like an announcement.
+        Anything else (private voice) is dropped.
         """
         if not self._send_to_system:
             return
@@ -204,6 +291,9 @@ class RoutingUseCases(
         # Legacy bridge_master 3080–3085: private call to ID 4000 only disconnects dynamics; do not route as PC.
         if call_type == "unit" and int_id(dst_id) == 4000:
             return
+        if plugin_origin is not None and not is_plugin_sendable(call_type, frame_type, dtype_vseq):
+            logger.warning("(PLUGIN) %s: only unit data and group voice may be sent, dropped", plugin_origin)
+            return False
         if call_type == "unit":
             _int_dst = int_id(dst_id)
             if dtype_vseq in (6, 7, 8) or (dtype_vseq == 3 and not self._is_stream_known(system_name, stream_id, slot)):
@@ -213,11 +303,14 @@ class RoutingUseCases(
                     obp_use_parsed=obp_use_parsed, obp_hops=obp_hops,
                     obp_source_server=obp_source_server,
                     obp_ber=obp_ber, obp_rssi=obp_rssi, obp_source_rptr=obp_source_rptr,
+                    plugin_origin=plugin_origin,
                 )
             # Legacy routerHBP ~3252-3254: 7-digit routing runs after unit data, not
             # instead of it. D-APRS ARS/LRRP downlink (dst 7300392) uses pvt_call_received
             # when SUB_MAP sendDataToHBP is blocked by the strict idle check.
-            if len(str(_int_dst)) == 7:
+            # Not for plugin frames: that path learns SUB_MAP from the source and keeps
+            # per-slot call state on the ingress MASTER, which a plugin is not a radio of.
+            if len(str(_int_dst)) == 7 and plugin_origin is None:
                 self._pvt_call_received(
                     system_name, peer_id, rf_src, dst_id, seq, slot,
                     frame_type, dtype_vseq, stream_id, data,
@@ -226,16 +319,24 @@ class RoutingUseCases(
         systems_cfg = self._config.get("SYSTEMS", {})
         source_is_obp = systems_cfg.get(system_name, {}).get("MODE") == "OPENBRIDGE"
         pkt_time = ingress_pkt_time if ingress_pkt_time is not None else time.time()
+        if (
+            call_type == "group"
+            and frame_type == HBPF_DATA_SYNC
+            and dtype_vseq in (HBPF_SLT_VHEAD, HBPF_SLT_VTERM)
+            and plugin_origin is None
+            and not synthetic_announcement
+        ):
+            self._note_tg_heard(dst_id, pkt_time)
         if not source_is_obp and call_type in ("group", "vcsbk"):
             if not self._hbp_group_voice_ingress_controls(
                 system_name, peer_id, rf_src, dst_id, seq, slot, stream_id, data, pkt_time,
+                loop_guard_check=plugin_origin is None and not synthetic_announcement,
+                terminator=frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM,
             ):
                 return
             # Arm ON in-band rules on VHEAD (echo 9990 and UA bridges); VTERM handled in udp_hbp too.
             if frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VHEAD:
                 self.apply_in_band_signalling(system_name, slot, dst_id, pkt_time)
-        from .subscription.subscription_queries import store_has_table
-
         relay_table_key = str(int_id(dst_id))
         dst_int = int_id(dst_id)
         # Legacy bridge_master to_target: OpenBridge clears TS bit — "all OpenBridge streams are
@@ -281,6 +382,7 @@ class RoutingUseCases(
                 stream_id,
                 data,
                 obp_hops if obp_use_parsed else b"",
+                synthetic_announcement=synthetic_announcement,
             ):
                 return
             # SINGLE_MODE in-band VTERM on another TG (e.g. 9990 echo) deactivates static OFF
@@ -299,7 +401,10 @@ class RoutingUseCases(
                     if src_proto and getattr(src_proto, "STATUS", None):
                         slot_st = src_proto.STATUS.get(slot, {})
                         if isinstance(slot_st, dict):
-                            _is_new_rx_stream = stream_id != slot_st.get("RX_STREAM_ID")
+                            _is_new_rx_stream = (
+                                stream_id != slot_st.get("RX_STREAM_ID")
+                                and stream_id not in slot_st.get("RX_STREAMS", ())
+                            )
                             _suppress_uplink_rx = bool(slot_st.get("_suppress_uplink"))
                 if _is_new_rx_stream and not _suppress_uplink_rx:
                     _rx_report_peer = peer_id
@@ -321,6 +426,18 @@ class RoutingUseCases(
                             int(synthetic_announcement),
                         )
                     )
+                    if self._voice_plugin_bridge is not None:
+                        self._voice_plugin_bridge.emit_group_voice_start(
+                            system_name=system_name,
+                            peer_id=peer_id,
+                            rf_src=rf_src,
+                            dst_id=dst_id,
+                            slot=slot,
+                            stream_id=stream_id,
+                            pkt_time=pkt_time,
+                            source_is_obp=False,
+                            synthetic_announcement=synthetic_announcement,
+                        )
         elif frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM:
             if not _obp_grp:
                 duration = 0.0
@@ -332,7 +449,8 @@ class RoutingUseCases(
                     ent = st.get(stream_id)
                     start = ent.get("START") if isinstance(ent, dict) else None
                     if start is None and slot in st:
-                        start = st.get(slot, {}).get("RX_START")
+                        tracked = st.get(slot, {}).get("RX_STREAMS", {}).get(stream_id)
+                        start = tracked[3] if tracked else st.get(slot, {}).get("RX_START")
                     if start is not None:
                         duration = pkt_time - start
                     slot_st_vterm = st.get(slot, {})
@@ -361,6 +479,19 @@ class RoutingUseCases(
                             int(synthetic_announcement),
                         )
                     )
+                    if self._voice_plugin_bridge is not None:
+                        self._voice_plugin_bridge.emit_group_voice_end(
+                            system_name=system_name,
+                            peer_id=peer_id,
+                            rf_src=rf_src,
+                            dst_id=dst_id,
+                            slot=slot,
+                            stream_id=stream_id,
+                            pkt_time=pkt_time,
+                            duration_s=duration,
+                            source_is_obp=False,
+                            synthetic_announcement=synthetic_announcement,
+                        )
         has_source = bool(
             self._voice_relay_tables_with_active_source(system_name, bridge_match_slot, dst_int)
         )
@@ -443,40 +574,16 @@ class RoutingUseCases(
             source_lc = b"\x00\x00\x20" + dst_id_b + rf_src
         # Legacy bridge_master routerOBP: _sysIgnore accumulates across each to_target(BRIDGES[_bridge])
         # pass; dedupe (SYSTEM, TS) for OpenBridge targets so the same leg is not sent twice per packet.
-        # SubscriptionRouter.resolve() already applies OBP dedup on OpenBridge targets.
-        forward_tables, forward_legs = self._voice_forward_plan(
+        # SubscriptionRouter.resolve() already applies OBP dedup on OpenBridge targets, and the plan
+        # collapses same-(target, translated TGID) MASTER/PEER legs (see _group_voice_forward_plan).
+        _plan = self._group_voice_forward_plan(
             system_name=system_name,
-            peer_id=peer_id,
-            rf_src=rf_src,
-            dst_id=dst_id,
             slot=slot,
             call_type=call_type,
-            stream_id=stream_id,
             source_is_obp=source_is_obp,
             bridge_match_slot=bridge_match_slot,
             dst_int=dst_int,
         )
-        # A BRIDGES scan (legacy parity, kept in SubscriptionRouter.resolve()) can list the
-        # same MASTER/PEER target on both TS1 and TS2 (e.g. an inject-only proxy whose
-        # connected hotspots collectively use both slots for one TG). Legacy's dumb
-        # send_peers() broadcast made that harmless — each hotspot's own radio dropped the
-        # slot it didn't want. This server's send_peers() instead resolves each peer's
-        # actual listen slot from its OPTIONS (iter_downlink_voice_slots) regardless of the
-        # wire slot, so a second identical leg to the same target delivers the same audio
-        # twice — doubling the downlink rate and making unpaced bridges (e.g. ysf2dmr) sound
-        # slow. OpenBridge targets keep distinct per-slot legs (real separate links); collapse
-        # only same-(target, translated TGID) duplicates for MASTER/PEER targets.
-        if forward_legs:
-            _seen_hbp_leg: set[tuple[str, int]] = set()
-            _deduped_legs = []
-            for _leg in forward_legs:
-                if systems_cfg.get(_leg.target_system, {}).get("MODE") != "OPENBRIDGE":
-                    _hbp_key = (_leg.target_system, int(_leg.target_tgid))
-                    if _hbp_key in _seen_hbp_leg:
-                        continue
-                    _seen_hbp_leg.add(_hbp_key)
-                _deduped_legs.append(_leg)
-            forward_legs = tuple(_deduped_legs)
         _tx_report_peer = int_id(peer_id)
         if not source_is_obp and not synthetic_announcement:
             _tx_report_peer = int_id(
@@ -492,18 +599,7 @@ class RoutingUseCases(
             _src_slot_st = src_proto.STATUS.get(slot, {})
             if isinstance(_src_slot_st, dict) and _src_slot_st.get("_suppress_uplink"):
                 _suppress_uplink = True
-        _leg_iter: list[tuple[str, dict[str, Any]]] = [
-            (
-                forward_tables[0] if forward_tables else str(dst_int),
-                {
-                    "SYSTEM": leg.target_system,
-                    "TS": int(leg.slot),
-                    "TGID": bytes_3(int(leg.target_tgid)),
-                    "ACTIVE": True,
-                },
-            )
-            for leg in forward_legs
-        ]
+        _leg_iter = _plan.entries
 
         for _relay_table_key, entry in _leg_iter:
                 if _suppress_uplink:
@@ -524,12 +620,11 @@ class RoutingUseCases(
                     if isinstance(target_tgid, int):
                         target_tgid = bytes_3(target_tgid)
                     # If target has quenched us, don't send (~1856-1859).
-                    if obp_target_bcsq_quenches_stream(systems_cfg, entry["SYSTEM"], dst_id_b, stream_id):
+                    _target_session = self._obp_session(entry["SYSTEM"])
+                    if _target_session.quenches(dst_id_b, stream_id):
                         continue
                     # If target has missed keepalives (ENHANCED_OBP), don't send (~1861-1863)
-                    if _target_system.get("ENHANCED_OBP") and (
-                        "_bcka" not in _target_system or _target_system["_bcka"] < pkt_time - 60
-                    ):
+                    if _target_system.get("ENHANCED_OBP") and not _target_session.keepalive_ok(pkt_time):
                         continue
                     # Talkgroup ACL (global + per-system TG1) (~1865-1873)
                     _global_cfg = self._config.get("GLOBAL", {})
@@ -572,9 +667,11 @@ class RoutingUseCases(
                                 logger.exception("(to_target) caught exception")
                                 _target_status[stream_id]["LAST"] = pkt_time
                                 return
-                            _target_status[stream_id]["H_LC"] = bptc.encode_header_lc(dst_lc)
-                            _target_status[stream_id]["T_LC"] = bptc.encode_terminator_lc(dst_lc)
-                            _target_status[stream_id]["EMB_LC"] = self._encode_emblc(dst_lc)
+                            (
+                                _target_status[stream_id]["H_LC"],
+                                _target_status[stream_id]["T_LC"],
+                                _target_status[stream_id]["EMB_LC"],
+                            ) = self._encode_lc_set(dst_lc)
                             self._init_talker_alias_embed(
                                 _target_status[stream_id],
                                 system_name,
@@ -628,6 +725,8 @@ class RoutingUseCases(
                                     entry["SYSTEM"], int_id(stream_id), _tx_report_peer, int_id(rf_src), entry.get("TS", 1), int_id(target_tgid), call_duration, int(synthetic_announcement)
                                 )
                             )
+                            # Leg is over: let the stream trimmer age it out (and not re-emit END,TX).
+                            _target_status[stream_id]["_end_tx_sent"] = True
                         elif dtype_vseq in (1, 2, 3, 4):
                             self._rewrite_embed_lc(
                                 dmrbits, _target_status[stream_id], dtype_vseq, "EMB_LC",
@@ -785,9 +884,12 @@ class RoutingUseCases(
                             _bridge_tx_leg["TX_STREAM_ID"] = stream_id
                             _bridge_tx_leg["TX_RFS"] = rf_src
                             _bridge_tx_leg["TX_PEER"] = peer_id
-                            _bridge_tx_leg["TX_H_LC"] = bptc.encode_header_lc(dst_lc)
-                            _bridge_tx_leg["TX_T_LC"] = bptc.encode_terminator_lc(dst_lc)
-                            _bridge_tx_leg["TX_EMB_LC"] = self._encode_emblc(dst_lc)
+                            _bridge_tx_leg["TX_FROM_MESH"] = source_is_obp
+                            (
+                                _bridge_tx_leg["TX_H_LC"],
+                                _bridge_tx_leg["TX_T_LC"],
+                                _bridge_tx_leg["TX_EMB_LC"],
+                            ) = self._encode_lc_set(dst_lc)
                             if obp_flat_bridge_tx_idle(_ts_st, pkt_time) or _ts_st.get("TX_STREAM_ID") == stream_id:
                                 obp_publish_flat_bridge_tx(_ts_st, _bridge_tx_leg)
                             self._dispatch_talker_alias_on_bridge_open(
@@ -806,9 +908,8 @@ class RoutingUseCases(
                             _ts_st["TX_STREAM_ID"] = stream_id
                             _ts_st["TX_RFS"] = rf_src
                             _ts_st["TX_PEER"] = peer_id
-                            _ts_st["TX_H_LC"] = bptc.encode_header_lc(dst_lc)
-                            _ts_st["TX_T_LC"] = bptc.encode_terminator_lc(dst_lc)
-                            _ts_st["TX_EMB_LC"] = self._encode_emblc(dst_lc)
+                            _ts_st["TX_FROM_MESH"] = source_is_obp
+                            _ts_st["TX_H_LC"], _ts_st["TX_T_LC"], _ts_st["TX_EMB_LC"] = self._encode_lc_set(dst_lc)
                             self._dispatch_talker_alias_on_bridge_open(
                                 _ts_st,
                                 system_name,
@@ -928,7 +1029,7 @@ class RoutingUseCases(
                 packet_rate = (ost.get("packets", 0) / call_duration) if call_duration else 0.0
                 loss_pct = ((ost.get("loss", 0) / ost["packets"]) * 100) if ost.get("packets") else 0.0
                 logger.info(
-                    "(%s) *CALL END*   STREAM ID: %s SUB: %s PEER: %s TGID %s, TS %s, Duration: %.2f, Packet rate: %.2f/s, Loss: %.2f%%",
+                    "(%s) *CALL END*   STREAM ID: %s SUB: %s PEER: %s TGID %s, TS %s, Duration: %.2f, Packet rate: %.2f/s, Loss: %.2f%%, Max gap: %.2fs",
                     system_name,
                     int_id(stream_id),
                     int_id(rf_src),
@@ -938,6 +1039,7 @@ class RoutingUseCases(
                     call_duration,
                     packet_rate,
                     loss_pct,
+                    ost.get("MAX_GAP", 0.0),
                 )
                 self._send_routing_event(
                     "GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f},{}".format(
@@ -951,6 +1053,26 @@ class RoutingUseCases(
                         int(synthetic_announcement),
                     )
                 )
+                if ost.get("_plugin_voice") and self._voice_plugin_bridge is not None:
+                    self._voice_plugin_bridge.emit_group_voice_end(
+                        system_name=system_name,
+                        peer_id=peer_id,
+                        rf_src=rf_src,
+                        dst_id=dst_id,
+                        slot=slot,
+                        stream_id=stream_id,
+                        pkt_time=_end_t,
+                        duration_s=call_duration,
+                        source_is_obp=True,
+                        obp_hops=obp_hops if obp_use_parsed else b"",
+                        obp_source_server=obp_source_server,
+                        obp_ber=obp_ber,
+                        obp_rssi=obp_rssi,
+                        obp_source_rptr=obp_source_rptr,
+                        synthetic_announcement=synthetic_announcement,
+                        forwarded=tuple(forwarded),
+                    )
+                    ost.pop("_plugin_voice", None)
                 ost["_fin"] = True
                 self._obp_emit_end_tx_for_forward_legs(stream_id, system_name, _end_t)
                 ost["lastSeq"] = False
@@ -960,6 +1082,35 @@ class RoutingUseCases(
                     "(ROUTER) Bridged TG %s from %s -> %s",
                     relay_table_key, system_name, ", ".join(forwarded),
                 )
+        if (
+            call_type in ("group", "vcsbk")
+            and self._voice_plugin_bridge is not None
+            and frame_type in (HBPF_VOICE, HBPF_VOICE_SYNC)
+            and (
+                not source_is_obp
+                or obp_status_plugin_voice(protocols, system_name, stream_id)
+            )
+        ):
+            self._voice_plugin_bridge.notify_group_after_forward(
+                system_name=system_name,
+                peer_id=peer_id,
+                rf_src=rf_src,
+                dst_id=dst_id,
+                slot=slot,
+                frame_type=frame_type,
+                dtype_vseq=dtype_vseq,
+                stream_id=stream_id,
+                data=data,
+                pkt_time=pkt_time,
+                source_is_obp=source_is_obp,
+                obp_hops=obp_hops if obp_use_parsed else b"",
+                obp_source_server=obp_source_server,
+                obp_ber=obp_ber,
+                obp_rssi=obp_rssi,
+                obp_source_rptr=obp_source_rptr,
+                synthetic_announcement=synthetic_announcement,
+                forwarded=forwarded,
+            )
         return True
 
     # ── Unit DATA path (SMS, GPS, CSBK) — legacy routerOBP/routerHBP unit data branch ──
@@ -1009,12 +1160,14 @@ class RoutingUseCases(
         obp_ber: bytes = b"\x00",
         obp_rssi: bytes = b"\x00",
         obp_source_rptr: bytes = b"\x00\x00\x00\x00",
+        plugin_origin: str | None = None,
     ) -> None:
         """Legacy routerOBP/routerHBP unit data branch: DATA-GATEWAY + OBP fan-out + SUB_MAP/hotspot."""
         pkt_time = time.time()
         dmrpkt = data[20:53] if len(data) >= 53 else b""
         _bits = data[15] if len(data) > 15 else 0
         _int_dst_id = int_id(dst_id)
+        _forwarded: list[str] = []
         systems_cfg = self._config.get("SYSTEMS", {})
         source_is_obp = systems_cfg.get(system_name, {}).get("MODE") == "OPENBRIDGE"
         global_cfg = self._config.get("GLOBAL", {})
@@ -1123,19 +1276,21 @@ class RoutingUseCases(
                 system_name, int_id(stream_id), int_id(rf_src), int_id(peer_id), _int_dst_id, slot,
             )
 
-        _dtype_labels = {3: "UNIT CSBK", 6: "UNIT DATA HEADER", 7: "UNIT VCSBK 1/2 DATA BLOCK", 8: "UNIT VCSBK 3/4 DATA BLOCK"}
-        _label = _dtype_labels.get(dtype_vseq, "UNIT DATA")
-        self._send_routing_event(
-            "{},DATA,RX,{},{},{},{},{},{}".format(
-                _label, system_name, int_id(stream_id), int_id(peer_id), int_id(rf_src), slot, _int_dst_id,
+        if unit_data_reportable(dtype_vseq):
+            _dtype_labels = {6: "UNIT DATA HEADER", 7: "UNIT VCSBK 1/2 DATA BLOCK", 8: "UNIT VCSBK 3/4 DATA BLOCK"}
+            _label = _dtype_labels.get(dtype_vseq, "UNIT DATA")
+            self._send_routing_event(
+                "{},DATA,RX,{},{},{},{},{},{}".format(
+                    _label, system_name, int_id(stream_id), int_id(peer_id), int_id(rf_src), slot, _int_dst_id,
+                )
             )
-        )
 
-        # DATA-GATEWAY forwarding (legacy ~2281-2284 / ~3083-3087)
-        if global_cfg.get("DATA_GATEWAY"):
+        # DATA-GATEWAY forwarding (legacy ~2281-2284 / ~3083-3087). Plugin frames stay local.
+        if global_cfg.get("DATA_GATEWAY") and plugin_origin is None:
             dg_cfg = systems_cfg.get("DATA-GATEWAY", {})
             if dg_cfg.get("MODE") == "OPENBRIDGE" and dg_cfg.get("ENABLED"):
                 logger.debug("(%s) DATA packet sent to DATA-GATEWAY", system_name)
+                _forwarded.append("DATA-GATEWAY")
                 self._send_data_to_obp(
                     system_name, "DATA-GATEWAY", data, dmrpkt, pkt_time, stream_id,
                     dst_id, peer_id, rf_src, _bits, slot,
@@ -1144,13 +1299,27 @@ class RoutingUseCases(
                 )
 
         # Fan-out to all OBP systems with VER > 1 and dst_id >= 1000000 (legacy ~2286-2295 / ~3088-3097)
+        # ...unless the destination is a subscriber recently seen on a LOCAL (non-OPENBRIDGE)
+        # system: SUB_MAP below already delivers it here. Flooding every OpenBridge with e.g.
+        # each ARS/LRRP answer of a D-APRS gateway to a local MOTOTRBO multiplies traffic by
+        # the number of bridges, and remote masters that mis-file those frames create a
+        # dynamic talkgroup named after the radio id.
         protocols = self._get_protocols() if self._get_protocols else {}
+        _local_sub = self._config.get("_SUB_MAP", {}).get(dst_id)
+        _dst_is_fresh_local_sub = bool(
+            _local_sub
+            and systems_cfg.get(_local_sub[0], {}).get("MODE") != "OPENBRIDGE"
+            and pkt_time - _local_sub[2] < UNIT_DATA_LOCAL_SUB_MAX_AGE
+        )
         for sys_name, sys_cfg in systems_cfg.items():
+            if _dst_is_fresh_local_sub or plugin_origin is not None:
+                break
             if sys_name == system_name:
                 continue
             if sys_name == "DATA-GATEWAY":
                 continue
             if sys_cfg.get("MODE") == "OPENBRIDGE" and sys_cfg.get("VER", 1) > 1 and _int_dst_id >= 1000000:
+                _forwarded.append(sys_name)
                 self._send_data_to_obp(
                     system_name, sys_name, data, dmrpkt, pkt_time, stream_id,
                     dst_id, peer_id, rf_src, _bits, slot,
@@ -1165,13 +1334,21 @@ class RoutingUseCases(
             _d_system, _d_slot, _d_time = _sub_map_entry[:3]
             _d_peer_id = _sub_map_entry[3] if len(_sub_map_entry) > 3 else None
             _d_proto = protocols.get(_d_system)
-            if _d_proto:
+            if _d_proto and _is_origin_peer(system_name, peer_id, _d_system, _d_peer_id):
+                # The destination was last heard on the very hotspot this came from: the
+                # radios hear each other on RF, sending it back would transmit over them.
+                logger.debug(
+                    "(%s) SUB_MAP matched the source peer %s, not sending unit data back",
+                    system_name, int_id(peer_id),
+                )
+            elif _d_proto:
                 _dst_slot = getattr(_d_proto, "STATUS", {}).get(_d_slot, {})
                 logger.info("(%s) SUB_MAP matched, System: %s Slot: %s, Time: %s", system_name, _d_system, _d_slot, _d_time)
                 _d_sys_cfg = systems_cfg.get(_d_system, {})
                 _hangtime = _d_sys_cfg.get("GROUP_HANGTIME", 5)
                 if unit_data_hbp_target_idle(_dst_slot, pkt_time, _hangtime):
                     _tmp_bits = _bits ^ (1 << 7) if slot != _d_slot else _bits
+                    _forwarded.append(_d_system)
                     self._send_data_to_hbp(system_name, _d_system, _d_slot, dst_id, _tmp_bits, data, dmrpkt, rf_src, stream_id, peer_id, d_peer_id=_d_peer_id)
                 elif not is_private_subscriber_dst(dst_id):
                     self._log_unit_data_hbp_busy(
@@ -1193,12 +1370,20 @@ class RoutingUseCases(
                     _to_str = str(_int_to_peer)
                     if len(_dst_str) == 6:
                         if _to_str[:6] == _dst_str:
+                            if _is_origin_peer(system_name, peer_id, _d_system, _to_peer):
+                                logger.debug(
+                                    "(%s) User Peer Hotspot ID (6-digit) is the source peer %s, not sending unit data back",
+                                    system_name, _int_to_peer,
+                                )
+                                _matched = True
+                                break
                             _d_slot = 2
                             _dst_slot = getattr(_d_proto, "STATUS", {}).get(_d_slot, {})
                             logger.info("(%s) User Peer Hotspot ID (6-digit) matched, System: %s Slot: %s", system_name, _d_system, _d_slot)
                             _hangtime = _d_sys_cfg.get("GROUP_HANGTIME", 5)
                             if unit_data_hbp_target_idle(_dst_slot, pkt_time, _hangtime):
                                 _tmp_bits = _bits ^ (1 << 7) if slot != 2 else _bits
+                                _forwarded.append(_d_system)
                                 self._send_data_to_hbp(system_name, _d_system, _d_slot, dst_id, _tmp_bits, data, dmrpkt, rf_src, stream_id, peer_id, d_peer_id=_to_peer)
                             elif not is_private_subscriber_dst(dst_id):
                                 self._log_unit_data_hbp_busy(
@@ -1208,12 +1393,20 @@ class RoutingUseCases(
                             break
                     elif len(_dst_str) >= 7:
                         if _to_str[:7] == _dst_str[:7]:
+                            if _is_origin_peer(system_name, peer_id, _d_system, _to_peer):
+                                logger.debug(
+                                    "(%s) User Peer Hotspot ID (7-digit) is the source peer %s, not sending unit data back",
+                                    system_name, _int_to_peer,
+                                )
+                                _matched = True
+                                break
                             _d_slot = 2
                             _dst_slot = getattr(_d_proto, "STATUS", {}).get(_d_slot, {})
                             logger.info("(%s) User Peer Hotspot ID (7-digit) matched, System: %s Slot: %s", system_name, _d_system, _d_slot)
                             _hangtime = _d_sys_cfg.get("GROUP_HANGTIME", 5)
                             if unit_data_hbp_target_idle(_dst_slot, pkt_time, _hangtime):
                                 _tmp_bits = _bits ^ (1 << 7) if slot != 2 else _bits
+                                _forwarded.append(_d_system)
                                 self._send_data_to_hbp(system_name, _d_system, _d_slot, dst_id, _tmp_bits, data, dmrpkt, rf_src, stream_id, peer_id, d_peer_id=_to_peer)
                             elif not is_private_subscriber_dst(dst_id):
                                 self._log_unit_data_hbp_busy(
@@ -1223,6 +1416,30 @@ class RoutingUseCases(
                             break
                 if _matched:
                     break
+
+        if self._data_plugin_bridge is not None:
+            self._data_plugin_bridge.notify_after_forward(
+                route="unit",
+                system_name=system_name,
+                peer_id=peer_id,
+                rf_src=rf_src,
+                dst_id=dst_id,
+                seq=seq,
+                slot=slot,
+                frame_type=frame_type,
+                dtype_vseq=dtype_vseq,
+                stream_id=stream_id,
+                data=data,
+                pkt_time=pkt_time,
+                source_is_obp=source_is_obp,
+                obp_hops=_hops,
+                obp_source_server=_source_server if source_is_obp else None,
+                obp_ber=_ber,
+                obp_rssi=_rssi,
+                obp_source_rptr=_source_rptr,
+                forwarded=_forwarded,
+                synthetic=plugin_origin is not None,
+            )
 
     def _pvt_call_received(
         self,
@@ -1241,9 +1458,8 @@ class RoutingUseCases(
         pkt_time = time.time()
         dmrpkt = data[20:53] if len(data) >= 53 else b""
         _bits = data[15] if len(data) > 15 else 0
+        learn_sub_map(self._config, system_name, rf_src, slot, pkt_time, peer_id)
         sub_map = self._config.get("_SUB_MAP", {})
-        if sub_map is not None:
-            sub_map[rf_src] = (system_name, slot, pkt_time, peer_id)
         systems_cfg = self._config.get("SYSTEMS", {})
         protocols = self._get_protocols() if self._get_protocols else {}
         source_proto = protocols.get(system_name)
@@ -1251,6 +1467,7 @@ class RoutingUseCases(
         if source_proto:
             source_status.setdefault(slot, {})
         slot_st = source_status[slot] if source_proto and slot in source_status else {}
+        _notify_pvt_start = False
         _unit_data = is_unit_data_ingress(
             "unit", dtype_vseq, stream_id, slot_st.get("RX_STREAM_ID"),
         )
@@ -1261,6 +1478,7 @@ class RoutingUseCases(
                     system_name, int_id(stream_id), int_id(rf_src), int_id(peer_id), int_id(dst_id), slot,
                 )
                 return
+            _notify_pvt_start = True
             slot_st["RX_START"] = pkt_time
             self._pvt_same_system_dst_peer_id = None
             if dst_id in sub_map:
@@ -1276,7 +1494,7 @@ class RoutingUseCases(
                 else:
                     self._pvt_targets = []
                     self._pvt_target_peer_ids = {}
-                    logger.error("PRIVATE call to a subscriber on the same system, send nothing")
+                    logger.debug("PRIVATE call to a subscriber on the same system, send nothing")
                     # Delivery is already handled by the MASTER's own local REPEAT
                     # (_pvt_repeat_targets in udp_hbp.py) -- this branch only exists so the
                     # monitor also learns who is *receiving*, which nothing else reports.
@@ -1316,7 +1534,7 @@ class RoutingUseCases(
             if _target_system.get("MODE") != "OPENBRIDGE":
                 _target_peer_id = getattr(self, "_pvt_target_peer_ids", {}).get(_target)
             if _target_system.get("MODE") == "OPENBRIDGE":
-                if _target_system.get("ENHANCED_OBP") and "_bcka" in _target_system and _target_system["_bcka"] < pkt_time - 60:
+                if _target_system.get("ENHANCED_OBP") and self._obp_session(_target).keepalive_stale(pkt_time):
                     continue
                 if stream_id not in _target_status:
                     _target_status[stream_id] = {
@@ -1372,6 +1590,7 @@ class RoutingUseCases(
                     ts_st["TX_STREAM_ID"] = stream_id
                     ts_st["TX_RFS"] = rf_src
                     ts_st["TX_PEER"] = peer_id
+                    ts_st["TX_FROM_MESH"] = self._config.get("SYSTEMS", {}).get(system_name, {}).get("MODE") == "OPENBRIDGE"
                     logger.info("(%s) PRIVATE call bridged to HBP System: %s TS: %s, DST: %s", system_name, _target, slot, int_id(dst_id))
                     if not _unit_data:
                         if _target_peer_id is not None and _target_peer_id in getattr(target_proto, "_peers", {}):
@@ -1397,6 +1616,28 @@ class RoutingUseCases(
                     self._send_to_system(_target, send_data)
             except Exception as e:
                 logger.warning("(ROUTER) send_to_system %s failed: %s", _target, e)
+        if self._data_plugin_bridge is not None and _unit_data:
+            self._data_plugin_bridge.notify_after_forward(
+                route="private",
+                system_name=system_name,
+                peer_id=peer_id,
+                rf_src=rf_src,
+                dst_id=dst_id,
+                seq=seq,
+                slot=slot,
+                frame_type=frame_type,
+                dtype_vseq=dtype_vseq,
+                stream_id=stream_id,
+                data=data,
+                pkt_time=pkt_time,
+                source_is_obp=False,
+                obp_hops=b"",
+                obp_source_server=None,
+                obp_ber=data[53:54] if len(data) > 53 else b"\x00",
+                obp_rssi=data[54:55] if len(data) > 54 else b"\x00",
+                obp_source_rptr=b"\x00\x00\x00\x00",
+                forwarded=list(getattr(self, "_pvt_targets", [])),
+            )
         if frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM and slot_st.get("RX_TYPE") != HBPF_SLT_VTERM:
             self._pvt_targets = []
             call_duration = pkt_time - slot_st.get("RX_START", pkt_time)
@@ -1430,6 +1671,57 @@ class RoutingUseCases(
                     )
                 )
             self._pvt_same_system_dst_peer_id = None
+        if self._voice_plugin_bridge is not None and not _unit_data:
+            _pvt_fwd = list(getattr(self, "_pvt_targets", []))
+            if _notify_pvt_start:
+                self._voice_plugin_bridge.notify_private_after_forward(
+                    system_name=system_name,
+                    peer_id=peer_id,
+                    rf_src=rf_src,
+                    dst_id=dst_id,
+                    slot=slot,
+                    frame_type=frame_type,
+                    dtype_vseq=dtype_vseq,
+                    stream_id=stream_id,
+                    data=data,
+                    pkt_time=pkt_time,
+                    synthetic_announcement=False,
+                    forwarded_targets=_pvt_fwd,
+                    phase="START",
+                )
+            elif frame_type in (HBPF_VOICE, HBPF_VOICE_SYNC):
+                self._voice_plugin_bridge.notify_private_after_forward(
+                    system_name=system_name,
+                    peer_id=peer_id,
+                    rf_src=rf_src,
+                    dst_id=dst_id,
+                    slot=slot,
+                    frame_type=frame_type,
+                    dtype_vseq=dtype_vseq,
+                    stream_id=stream_id,
+                    data=data,
+                    pkt_time=pkt_time,
+                    synthetic_announcement=False,
+                    forwarded_targets=_pvt_fwd,
+                    phase="FRAME",
+                )
+            elif frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM and slot_st.get("RX_TYPE") != HBPF_SLT_VTERM:
+                self._voice_plugin_bridge.notify_private_after_forward(
+                    system_name=system_name,
+                    peer_id=peer_id,
+                    rf_src=rf_src,
+                    dst_id=dst_id,
+                    slot=slot,
+                    frame_type=frame_type,
+                    dtype_vseq=dtype_vseq,
+                    stream_id=stream_id,
+                    data=data,
+                    pkt_time=pkt_time,
+                    synthetic_announcement=False,
+                    forwarded_targets=_pvt_fwd,
+                    phase="END",
+                    duration_s=call_duration,
+                )
         if slot_st:
             if _unit_data:
                 # Keep stream continuity for multi-frame unit data without marking the

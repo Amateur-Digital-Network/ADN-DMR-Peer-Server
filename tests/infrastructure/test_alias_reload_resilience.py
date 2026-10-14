@@ -158,42 +158,39 @@ def test_merge_reload_keeps_previous_sub_ids_on_empty_reload() -> None:
     assert config["_PEER_IDS"] == {730039101: "CE5RPY"}
 
 
-def test_load_id_dict_with_backup_uses_bak_on_checksum_mismatch(tmp_path: Path) -> None:
+def test_load_with_backup_uses_bak_on_checksum_mismatch(tmp_path: Path) -> None:
     loader = DefaultAliasLoader()
     file_name = "subscriber_ids.json"
     _write_subscriber_file(tmp_path, file_name, 1111111, "BAD")
     _write_subscriber_file(tmp_path, f"{file_name}.bak", 7300391, "GOOD")
-    loaded = loader._load_id_dict_with_backup(
-        tmp_path,
-        file_name,
-        "deadbeef",
-        "subscriber_ids",
+    loaded = loader._load_with_backup(
+        tmp_path, file_name, "deadbeef", "subscriber_ids", loader._load_id_json,
     )
     assert loaded.get(7300391) == "GOOD"
 
 
-def test_load_id_dict_with_backup_uses_bak_when_primary_missing(tmp_path: Path) -> None:
+def test_load_with_backup_uses_bak_when_primary_missing(tmp_path: Path) -> None:
     loader = DefaultAliasLoader()
     file_name = "subscriber_ids.json"
     # No primary file at all (e.g. first boot, download never succeeded), only a .bak
     # from a previous successful run.
     _write_subscriber_file(tmp_path, f"{file_name}.bak", 7300391, "GOOD")
-    loaded = loader._load_id_dict_with_backup(
-        tmp_path,
-        file_name,
-        None,
-        "subscriber_ids",
+    loaded = loader._load_with_backup(
+        tmp_path, file_name, None, "subscriber_ids", loader._load_id_json,
     )
     assert loaded.get(7300391) == "GOOD"
 
 
-def test_load_server_tsv_with_backup_uses_bak_when_primary_missing(tmp_path: Path) -> None:
+def test_load_with_backup_uses_bak_for_the_server_tsv_too(tmp_path: Path) -> None:
     loader = DefaultAliasLoader()
     file_name = "server_ids.tsv"
     (tmp_path / f"{file_name}.bak").write_text(
         "OPB Net ID\tCountry\n1234\tChile\n", encoding="utf-8"
     )
-    loaded = loader._load_server_tsv_with_backup(tmp_path, file_name, None)
+    loaded = loader._load_with_backup(
+        tmp_path, file_name, None, "server_ids",
+        lambda f: loader._load_server_tsv(f.parent, f.name),
+    )
     assert loaded.get("1234") == "Chile"
 
 

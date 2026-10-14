@@ -47,6 +47,7 @@ class MeshIngress:
     source_server: bytes
     source_rptr: bytes
     embedded_ver: int | None = None
+    timestamp: bytes = b"\x00" * 8
 
 
 @dataclass(frozen=True, slots=True)

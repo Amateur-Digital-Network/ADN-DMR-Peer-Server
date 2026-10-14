@@ -522,3 +522,31 @@ def test_echo_tx_falls_back_without_downlink_ctx() -> None:
     # legacy leaves the event unchanged when the hotspot cannot be resolved.
     assert len(events) == 1
     assert events[0] == raw
+
+
+def test_expand_inject_proxy_never_deep_copies_the_peers(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Every report copied every peer once per virtual master (MAX_PEERS of them) on the
+    reactor: ~0.2 s with 26 hotspots and MAX_PEERS 200, a gap hotspots hear as loss."""
+    import copy
+
+    peers = {bytes_4(730039100 + i): _peer(options=b"TS2=730;") for i in range(26)}
+    config = _proxy_config(peers, max_peers=200)
+
+    def refuse(*_a, **_k):
+        raise AssertionError("deepcopy on the report path")
+
+    monkeypatch.setattr(copy, "deepcopy", refuse)
+    out = expand_inject_proxy_systems(config, config["SYSTEMS"])
+    assert sum(len(out[f"SYSTEM-{n}"]["PEERS"]) for n in range(200)) == 26
+
+
+def test_expand_inject_proxy_leaves_the_live_system_untouched() -> None:
+    peers = {bytes_4(730039101): _peer(options=b"TS2=730;")}
+    config = _proxy_config(peers, max_peers=3)
+    sys_cfg = config["SYSTEMS"]["SYSTEM"]
+    sys_cfg.update(TS1_STATIC="214", TS2_STATIC="730", PORT=62031)
+    out = expand_inject_proxy_systems(config, config["SYSTEMS"])
+    out["SYSTEM-0"]["PEERS"].clear()
+    assert sys_cfg["PEERS"] is peers and len(peers) == 1
+    assert (sys_cfg["TS1_STATIC"], sys_cfg["TS2_STATIC"], sys_cfg["PORT"]) == ("214", "730", 62031)
+    assert out["SYSTEM-1"]["PORT"] != out["SYSTEM-0"]["PORT"]

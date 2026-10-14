@@ -32,13 +32,16 @@ import logging
 import os
 import shutil
 import ssl
+import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.request import urlopen
 
 from ...application.ports import AliasLoader
+from ...domain.value_objects import SubscriberProfile
 
 logger = logging.getLogger(__name__)
 
@@ -54,8 +57,14 @@ def try_download(
     retry_timeout: float = 10,
     retry_delay_sec: float = 3,
     expected_checksum: str | None = None,
+    current_checksum: str | None = None,
 ) -> str:
     """Legacy try_download: download file from url if missing or older than stale_sec.
+
+    When both the checksum the server publishes (`expected_checksum`) and the one of
+    the file on disk (`current_checksum`) are known, they decide instead of the age:
+    equal means the file is what the server has, however old; different means the
+    server has published a new list, however recent ours is.
 
     Retries up to `max_attempts` times on network failure (timeout, connection refused,
     DNS failure, etc). The first attempt uses `first_timeout`; retries use the shorter
@@ -68,12 +77,16 @@ def try_download(
     full = path / file_name
     now = time.time()
     file_exists = full.is_file()
-    if file_exists:
-        file_old = (full.stat().st_mtime + stale_sec) < now
+    if file_exists and expected_checksum and current_checksum:
+        if current_checksum == expected_checksum:
+            return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
     else:
-        file_old = True
-    if not file_old and file_exists:
-        return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
+        if file_exists:
+            file_old = (full.stat().st_mtime + stale_sec) < now
+        else:
+            file_old = True
+        if not file_old and file_exists:
+            return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
 
     data: bytes | None = None
     last_error: Exception | None = None
@@ -151,8 +164,46 @@ def _atomic_copy(src: Path, dst: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
+def _file_stamp(file_path: Path) -> tuple[int, int, int] | None:
+    """Identifies a file's contents: try_download replaces, so the inode moves too."""
+    try:
+        stat = file_path.stat()
+    except OSError:
+        return None
+    return (stat.st_mtime_ns, stat.st_size, stat.st_ino)
+
+
+_BAD_CHECKSUM_RETRY_SEC = 3600
+
+
 class DefaultAliasLoader(AliasLoader):
-    """Load aliases from JSON files and optional downloads. Legacy mk_aliases."""
+    """Load aliases from JSON files and optional downloads. Legacy mk_aliases.
+
+    The reload loop ticks far more often than STALE_DAYS replaces the files, so
+    parsed results are kept against each file's stamp.
+    """
+
+    def __init__(self) -> None:
+        self._parsed: dict[str, tuple[Any, Any]] = {}
+        # path -> (stamp, blake2b): a 44MB subscriber file takes ~0.1s to hash.
+        self._digests: dict[str, tuple[tuple[int, int, int], str]] = {}
+        # file -> checksum the server published that the download didn't match.
+        self._bad_downloads: dict[str, tuple[str, float]] = {}
+
+    def _digest(self, file_path: Path) -> str | None:
+        stamp = _file_stamp(file_path)
+        if stamp is None:
+            return None
+        key = str(file_path)
+        known = self._digests.get(key)
+        if known is not None and known[0] == stamp:
+            return known[1]
+        try:
+            digest = _blake2bsum(file_path)
+        except OSError:
+            return None
+        self._digests[key] = (stamp, digest)
+        return digest
 
     def load_aliases(
         self,
@@ -165,13 +216,20 @@ class DefaultAliasLoader(AliasLoader):
         dict[str, str],
         dict[str, str],
     ]:
-        """Build alias dicts. Same order as legacy mk_aliases."""
+        """Build alias dicts. Same order as legacy mk_aliases.
+
+        With a checksum file configured, it is fetched on every tick (a few hundred
+        bytes) and the lists are downloaded only when their published checksum no
+        longer matches the file on disk: a DMR ID issued today is known within one
+        poll of the server publishing it, and an unchanged 44MB list is never fetched
+        again. Without one, STALE_DAYS decides as before.
+        """
         aliases = config.get("ALIASES", {})
         path = Path(aliases.get("PATH", "./data/")).resolve()
         stale_sec = float(aliases.get("STALE_TIME", aliases.get("STALE_DAYS", 1) * 86400))
         if aliases.get("TRY_DOWNLOAD"):
             if aliases.get("CHECKSUM_FILE") and aliases.get("CHECKSUM_URL"):
-                result = try_download(path, aliases["CHECKSUM_FILE"], aliases.get("CHECKSUM_URL", ""), stale_sec)
+                result = try_download(path, aliases["CHECKSUM_FILE"], aliases.get("CHECKSUM_URL", ""), 0)
                 _log_download_result(result)
             checksums = self._load_checksums(path, aliases.get("CHECKSUM_FILE"))
             for key, url_key, checksum_key in [
@@ -182,31 +240,30 @@ class DefaultAliasLoader(AliasLoader):
             ]:
                 url = aliases.get(url_key)
                 if url and aliases.get(key):
-                    result = try_download(
-                        path, aliases[key], url, stale_sec,
-                        expected_checksum=checksums.get(checksum_key),
-                    )
-                    _log_download_result(result)
+                    self._download(path, aliases[key], url, stale_sec, checksums.get(checksum_key))
         else:
             checksums = self._load_checksums(path, aliases.get("CHECKSUM_FILE"))
         peer_file = aliases.get("PEER_FILE", "peer_ids.json")
         sub_file = aliases.get("SUBSCRIBER_FILE", "subscriber_ids.json")
         tgid_file = aliases.get("TGID_FILE", "talkgroup_ids.json")
         server_file = aliases.get("SERVER_ID_FILE", "server_ids.tsv")
-        peer_ids = self._load_id_dict_with_backup(
-            path, peer_file, checksums.get("peer_ids"), "peer_ids",
+        peer_ids = self._load_with_backup(
+            path, peer_file, checksums.get("peer_ids"), "peer_ids", self._load_id_json,
         )
-        subscriber_ids = self._load_id_dict_with_backup(
-            path, sub_file, checksums.get("subscriber_ids"), "subscriber_ids",
+        subscriber_ids = self._subscriber_ids(self._load_with_backup(
+            path, sub_file, checksums.get("subscriber_ids"), "subscriber_ids", self._load_subscriber_json,
+        ))
+        talkgroup_ids = self._load_with_backup(
+            path, tgid_file, checksums.get("talkgroup_ids"), "talkgroup_ids", self._load_id_json,
         )
-        talkgroup_ids = self._load_id_dict_with_backup(
-            path, tgid_file, checksums.get("talkgroup_ids"), "talkgroup_ids",
+        local_file = aliases.get("LOCAL_SUBSCRIBER_FILE", "subscriber_ids.json")
+        # The default points at the subscriber file itself: don't parse 300k records twice.
+        local_subscriber_ids = (
+            subscriber_ids if local_file == sub_file else self._load_id_json(path / local_file)
         )
-        local_subscriber_ids = self._load_id_json(
-            path / aliases.get("LOCAL_SUBSCRIBER_FILE", "subscriber_ids.json")
-        )
-        server_ids = self._load_server_tsv_with_backup(
-            path, server_file, checksums.get("server_ids"),
+        server_ids = self._load_with_backup(
+            path, server_file, checksums.get("server_ids"), "server_ids",
+            lambda f: self._load_server_tsv(f.parent, f.name),
         )
         return (peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids, server_ids, checksums)
 
@@ -220,8 +277,13 @@ class DefaultAliasLoader(AliasLoader):
         local_subscriber_ids: dict[int, str],
         server_ids: dict[str, str],
         checksums: dict[str, str],
+        profiles: dict[int, dict[str, str]] | None = None,
     ) -> None:
-        """Apply alias reload without wiping in-memory tables on partial download failure."""
+        """Apply alias reload without wiping in-memory tables on partial download failure.
+
+        This runs on the reactor thread, so ``profiles`` lets the caller build the
+        300k of them off it instead.
+        """
         def _keep(key: str, new_val: dict, label: str) -> None:
             if new_val:
                 config[key] = new_val
@@ -234,11 +296,13 @@ class DefaultAliasLoader(AliasLoader):
 
         _keep("_PEER_IDS", peer_ids, "peer_ids")
         if subscriber_ids:
-            sub = dict(subscriber_ids)
-            sub[900999] = "D-APRS"
-            sub[4294967295] = "SC"
-            config["_SUB_IDS"] = sub
-            if isinstance(alias_loader, DefaultAliasLoader):
+            # In place: a copy would keep a second 300k-entry table alive.
+            subscriber_ids[900999] = "D-APRS"
+            subscriber_ids[4294967295] = "SC"
+            config["_SUB_IDS"] = subscriber_ids
+            if profiles is not None:
+                config["_SUB_PROFILES"] = profiles
+            elif isinstance(alias_loader, DefaultAliasLoader):
                 config["_SUB_PROFILES"] = alias_loader.load_subscriber_profiles(config)
         elif config.get("_SUB_IDS"):
             logger.warning(
@@ -250,6 +314,33 @@ class DefaultAliasLoader(AliasLoader):
         _keep("_SERVER_IDS", server_ids, "server_ids")
         if checksums:
             config["CHECKSUMS"] = checksums
+
+    def _download(
+        self, path: Path, file_name: str, url: str, stale_sec: float, expected: str | None,
+    ) -> None:
+        """try_download driven by the published checksum, with a retry limit for it.
+
+        If the server publishes a checksum its own list doesn't match, every tick
+        would fetch 44MB to throw it away; one attempt an hour per such checksum.
+        """
+        full = path / file_name
+        current = self._digest(full) if expected else None
+        bad = self._bad_downloads.get(file_name)
+        if (
+            bad is not None and expected == bad[0] and current != expected
+            and time.time() - bad[1] < _BAD_CHECKSUM_RETRY_SEC
+        ):
+            logger.debug("(ALIAS) '%s': published checksum still unmatched, retry later", file_name)
+            return
+        result = try_download(
+            path, file_name, url, stale_sec,
+            expected_checksum=expected, current_checksum=current,
+        )
+        if expected and "checksum mismatch" in result:
+            self._bad_downloads[file_name] = (expected, time.time())
+        else:
+            self._bad_downloads.pop(file_name, None)
+        _log_download_result(result)
 
     def _load_checksums(self, path: Path, file_name: str | None) -> dict[str, str]:
         """Load checksum JSON (legacy load_json of CHECKSUM_FILE). Keys e.g. peer_ids, subscriber_ids, talkgroup_ids, server_ids."""
@@ -285,29 +376,34 @@ class DefaultAliasLoader(AliasLoader):
             logger.warning("(ALIAS) ID ALIAS MAPPER: %s could not be read: %s", file_name, err)
             return {}
 
-    def _load_id_dict_with_backup(
+    def _load_with_backup(
         self,
         path: Path,
         file_name: str,
         expected_checksum: str | None,
         name: str,
-    ) -> dict[int, str]:
-        """Legacy mk_aliases peer/subscriber/tgid load with .bak fallback."""
+        parse: Callable[[Path], dict],
+    ) -> dict:
+        """Legacy mk_aliases load with .bak fallback, for whatever `parse` reads."""
         full = path / file_name
         bak = path / f"{file_name}.bak"
-        result: dict[int, str] = {}
+        stamp = _file_stamp(full)
+        remembered = self._parsed.get(file_name)
+        if stamp is not None and remembered is not None and remembered[0] == stamp:
+            return remembered[1]
+        result: dict = {}
         loaded_from_primary = False
 
-        def _load_verified(target: Path) -> dict[int, str]:
+        def _load_verified(target: Path) -> dict:
             if not target.is_file():
                 # Raise (not return {}) so the caller falls back to .bak below instead of
                 # silently ending up with an empty dictionary when the primary file is
                 # simply missing (e.g. first boot with the download still failing).
                 raise FileNotFoundError(f"'{target.name}' file does not exist")
             if expected_checksum:
-                if _blake2bsum(target) != expected_checksum:
+                if self._digest(target) != expected_checksum:
                     raise ValueError("bad checksum")
-            loaded = self._load_id_json(target)
+            loaded = parse(target)
             if not loaded:
                 raise ValueError("empty or invalid dictionary data")
             return loaded
@@ -316,6 +412,7 @@ class DefaultAliasLoader(AliasLoader):
             result = _load_verified(full)
             loaded_from_primary = True
         except Exception as e:
+            self._parsed.pop(file_name, None)
             logger.error(
                 "(ALIAS) ID ALIAS MAPPER: problem loading %s file (%s), falling back to .bak",
                 name,
@@ -323,7 +420,7 @@ class DefaultAliasLoader(AliasLoader):
             )
             if bak.is_file():
                 try:
-                    result = self._load_id_json(bak)
+                    result = parse(bak)
                 except Exception as f:
                     logger.error(
                         "(ALIAS) ID ALIAS MAPPER: Tried backup %s file, but couldn't load that either: %s",
@@ -348,6 +445,8 @@ class DefaultAliasLoader(AliasLoader):
                     name,
                     g,
                 )
+            if stamp is not None:
+                self._parsed[file_name] = (stamp, result)
         return result
 
     def _load_id_json(self, file_path: Path) -> dict[int, str]:
@@ -374,100 +473,59 @@ class DefaultAliasLoader(AliasLoader):
                                 pass
         return out
 
-    def _load_server_tsv_with_backup(
-        self,
-        path: Path,
-        file_name: str,
-        expected_checksum: str | None,
-    ) -> dict[str, str]:
-        """Legacy mk_aliases server_ids load with .bak fallback."""
-        full = path / file_name
-        bak = path / f"{file_name}.bak"
-        result: dict[str, str] = {}
-        loaded_from_primary = False
-
-        try:
-            # Raise (not just skip) on a missing primary file too, so the except block
-            # below falls back to .bak instead of silently ending up with an empty dict
-            # (e.g. first boot with the download still failing).
-            if not full.is_file():
-                raise FileNotFoundError(f"'{file_name}' file does not exist")
-            if expected_checksum and _blake2bsum(full) != expected_checksum:
-                raise ValueError("bad checksum")
-            result = self._load_server_tsv(path, file_name)
-            if not result:
-                raise ValueError("empty server_ids")
-            loaded_from_primary = True
-        except Exception as e:
-            logger.error(
-                "(ALIAS) ID ALIAS MAPPER: problem loading server_ids file (%s), falling back to .bak",
-                e,
-            )
-            if bak.is_file():
-                try:
-                    result = self._load_server_tsv(path, f"{file_name}.bak")
-                except Exception as f:
-                    logger.error(
-                        "(ALIAS) ID ALIAS MAPPER: Tried backup server_ids file, but couldn't load that either: %s",
-                        f,
-                    )
-        if result:
-            logger.info("(ALIAS) ID ALIAS MAPPER: server_ids dictionary is available")
-        else:
-            logger.warning("(ALIAS) ID ALIAS MAPPER: server_ids dictionary is empty")
-        if loaded_from_primary and full.is_file():
-            try:
-                _atomic_copy(full, bak)
-            except OSError as g:
-                logger.info(
-                    "(ALIAS) ID ALIAS MAPPER: couldn't make backup copy of server_ids file %s",
-                    g,
-                )
-        return result
-
-    def load_subscriber_profiles(self, config: dict[str, Any]) -> dict[int, dict[str, str]]:
-        """Load {id: {callsign, fname, surname, talker_alias?}} from subscriber JSON files."""
+    def load_subscriber_profiles(self, config: dict[str, Any]) -> dict[int, SubscriberProfile]:
+        """{id: profile} from the subscriber file, overlaid with the local subscriber file."""
         aliases = config.get("ALIASES", {})
         path = Path(aliases.get("PATH", "./data/")).resolve()
         sub_file = aliases.get("SUBSCRIBER_FILE", "subscriber_ids.json")
         local_file = aliases.get("LOCAL_SUBSCRIBER_FILE", "subscriber_ids.json")
-        profiles: dict[int, dict[str, str]] = {}
-        for file_name in (sub_file, local_file):
-            self._merge_subscriber_profiles(path / file_name, profiles)
+        # load_aliases has just parsed this file: this is a cache hit, not a second parse.
+        main = self._load_with_backup(path, sub_file, None, "subscriber_ids", self._load_subscriber_json)
+        if local_file == sub_file:
+            return main
+        stamp = _file_stamp(path / local_file)
+        remembered = self._parsed.get("_profiles")
+        if remembered is not None and remembered[0] is main and remembered[1] == stamp:
+            return remembered[2]
+        local = self._load_subscriber_json(path / local_file)
+        profiles = {**main, **local} if local else main
+        self._parsed["_profiles"] = (main, stamp, profiles)
         return profiles
 
-    def _merge_subscriber_profiles(self, file_path: Path, out: dict[int, dict[str, str]]) -> None:
+    def _subscriber_ids(self, profiles: dict[int, SubscriberProfile]) -> dict[int, str]:
+        remembered = self._parsed.get("_sub_ids")
+        if remembered is not None and remembered[0] is profiles:
+            return remembered[1]
+        ids = {rid: p[0] for rid, p in profiles.items() if p[0] is not None}
+        self._parsed["_sub_ids"] = (profiles, ids)
+        return ids
+
+    def _load_subscriber_json(self, file_path: Path) -> dict[int, SubscriberProfile]:
         if not file_path.is_file():
-            return
+            return {}
+        out: dict[int, SubscriberProfile] = {}
+
+        # Each record becomes a profile as soon as the decoder finishes it, so the
+        # file's whole tree (eight strings per subscriber) never exists at once.
+        def record(obj: dict[str, Any]) -> Any:
+            if "id" not in obj:
+                return obj
+            try:
+                rid = int(obj["id"])
+            except (TypeError, ValueError):
+                return None
+            callsign = obj.get("callsign")
+            out[rid] = (
+                None if callsign is None else str(callsign),
+                sys.intern(str(obj.get("fname") or "")),
+                sys.intern(str(obj.get("surname") or "")),
+                str(obj.get("talker_alias") or ""),
+            )
+            return None
+
         try:
             with open(file_path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+                json.load(f, object_hook=record)
         except (json.JSONDecodeError, OSError):
-            return
-        if not isinstance(data, dict):
-            return
-        if "count" in data:
-            data = {k: v for k, v in data.items() if k != "count"}
-        for _key, val in data.items():
-            if not isinstance(val, list):
-                continue
-            for record in val:
-                if not isinstance(record, dict) or "id" not in record:
-                    continue
-                try:
-                    rid = int(record["id"])
-                except (ValueError, TypeError):
-                    continue
-                entry: dict[str, str] = {}
-                if record.get("callsign"):
-                    entry["callsign"] = str(record["callsign"])
-                if record.get("fname"):
-                    entry["fname"] = str(record["fname"])
-                if record.get("surname"):
-                    entry["surname"] = str(record["surname"])
-                if record.get("talker_alias"):
-                    entry["talker_alias"] = str(record["talker_alias"])
-                if entry:
-                    prev = out.get(rid, {})
-                    prev.update(entry)
-                    out[rid] = prev
+            return {}
+        return out

@@ -1,0 +1,488 @@
+# ADN DMR Peer Server - tests plugin send routing
+#
+# Copyright (C) 2026  Rodrigo Pérez, CE5RPY <ce5rpy@qmd.cl>
+#
+###############################################################################
+#   This program is free software; you can redistribute it and/or modify
+#   it under the terms of the GNU General Public License as published by
+#   the Free Software Foundation; either version 3 of the License, or
+#   (at your option) any later version.
+#
+#   This program is distributed in the hope that it will be useful,
+#   but WITHOUT ANY WARRANTY; without even the implied warranty of
+#   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+#   GNU General Public License for more details.
+#
+#   You should have received a copy of the GNU General Public License
+#   along with this program; if not, write to the Free Software Foundation,
+#   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
+###############################################################################
+
+"""Unit data a plugin sends (ServerContext.send_dmrd) is routed locally, and only locally."""
+
+from __future__ import annotations
+
+import math
+
+import pytest
+
+from tests.harness.deterministic import (
+    DeterministicScenario,
+    PacketSpec,
+    active_routing_table,
+    add_openbridge_system,
+    minimal_config,
+    patch_routing_wall_time,
+)
+from tests.routing.unit_data_helpers import idle_hbp_slot
+
+from adn_server.application.plugins.application.bus import PluginBus
+from adn_server.application.plugins.application.data_bridge import DataPluginBridge
+from adn_server.application.plugins.application.ingress import PluginIngress
+from adn_server.application.routing.helpers import hbp_slot_blocks_group_voice
+from adn_server.application.plugins.domain.events import UnitDataFrame
+from adn_server.application.routing.announcement_ptt_inject import inject_plugin_dmrd
+from adn_server.domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, HBPF_VOICE, bytes_3, bytes_4, int_id
+
+GATEWAY_ID = 900999
+RADIO_ID = 7140023
+RADIO_HOTSPOT = bytes_4(714002301)
+SERVER_ID = bytes_4(2131)
+
+
+def _scenario(radio_on: str = "SYSTEM-B") -> DeterministicScenario:
+    config = minimal_config(("SYSTEM", "SYSTEM-B"))
+    add_openbridge_system(config, "OBP-1")
+    config["SYSTEMS"]["OBP-1"]["VER"] = 5
+    config["GLOBAL"]["DATA_GATEWAY"] = True
+    add_openbridge_system(config, "DATA-GATEWAY")
+    config["SYSTEMS"]["DATA-GATEWAY"]["ENABLED"] = True
+    sc = DeterministicScenario(config=config)
+    for name in ("SYSTEM", "SYSTEM-B"):
+        sc.protocols[name].STATUS[2] = idle_hbp_slot()
+        sc.config["SYSTEMS"][name]["GROUP_HANGTIME"] = 0
+    sc.protocols[radio_on]._peers[RADIO_HOTSPOT] = {}
+    sc.config["_SUB_MAP"] = {bytes_3(RADIO_ID): (radio_on, 2, sc.clock.time(), RADIO_HOTSPOT)}
+    return sc
+
+
+def _ars_ack(dst: int = RADIO_ID, *, call_type: str = "unit", frame_type: int = HBPF_DATA_SYNC) -> bytes:
+    return PacketSpec(
+        rf_src=GATEWAY_ID, dst_id=dst, peer_id=1, slot=2, call_type=call_type,
+        frame_type=frame_type, dtype_vseq=6, stream_id=0x0A0B0C0D, payload=bytes(range(33)),
+    ).data()
+
+
+def _send(sc: DeterministicScenario, pkt: bytes):
+    with patch_routing_wall_time(sc.clock):
+        return inject_plugin_dmrd(sc.routing, "SYSTEM", pkt, pkt_time=sc.clock.time(), server_id=SERVER_ID, plugin="d-aprs")
+
+
+def test_reaches_the_radio_on_another_system_and_nothing_else() -> None:
+    sc = _scenario("SYSTEM-B")
+    _send(sc, _ars_ack())
+    assert [peer for peer, _ in sc.protocols["SYSTEM-B"].sent_to_peer] == [RADIO_HOTSPOT]
+    assert sc.capture.packets == []  # no OpenBridge, no DATA-GATEWAY
+
+
+def test_reaches_a_radio_behind_the_ingress_master_itself() -> None:
+    # The common case: every hotspot sits on the proxy MASTER the plugin injects on.
+    sc = _scenario("SYSTEM")
+    _send(sc, _ars_ack())
+    assert [peer for peer, _ in sc.protocols["SYSTEM"].sent_to_peer] == [RADIO_HOTSPOT]
+
+
+def test_unknown_destination_is_not_flooded_to_openbridge() -> None:
+    sc = _scenario()
+    _send(sc, _ars_ack(dst=3341234))
+    assert sc.capture.for_system("OBP-1") == []
+    assert sc.capture.for_system("DATA-GATEWAY") == []
+
+
+def test_the_plugin_source_is_never_learned_in_sub_map() -> None:
+    sc = _scenario()
+    _send(sc, _ars_ack())
+    assert bytes_3(GATEWAY_ID) not in sc.config["_SUB_MAP"]
+
+
+def test_private_voice_from_a_plugin_is_refused() -> None:
+    sc = _scenario()
+    assert _send(sc, _ars_ack(frame_type=HBPF_VOICE)) is False
+    assert sc.capture.packets == [] and sc.protocols["SYSTEM-B"].sent_to_peer == []
+
+
+def test_plugins_see_their_own_frames_as_synthetic() -> None:
+    sc = _scenario()
+    events: list[object] = []
+    bus = PluginBus()
+    bus.subscribe(events.append)
+    sc.routing._data_plugin_bridge = DataPluginBridge(bus, sc.config)
+    _send(sc, _ars_ack())
+    frames = [e for e in events if isinstance(e, UnitDataFrame)]
+    assert frames and all(f.context.is_synthetic for f in frames)
+
+
+# --- group voice (voice beacons and announcements as plugins) ---
+
+TG = 213
+BEACON_ID = 2130035
+
+
+def _voice_scenario():
+    config = minimal_config(("SYSTEM", "SYSTEM-B"))
+    config["SYSTEMS"]["SYSTEM"]["PEERS"] = {b"\x00\x00\x03\xe9": {"CALLSIGN": "HOTSPOT"}}
+    table = active_routing_table(TG, (("SYSTEM", 2), ("SYSTEM-B", 2)), timeout_minutes=10**6)
+    sc = DeterministicScenario(config=config, routing_table=table)
+    sc.routing.apply_startup_subscriptions()
+    for name in ("SYSTEM", "SYSTEM-B"):
+        sc.protocols[name].STATUS[2] = idle_hbp_slot()
+    local: list[bytes] = []
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda system, pkt: local.append(pkt), clock=sc.clock.time)
+    return sc, ingress, local
+
+
+def _beacon(stream: int = 0x0B0B0B0B) -> list[bytes]:
+    base = PacketSpec(rf_src=BEACON_ID, dst_id=TG, peer_id=7, slot=2, stream_id=stream)
+    frames = [DeterministicScenario.voice_head_spec(base)]
+    frames += [DeterministicScenario.voice_burst_spec(base, seq=n + 1, dtype_vseq=n % 6) for n in range(6)]
+    frames.append(DeterministicScenario.voice_term_spec(base, seq=7))
+    return [f.data() for f in frames]
+
+
+def _play(sc, ingress, frames) -> list[bool]:
+    out = []
+    for pkt in frames:
+        sc.clock.advance(0.06)
+        with patch_routing_wall_time(sc.clock):
+            out.append(ingress.deliver(pkt, "beacon"))
+    return out
+
+
+def test_a_voice_beacon_is_routed_like_an_announcement_and_heard_locally() -> None:
+    sc, ingress, local = _voice_scenario()
+    frames = _beacon()
+    assert _play(sc, ingress, frames) == [True] * len(frames)
+    to_b = sc.capture.for_system("SYSTEM-B")
+    assert len(to_b) == len(frames)
+    assert all(p.packet[5:8] == bytes_3(BEACON_ID) for p in to_b)
+    assert len(local) == len(frames)  # hotspots of the MASTER it enters on
+    assert {p[11:15] for p in local} == {ingress._server_id()}  # never the peer the plugin wrote
+    assert ingress._server_id() != bytes_4(7)
+
+
+def test_the_master_slot_is_held_while_it_plays_and_freed_by_the_terminator() -> None:
+    sc, ingress, _ = _voice_scenario()
+    frames = _beacon()
+    _play(sc, ingress, frames[:3])
+    slot = sc.protocols["SYSTEM"].STATUS[2]
+    assert slot["RX_RFS"] == bytes_3(BEACON_ID) and slot["RX_TYPE"] != HBPF_SLT_VTERM
+    # routed voice for another TG finds the slot busy while the beacon plays
+    assert hbp_slot_blocks_group_voice(slot, bytes_3(214), b"\x07" * 4, sc.clock.time(), 0)
+    _play(sc, ingress, frames[3:])
+    assert slot["RX_TYPE"] == HBPF_SLT_VTERM
+
+
+def test_a_radio_talking_on_the_slot_stops_the_beacon() -> None:
+    sc, ingress, local = _voice_scenario()
+    slot = sc.protocols["SYSTEM"].STATUS[2]
+    slot.update(RX_TYPE=HBPF_SLT_VHEAD, RX_TIME=sc.clock.time() + 0.06, RX_STREAM_ID=b"\x01\x01\x01\x01")
+    assert _play(sc, ingress, _beacon()[:1]) == [False]
+    assert sc.capture.for_system("SYSTEM-B") == [] and local == []
+
+
+def test_a_second_plugin_stream_cannot_talk_over_the_first() -> None:
+    sc, ingress, _ = _voice_scenario()
+    _play(sc, ingress, _beacon(stream=1)[:2])
+    assert _play(sc, ingress, _beacon(stream=2)[:1]) == [False]
+
+
+def test_voice_slot_prefers_the_slot_where_the_tg_is_bridged_on_the_master() -> None:
+    config = minimal_config(("SYSTEM", "SYSTEM-B"))
+    config["SYSTEMS"]["SYSTEM"]["PEERS"] = {b"\x00\x00\x03\xe9": {"CALLSIGN": "HOTSPOT"}}
+    table = active_routing_table(TG, (("SYSTEM", 1), ("SYSTEM-B", 2)), timeout_minutes=10**6)
+    sc = DeterministicScenario(config=config, routing_table=table)
+    sc.routing.apply_startup_subscriptions()
+    for ts in (1, 2):
+        sc.protocols["SYSTEM"].STATUS[ts] = idle_hbp_slot() | {"RX_TYPE": HBPF_SLT_VTERM}
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None, clock=sc.clock.time)
+    assert ingress.voice_slot_for_tg(TG) == 1  # TG 213 lives on TS1 of this MASTER
+    assert ingress.voice_slot_for_tg(9999) == 2  # nowhere yet: TS2 first
+
+
+def test_voice_slot_is_none_while_every_slot_is_busy() -> None:
+    sc, ingress, _ = _voice_scenario()
+    for ts in (1, 2):
+        sc.protocols["SYSTEM"].STATUS[ts] = {
+            "RX_TYPE": HBPF_SLT_VHEAD, "RX_TIME": sc.clock.time(), "TX_TYPE": HBPF_SLT_VTERM,
+            "RX_STREAM_ID": b"\x05\x05\x05\x05",
+        }
+    assert ingress.voice_slot_for_tg(TG) is None
+
+
+def test_the_monitor_sees_the_beacon_on_the_master_it_plays_on() -> None:
+    sc, _, _ = _voice_scenario()
+    events: list[str] = []
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None,
+                            clock=sc.clock.time, send_routing_event=events.append)
+    _play(sc, ingress, _beacon(stream=0x0C0C0C0C))
+    starts = [e for e in events if e.startswith("GROUP VOICE,START,TX,SYSTEM,")]
+    ends = [e for e in events if e.startswith("GROUP VOICE,END,TX,SYSTEM,")]
+    assert len(starts) == 1 and len(ends) == 1
+    assert starts[0].split(",")[4:9] == [str(0x0C0C0C0C), str(BEACON_ID), str(BEACON_ID), "2", str(TG)]
+
+
+def test_a_beacon_cut_by_a_radio_still_ends_on_the_monitor() -> None:
+    sc, _, _ = _voice_scenario()
+    events: list[str] = []
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None,
+                            clock=sc.clock.time, send_routing_event=events.append)
+    frames = _beacon()
+    _play(sc, ingress, frames[:3])
+    sc.protocols["SYSTEM"].STATUS[2].update(RX_TYPE=HBPF_SLT_VHEAD, RX_TIME=sc.clock.time() + 0.06, RX_STREAM_ID=b"\x09" * 4)
+    assert _play(sc, ingress, frames[3:4]) == [False]
+    assert sum(e.startswith("GROUP VOICE,END,TX,SYSTEM,") for e in events) == 1
+    slot = sc.protocols["SYSTEM"].STATUS[2]
+    assert slot["RX_STREAM_ID"] == b"\x09" * 4 and slot["RX_TYPE"] == HBPF_SLT_VHEAD  # the radio's state is left alone
+
+
+def test_a_stream_the_plugin_abandons_ends_after_a_silent_second() -> None:
+    sc, _, _ = _voice_scenario()
+    events: list[str] = []
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None,
+                            clock=sc.clock.time, send_routing_event=events.append)
+    _play(sc, ingress, _beacon(stream=1)[:3])  # no terminator
+    sc.clock.advance(1.5)
+    assert ingress.voice_slot_for_tg(TG) == 2  # the next query sweeps it
+    assert sum(e.startswith("GROUP VOICE,END,TX,SYSTEM,") for e in events) == 1
+    assert sc.protocols["SYSTEM"].STATUS[2]["RX_TYPE"] == HBPF_SLT_VTERM  # released by the sweep
+
+
+def test_a_beacon_on_a_slot_with_stale_rx_state_is_forwarded_whole_with_its_own_lc() -> None:
+    """Regression (2131, 25-sep-2026): the ingress slot still held the last radio's RX
+    state. From the second frame on, routing took the beacon for a colliding QSO,
+    suppressed the uplink, and forwarded only 2 frames; the LC came from RX_LC."""
+    from adn_server.domain.dmr import decode
+
+    sc, ingress, _ = _voice_scenario()
+    sc.protocols["SYSTEM"].STATUS[2].update(
+        RX_TYPE=HBPF_SLT_VTERM, RX_STREAM_ID=b"\x0e" * 4, RX_RFS=bytes_3(3120001), RX_TGID=bytes_3(214),
+        RX_PEER=bytes_4(1001), RX_TIME=sc.clock.time() - 30, RX_LC=b"\x00\x00\x20" + bytes_3(214) + bytes_3(3120001),
+    )
+    frames = _beacon()
+    assert _play(sc, ingress, frames) == [True] * len(frames)
+    to_b = sc.capture.for_system("SYSTEM-B")
+    assert len(to_b) == len(frames)
+    lc = decode.voice_head_term(to_b[0].packet[20:53])["LC"]
+    assert lc[3:6] == bytes_3(TG) and lc[6:9] == bytes_3(BEACON_ID)
+    # the embedded LC of the voice bursts B-E must be the beacon's too, not the stale RX_LC
+    from bitarray import bitarray
+
+    from adn_server.domain.dmr import bptc
+
+    by_vseq = {p.packet[15] & 0x0F: p.packet for p in to_b[1:-1]}
+    frags = bitarray(endian="big")
+    for vseq in (1, 2, 3, 4):
+        frags += decode.voice(by_vseq[vseq][20:53])["EMBED"]
+    emb = bptc.decode_emblc(frags)
+    assert emb[3:6] == bytes_3(TG) and emb[6:9] == bytes_3(BEACON_ID)
+
+
+def test_mesh_voice_for_another_tg_on_the_master_slot_neither_cuts_the_beacon_nor_is_held_back() -> None:
+    """Like the core announcements: a call on another TG bridged to the slot a beacon plays
+    on takes the slot's TX leg (each hotspot keeps the stream it hears first) and the
+    beacon goes on. Refusing the frame stopped announcements a few seconds in; holding
+    the slot instead cut the start of the call for every other hotspot of the MASTER."""
+    config = minimal_config(("SYSTEM", "SYSTEM-B"))
+    config["SYSTEMS"]["SYSTEM"]["PEERS"] = {b"\x00\x00\x03\xe9": {"CALLSIGN": "HOTSPOT", "CONNECTION": "YES"}}
+    add_openbridge_system(config, "OBP-1")
+    table = active_routing_table(TG, (("SYSTEM", 2), ("SYSTEM-B", 2)), timeout_minutes=10**6)
+    table.update(active_routing_table(214, (("SYSTEM-B", 2), ("OBP-1", 1)), timeout_minutes=10**6))
+    sc = DeterministicScenario(config=config, routing_table=table)
+    sc.routing.apply_startup_subscriptions()
+    for name in ("SYSTEM", "SYSTEM-B"):
+        sc.protocols[name].STATUS[2] = idle_hbp_slot()
+    local: list[bytes] = []
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda system, pkt: local.append(pkt),
+                            clock=sc.clock.time)
+    frames = _beacon()
+    assert _play(sc, ingress, frames[:3]) == [True] * 3
+    # a hotspot on SYSTEM listens to TG 214 on TS2; a call on it arrives from the mesh
+    sc.routing.ensure_dynamic_relay(bytes_3(214), "SYSTEM", 2, 300.0)
+    mesh = PacketSpec(rf_src=7140099, dst_id=214, peer_id=714009901, slot=1, stream_id=0x0D0D0D0D)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_obp("OBP-1", DeterministicScenario.voice_head_spec(mesh))
+    assert sc.protocols["SYSTEM"].STATUS[2].get("TX_STREAM_ID") == bytes_4(0x0D0D0D0D)
+    assert _play(sc, ingress, frames[3:]) == [True] * (len(frames) - 3)
+    assert len(local) == len(frames)
+
+
+def test_a_frame_routing_refuses_is_still_heard_on_the_master_and_the_beacon_goes_on() -> None:
+    """The core announcements only logged a refused frame; the MASTER's hotspots got it anyway."""
+    sc, ingress, local = _voice_scenario()
+    route = ingress._route
+    refused = {3}
+    calls = iter(range(100))
+    ingress._route = lambda *a: None if next(calls) in refused else route(*a)
+    frames = _beacon()
+    assert _play(sc, ingress, frames) == [True] * len(frames)
+    assert len(local) == len(frames)
+    assert len(sc.capture.for_system("SYSTEM-B")) == len(frames) - len(refused)
+
+
+def test_voice_slot_is_free_while_routed_voice_for_another_tg_uses_the_tx_leg() -> None:
+    """Core parity: on the slot where the TG lives, only a QSO coming in makes it busy."""
+    sc, ingress, _ = _voice_scenario()
+    sc.protocols["SYSTEM"].STATUS[2].update(
+        RX_TYPE=HBPF_SLT_VTERM, TX_TYPE=HBPF_SLT_VHEAD, TX_TIME=sc.clock.time(),
+        TX_STREAM_ID=b"\x0d" * 4, TX_TGID=bytes_3(214),
+    )
+    assert ingress.voice_slot_for_tg(TG) == 2
+
+
+
+def _qso_scenario():
+    """SYSTEM (two hotspots) and SYSTEM-B bridged on TG 213 TS2, plus an OpenBridge link."""
+    config = minimal_config(("SYSTEM", "SYSTEM-B"))
+    config["SYSTEMS"]["SYSTEM"]["PEERS"] = {
+        b"\x00\x00\x03\xe9": {"CALLSIGN": "HS-A", "CONNECTION": "YES"},
+        b"\x00\x00\x03\xea": {"CALLSIGN": "HS-B", "CONNECTION": "YES"},
+    }
+    add_openbridge_system(config, "OBP-1")
+    table = active_routing_table(TG, (("SYSTEM", 2), ("SYSTEM-B", 2), ("OBP-1", 1)), timeout_minutes=10**6)
+    table.update(active_routing_table(91, (("SYSTEM", 2), ("OBP-1", 1)), timeout_minutes=10**6))
+    sc = DeterministicScenario(config=config, routing_table=table)
+    sc.routing.apply_startup_subscriptions()
+    for name in ("SYSTEM", "SYSTEM-B"):
+        sc.protocols[name].STATUS[2] = idle_hbp_slot()
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None, clock=sc.clock.time)
+    return sc, ingress
+
+
+def _mesh_over(sc, tg: int = TG, stream: int = 0x0C0C0C0C, *, end: bool = True) -> None:
+    spec = PacketSpec(rf_src=3340062, dst_id=tg, peer_id=26811, slot=1, stream_id=stream)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_obp("OBP-1", DeterministicScenario.voice_head_spec(spec))
+        for n in range(1, 6):
+            sc.clock.advance(0.06)
+            sc.inject_obp("OBP-1", DeterministicScenario.voice_burst_spec(spec, seq=n, dtype_vseq=n))
+        if end:
+            sc.clock.advance(0.06)
+            sc.inject_obp("OBP-1", DeterministicScenario.voice_term_spec(spec, seq=6))
+
+
+def _hotspot_over(sc, system: str, peer: int, tg: int, stream: int, *, end: bool = True) -> None:
+    spec = PacketSpec(rf_src=2130035, dst_id=tg, peer_id=peer, slot=2, stream_id=stream)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_hbp(system, DeterministicScenario.voice_head_spec(spec), ingress_pkt_time=sc.clock.time())
+        if end:
+            sc.clock.advance(0.06)
+            sc.inject_hbp(system, DeterministicScenario.voice_term_spec(spec, seq=1), ingress_pkt_time=sc.clock.time())
+
+
+def test_a_talkgroup_never_heard_is_quiet_forever() -> None:
+    sc, ingress = _qso_scenario()
+    assert sc.routing.tg_quiet_for(TG, sc.clock.time()) == math.inf
+    assert ingress.tg_quiet_for(TG) == math.inf
+
+
+def test_quiet_time_counts_from_the_end_of_the_last_mesh_over() -> None:
+    sc, ingress = _qso_scenario()
+    _mesh_over(sc)
+    sc.clock.advance(2.0)  # the usual pause before the reply
+    assert ingress.tg_quiet_for(TG) == pytest.approx(2.0, abs=0.01)
+
+
+def test_a_live_over_is_never_quiet() -> None:
+    sc, ingress = _qso_scenario()
+    _mesh_over(sc, end=False)
+    assert ingress.tg_quiet_for(TG) == 0.0
+
+
+def test_an_over_on_another_master_counts_too() -> None:
+    sc, ingress = _qso_scenario()
+    _hotspot_over(sc, "SYSTEM-B", 2001, TG, 0x0D0D0D0D)
+    sc.clock.advance(1.5)
+    assert ingress.tg_quiet_for(TG) == pytest.approx(1.5, abs=0.01)
+
+
+def test_another_tg_on_the_same_slot_does_not_erase_the_trace() -> None:
+    """Shared SYSTEM: hotspot A is in the pause of a QSO on TG 213 when hotspot B keys TG 91
+    on the same slot. The slot's flat RX fields now say 91; the per-TG record still has 213."""
+    sc, ingress = _qso_scenario()
+    _hotspot_over(sc, "SYSTEM", 1001, TG, 0x0E0E0E01)
+    sc.clock.advance(1.0)
+    _hotspot_over(sc, "SYSTEM", 1002, 91, 0x0E0E0E02)
+    assert int_id(sc.protocols["SYSTEM"].STATUS[2]["RX_TGID"]) == 91
+    assert ingress.tg_quiet_for(TG) == pytest.approx(1.06, abs=0.01)
+
+
+def test_the_servers_own_voice_does_not_count() -> None:
+    sc, ingress = _qso_scenario()
+    assert all(_play(sc, ingress, _beacon()))  # a plugin announcement on TG 213, routed everywhere
+    sc.clock.advance(1.0)
+    assert ingress.tg_quiet_for(TG) == math.inf
+
+
+def test_a_live_over_sharing_its_slot_with_another_tg_is_live() -> None:
+    """Shared SYSTEM: hotspot A talks on TG 213 while hotspot B talks on TG 91 on the same slot,
+    B's frame last. The slot's flat RX fields say 91; A's stream in RX_STREAMS is still live."""
+    sc, ingress = _qso_scenario()
+    a = PacketSpec(rf_src=2130035, dst_id=TG, peer_id=1001, slot=2, stream_id=0x0F0F0F01)
+    b = PacketSpec(rf_src=2130036, dst_id=91, peer_id=1002, slot=2, stream_id=0x0F0F0F02)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_hbp("SYSTEM", DeterministicScenario.voice_head_spec(a), ingress_pkt_time=sc.clock.time())
+        sc.inject_hbp("SYSTEM", DeterministicScenario.voice_head_spec(b), ingress_pkt_time=sc.clock.time())
+        for n in range(1, 70):  # ~4 s of interleaved bursts, B's last
+            for spec in (a, b):
+                sc.clock.advance(0.03)
+                sc.inject_hbp("SYSTEM", DeterministicScenario.voice_burst_spec(spec, seq=n, dtype_vseq=(n - 1) % 6 + 1),
+                              ingress_pkt_time=sc.clock.time())
+    assert int_id(sc.protocols["SYSTEM"].STATUS[2]["RX_TGID"]) == 91
+    assert ingress.tg_quiet_for(TG) == 0.0
+
+
+def _trim(sc) -> None:
+    with patch_routing_wall_time(sc.clock):
+        sc.routing.stream_trimmer_loop()
+
+
+def test_a_hotspot_over_without_terminator_is_quiet_from_its_last_frame() -> None:
+    sc, ingress = _qso_scenario()
+    spec = PacketSpec(rf_src=2130035, dst_id=TG, peer_id=2001, slot=2, stream_id=0x10101010)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_hbp("SYSTEM-B", DeterministicScenario.voice_head_spec(spec), ingress_pkt_time=sc.clock.time())
+        for n in range(1, 67):  # a 4 s over that loses its terminator
+            sc.clock.advance(0.06)
+            sc.inject_hbp("SYSTEM-B", DeterministicScenario.voice_burst_spec(spec, seq=n, dtype_vseq=(n - 1) % 6 + 1),
+                          ingress_pkt_time=sc.clock.time())
+    last = sc.clock.time()
+    sc.clock.advance(6.0)
+    _trim(sc)  # the stream times out (5 s idle)
+    assert ingress.tg_quiet_for(TG) == pytest.approx(sc.clock.time() - last, abs=0.01)  # 6 s, not 10
+
+
+def test_a_mesh_over_without_terminator_is_quiet_from_its_last_frame() -> None:
+    sc, ingress = _qso_scenario()
+    spec = PacketSpec(rf_src=3340062, dst_id=TG, peer_id=26811, slot=1, stream_id=0x11111111)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_obp("OBP-1", DeterministicScenario.voice_head_spec(spec))
+        for n in range(1, 67):
+            sc.clock.advance(0.06)
+            sc.inject_obp("OBP-1", DeterministicScenario.voice_burst_spec(spec, seq=n, dtype_vseq=(n - 1) % 6 + 1))
+    last = sc.clock.time()
+    sc.clock.advance(6.0)
+    _trim(sc)
+    assert ingress.tg_quiet_for(TG) == pytest.approx(sc.clock.time() - last, abs=0.01)
+
+
+def test_a_core_announcement_does_not_count() -> None:
+    """Voice ident / 999x playback route as synthetic announcements without a plugin origin."""
+    sc, ingress = _qso_scenario()
+    spec = PacketSpec(rf_src=1000001, dst_id=TG, peer_id=2131, slot=2, stream_id=0x12121212)
+    with patch_routing_wall_time(sc.clock):
+        for frame in (DeterministicScenario.voice_head_spec(spec), DeterministicScenario.voice_term_spec(spec, seq=1)):
+            sc.routing.dmrd_received("SYSTEM", ingress_pkt_time=sc.clock.time(), synthetic_announcement=True,
+                                     **frame.decoded_hbp_args())
+            sc.clock.advance(0.06)
+    sc.clock.advance(1.0)  # its copies on the other legs are no longer live
+    assert ingress.tg_quiet_for(TG) == math.inf  # and the record never noted it

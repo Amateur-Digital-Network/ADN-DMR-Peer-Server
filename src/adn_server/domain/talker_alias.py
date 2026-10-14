@@ -24,6 +24,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from .dmr import bptc, decode
+
 if TYPE_CHECKING:
     from bitarray import bitarray
 
@@ -292,18 +294,16 @@ def try_buffer_ta_from_voice_fragments(
     decodes losslessly here.
     Returns True when a TA block was decoded and stored.
     """
-    from .dmr import bptc, decode
-
     if vseq not in (1, 2, 3, 4) or len(dmrpkt) < 33:
         return False
     try:
-        embed = decode.voice(dmrpkt)["EMBED"]
+        embed = decode.voice_embed(dmrpkt)
     except Exception:
         return False
     if vseq == 1:
         acc.clear()
     acc[vseq] = embed
-    if not all(i in acc for i in (1, 2, 3, 4)):
+    if len(acc) < 4:  # keys are vseq 1-4 only, and vseq 1 clears it
         return False
     try:
         lc = bptc.decode_emblc(acc[1] + acc[2] + acc[3] + acc[4])

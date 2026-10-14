@@ -92,6 +92,9 @@ Detalle del flujo en el panel: [Self-service](../../monitor/self-service.md).
 ## Comportamiento con varios hotspots
 
 - Cada hotspot autenticado es un **peer** en el MASTER de inyección con sus **OPTIONS** (TG estáticas). **Repeat** y el fan-out del monitor respetan **OPTIONS por peer** — el tráfico de un TG no se envía a peers que no lo tienen seleccionado.
+- **`TS1_STATIC`** / **`TS2_STATIC`** del MASTER se suman a los estáticos de cada hotspot conectado, además de sus OPTIONS (se ignoran los TG 0–5, 9 y 9990–9999). Un **SIGHUP** actualiza los hotspots conectados y las piernas de bridge del MASTER; el monitor muestra la lista resultante de cada hotspot, primero los TG del yaml.
+- Los hotspots que hablan a la vez en el mismo slot del MASTER se siguen **por stream**: cada uno vence por su cuenta y recibe su propio END con su duración real.
+- Un login fallido, un indicativo que no coincide o la salida de un hotspot ya no resetean los bridges del MASTER; el reset (vuelven las OPTIONS por defecto y sus piernas de bridge quedan inactivas) ocurre solo cuando se va su **último** peer.
 - Los talkgroups **eco 9990–9999** son **punto-a-punto**: omiten el filtro OPTIONS y vuelven **sólo** al peer exacto que originó la llamada (`RX_PEER` en el slot), nunca a otros hotspots del mismo usuario. Con un único peer conectado, se le entrega a ése (comportamiento legado). Ver [Echo — Comportamiento con varios hotspots](echo.md#comportamiento-con-varios-hotspots-proxy-inject-only) y [Números especiales](special-numbers.md).
 
 ---

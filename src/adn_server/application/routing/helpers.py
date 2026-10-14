@@ -48,7 +48,9 @@ from typing import Any
 
 from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, bytes_3, bytes_4, int_id
 from ...domain.hbp_protocol import HBPF_SLT_VTERM, STREAM_TO
+from ...domain.mesh_session import obp_session
 from ..server_voice import DEFAULT_SERVER_VOICE_ID
+from .loop_guard import loop_guard_drops
 
 PeerVoiceSlotRow = dict[str, Any]
 PeerVoiceSlotMap = dict[int, PeerVoiceSlotRow]
@@ -62,6 +64,42 @@ RF_MODE_SIMPLEX = "simplex"
 RF_MODE_DUPLEX = "duplex"
 # MMDVMHost DMO: downlink DMRD with TS1 bit set is dropped; only TS2 passes (DMRNetwork.cpp).
 SIMPLEX_VOICE_SLOT = 2
+
+
+# A late packet arrives within milliseconds of its neighbours. A frame that looks behind (or
+# repeated) after this much silence is the stream resuming after a pause: resync to it.
+SEQ_RESYNC_SILENCE_S = 1.0
+
+
+def seq_advance(last_seq: Any, seq: int, silence: float = 0.0, *, terminator: bool = False) -> int:
+    """Steps from ``last_seq`` to ``seq`` on the 8-bit HBP/OBP sequence, which wraps 255 -> 0.
+
+    1: the next packet (or no previous one: ``last_seq`` False/None). 2..127: a forward jump,
+    the packets in between were missed. 0: the same sequence again. -1: behind ``last_seq``,
+    a late or out-of-order packet; the caller drops it and keeps ``last_seq``. A late packet
+    taken as the new reference used to make every later frame of the call look out of order.
+    ``seq`` 1 behind is a source restarting its count, and ``seq`` 0 again is a repeated
+    voice header, as before: both taken as the next packet.
+
+    ``silence`` is the time since the last accepted frame of the stream. After more than
+    ``SEQ_RESYNC_SILENCE_S`` the stream is resuming from a pause, where the jump can be
+    128 or more (or a whole lap, 0): the frame is taken as a forward jump of ``step`` (at
+    least 1) and the caller resyncs to it.
+
+    A ``terminator`` behind ``last_seq`` is still the next packet: it closes the call, and
+    some client apps send it with ``seq`` 0 whatever came before (dropped, the call only ended
+    on the 5 s stream timeout).
+    """
+    if last_seq is False or last_seq is None:
+        return 1
+    step = (seq - last_seq) & 0xFF
+    if silence > SEQ_RESYNC_SILENCE_S:
+        return max(step, 1)
+    if step == 0 and seq == 0:
+        return 1
+    if step >= 128:
+        return 1 if seq == 1 or terminator else -1
+    return step
 
 
 def _peer_freq_text(value: Any) -> str:
@@ -111,17 +149,24 @@ def peer_is_simplex(peer: dict[str, Any]) -> bool:
     return peer_rf_mode(peer) == RF_MODE_SIMPLEX
 
 
+def _slot_leg_active(slot_st: dict[str, Any], leg: str, pkt_time: float) -> bool:
+    """True when the slot's ``RX`` or ``TX`` leg carries voice (within STREAM_TO)."""
+    leg_type = slot_st.get(f"{leg}_TYPE")
+    if leg_type is None or leg_type == HBPF_SLT_VTERM:
+        return False
+    return (pkt_time - float(slot_st.get(f"{leg}_TIME", 0) or 0)) < STREAM_TO
+
+
 def slot_has_active_voice(slot_st: dict[str, Any], pkt_time: float) -> bool:
     """True when the slot has an active group-voice RX or TX leg (within STREAM_TO)."""
-    rx_type = slot_st.get("RX_TYPE")
-    if rx_type is not None and rx_type != HBPF_SLT_VTERM:
-        if (pkt_time - float(slot_st.get("RX_TIME", 0))) < STREAM_TO:
-            return True
-    tx_type = slot_st.get("TX_TYPE")
-    if tx_type is not None and tx_type != HBPF_SLT_VTERM:
-        if (pkt_time - float(slot_st.get("TX_TIME", 0))) < STREAM_TO:
-            return True
-    return False
+    return _slot_leg_active(slot_st, "RX", pkt_time) or _slot_leg_active(slot_st, "TX", pkt_time)
+
+
+def slot_voice_held_by_other_stream(slot_st: dict[str, Any], stream_id: bytes, pkt_time: float) -> bool:
+    """Like ``slot_has_active_voice``, but ``stream_id``'s own TX leg does not count."""
+    if _slot_leg_active(slot_st, "RX", pkt_time):
+        return True
+    return slot_st.get("TX_STREAM_ID") != stream_id and _slot_leg_active(slot_st, "TX", pkt_time)
 
 
 def _slot_last_voice_activity(slot_st: dict[str, Any]) -> tuple[bytes, float]:
@@ -520,7 +565,14 @@ def master_slot_holds_server_broadcast(
     Announcements stamp TX_TYPE=VHEAD, TX_RFS=server voice ID, and refresh TX_TIME each frame.
     Re-apply global slot contention for OBP→MASTER when held so inject-only defer
     does not interleave mesh voice (legacy ``bridge_master`` TX_TGID/TX_TIME rules).
+
+    Only this server's own voice counts: every server announces with the same IDs, and
+    another server's announcement relayed over OpenBridge (``TX_FROM_MESH``) is ordinary
+    mesh voice. Holding the slot for it made two mesh announcements on different TGs
+    (one server's hourly batch) take the slot from each other for every hotspot.
     """
+    if slot_st.get("TX_FROM_MESH"):
+        return False
     tx_rfs = int_id(slot_st.get("TX_RFS", b"\x00\x00\x00"))
     if server_voice_rf_srcs is not None:
         if tx_rfs not in server_voice_rf_srcs:
@@ -545,6 +597,7 @@ _OBP_FLAT_TX_KEYS = (
     "TX_STREAM_ID",
     "TX_RFS",
     "TX_PEER",
+    "TX_FROM_MESH",
     "TX_H_LC",
     "TX_T_LC",
     "TX_EMB_LC",
@@ -815,6 +868,90 @@ def _obp_stream_active(st: dict[str, Any], pkt_time: float) -> bool:
     return True
 
 
+def obp_ingress_stream_on_system(
+    obp_status: dict[Any, Any],
+    stream_id: bytes,
+    dst_id: bytes,
+    rf_src: bytes,
+) -> int:
+    best_sid: bytes | None = None
+    best_first: float | None = None
+    for sid, st in obp_status.items():
+        if not isinstance(sid, (bytes, bytearray)) or not isinstance(st, dict):
+            continue
+        if "H_LC" in st:
+            continue
+        if st.get("TGID") != dst_id:
+            continue
+        if not _same_rf_source(st.get("RFS", b"\x00\x00\x00"), rf_src):
+            continue
+        if st.get("_fin"):
+            continue
+        first = st.get("1ST")
+        if first is None:
+            continue
+        if best_first is None or float(first) < best_first:
+            best_first = float(first)
+            best_sid = sid
+    return int_id(best_sid if best_sid is not None else stream_id)
+
+
+def obp_cross_system_winner(
+    protocols: dict[str, Any],
+    systems_cfg: dict[str, Any],
+    system_name: str,
+    stream_id: bytes,
+    dst_id: bytes,
+) -> str:
+    hr_times: dict[str, float] = {}
+    for other_name, proto in protocols.items():
+        if systems_cfg.get(other_name, {}).get("MODE") != "OPENBRIDGE":
+            continue
+        obp_status = getattr(proto, "STATUS", None)
+        if not isinstance(obp_status, dict):
+            continue
+        ent = obp_status.get(stream_id)
+        if not isinstance(ent, dict) or "1ST" not in ent or ent.get("TGID") != dst_id:
+            continue
+        hr_times[other_name] = float(ent["1ST"])
+    if not hr_times:
+        return system_name
+    return min(hr_times, key=hr_times.get)
+
+
+def obp_is_canonical_ingress(
+    protocols: dict[str, Any],
+    systems_cfg: dict[str, Any],
+    system_name: str,
+    stream_id: bytes,
+    dst_id: bytes,
+    rf_src: bytes,
+) -> bool:
+    src_proto = protocols.get(system_name)
+    obp_status = getattr(src_proto, "STATUS", None) if src_proto else None
+    if not isinstance(obp_status, dict):
+        return False
+    sid = int_id(stream_id)
+    if sid != obp_ingress_stream_on_system(obp_status, stream_id, dst_id, rf_src):
+        return False
+    return system_name == obp_cross_system_winner(
+        protocols, systems_cfg, system_name, stream_id, dst_id
+    )
+
+
+def obp_status_plugin_voice(
+    protocols: dict[str, Any],
+    system_name: str,
+    stream_id: bytes,
+) -> bool:
+    proto = protocols.get(system_name)
+    status = getattr(proto, "STATUS", None) if proto else None
+    if not isinstance(status, dict):
+        return False
+    ent = status.get(stream_id)
+    return isinstance(ent, dict) and bool(ent.get("_plugin_voice"))
+
+
 def tg_has_active_conversation(
     protocols: dict[str, Any],
     systems_cfg: dict[str, Any],
@@ -924,14 +1061,46 @@ def group_voice_tg_ingress_collision(
     return False
 
 
+def track_rx_stream(
+    slot_st: dict[str, Any],
+    stream_id: bytes,
+    peer_id: bytes,
+    rf_src: bytes,
+    tgid: bytes,
+    now: float,
+    *,
+    ended: bool,
+) -> None:
+    """Keep each ingress stream of a MASTER slot on its own: [peer, rf_src, tgid, start, last].
+
+    Hotspots sharing the inject-only MASTER overwrite the slot's RX_* fields, so the timeout
+    and the reported duration only ever saw the last stream: one that lost its terminator
+    while another hotspot talked on the same slot never got its END RX.
+    """
+    streams = slot_st.setdefault("RX_STREAMS", {})
+    if ended:
+        streams.pop(stream_id, None)
+        return
+    entry = streams.get(stream_id)
+    if entry is None:
+        streams[stream_id] = [peer_id, rf_src, tgid, now, now]
+    else:
+        entry[4] = now
+
+
 def hbp_ingress_downlink_session_blocks_tx(
     voice_slot: int,
     incoming_tgid_b: bytes,
     peer_slots: PeerVoiceSlotMap | None,
 ) -> bool:
-    """True when a hotspot mid downlink QSO on this TG/slot must not ingress TX."""
+    """True when a hotspot mid downlink QSO on this TG/slot must not ingress TX.
+
+    Its own transmission is no downlink: neither while it lasts (``ingress``) nor the bridge
+    hold its terminator leaves (``bridge_hold_ingress``). With another hotspot talking on the
+    same MASTER slot the terminator is checked again as a new stream, after that hold was set.
+    """
     active = (peer_slots or {}).get(int(voice_slot))
-    if not isinstance(active, dict) or active.get("ingress"):
+    if not isinstance(active, dict) or active.get("ingress") or active.get("bridge_hold_ingress"):
         return False
     active_tg = int(active.get("tgid", 0) or 0)
     incoming_tg = int_id(incoming_tgid_b)
@@ -950,6 +1119,9 @@ def hbp_master_ingress_repeat_allowed(
     systems_cfg: dict[str, Any] | None = None,
     is_vterm: bool = False,
     system_cfg: dict[str, Any] | None = None,
+    config: dict[str, Any] | None = None,
+    system_name: str = "",
+    slot: int = 0,
 ) -> bool:
     """True when MASTER REPEAT may fan this ingress packet to other peers.
 
@@ -972,6 +1144,14 @@ def hbp_master_ingress_repeat_allowed(
     # (multi-hotspot MASTER). Blocking it leaves per-peer sessions open forever.
     if is_vterm:
         return True
+    # A loop echo dropped by the loop guard must not reach this MASTER's other peers
+    # either (``config`` is the full server config; the verdict is shared with routing).
+    if config is not None and protocols is not None and loop_guard_drops(
+        config, protocols,
+        system_name=system_name, peer_id=peer_id, slot=slot, rf_src=rf_src,
+        dst_id=dst_id, stream_id=stream_id, pkt_time=pkt_time,
+    ):
+        return False
     per_peer = bool(system_cfg and master_per_peer_slot_contention(
         systems_cfg or {}, "", system_cfg, connected_count=0,
     ))
@@ -1004,6 +1184,15 @@ def unit_data_hbp_target_idle(
         and dst_slot.get("TX_TYPE") == HBPF_SLT_VTERM
         and (pkt_time - dst_slot.get("TX_TIME", 0) > hangtime)
     )
+
+
+def unit_data_reportable(dtype_vseq: int) -> bool:
+    """True when a unit-data frame should emit monitor/report events.
+
+    CSBK prelude (dtype 3) is routed but omitted from BRDG_EVENT — same policy as
+    data-log ``log_dtypes`` — to avoid SMS/GPS setup storms in logs and monitors.
+    """
+    return dtype_vseq in (6, 7, 8)
 
 
 def is_unit_data_ingress(
@@ -1052,24 +1241,10 @@ def is_ua_session_tgid(tgid: int) -> bool:
 
 
 def obp_target_bcsq_quenches_stream(
-    systems_cfg: dict[str, Any], target_name: str, dst_id_b: bytes, stream_id: bytes
+    config: dict[str, Any], target_name: str, dst_id_b: bytes, stream_id: bytes
 ) -> bool:
-    """True if target OBP config has _bcsq[tgid]==stream_id (bytes key or same int TG)."""
-    m = systems_cfg.get(target_name, {}).get("_bcsq")
-    if not isinstance(m, dict) or not m:
-        return False
-    tid = dst_id_b[:3] if isinstance(dst_id_b, bytes) and len(dst_id_b) >= 3 else bytes_3(int_id(dst_id_b))
-    if m.get(tid) == stream_id:
-        return True
-    for k, v in m.items():
-        if v != stream_id:
-            continue
-        try:
-            if isinstance(k, bytes) and len(k) >= 3 and int_id(k) == int_id(tid):
-                return True
-        except Exception:
-            continue
-    return False
+    """True when the target OBP has quenched this stream for this talkgroup."""
+    return obp_session(config, target_name).quenches(dst_id_b, stream_id)
 
 
 def _peer_key_from_int(peer_key: Any) -> bytes:
@@ -1238,10 +1413,23 @@ def _system_has_active_bridge_leg(
 
 
 def peer_options_fields(peer: dict[str, Any]) -> dict[str, Any]:
-    """Parse hotspot OPTIONS into fields used by SINGLE/TIMER resolution."""
+    """Parse hotspot OPTIONS into fields used by SINGLE/TIMER resolution.
+
+    Memoized against the OPTIONS blob, the way ``cached_peer_static_tgs`` already
+    memoizes the static lists: OPTIONS only changes on RPTO, which drops the cache
+    (``invalidate_peer_options_cache``), while ingress asks for these fields
+    several times per voice frame through ``peer_single_mode``.
+    """
+    opts = peer.get("OPTIONS")
+    key = opts if isinstance(opts, bytes) else b""
+    cached = peer.get("_CACHED_OPTIONS_FIELDS")
+    if cached is not None and cached[0] == key:
+        return cached[1]
     from adn_server.application.report.payloads import parse_peer_options_fields
 
-    return parse_peer_options_fields(peer.get("OPTIONS"))
+    fields = parse_peer_options_fields(opts)
+    peer["_CACHED_OPTIONS_FIELDS"] = (key, fields)
+    return fields
 
 
 def _peer_ua_session_entry(
@@ -1301,9 +1489,9 @@ def _peer_static_tg_blocks_slot(peer: dict[str, Any], slot: int, tgid: int) -> b
     match on one slot must not block genuinely independent dynamic activity
     on the *other* slot (e.g. TG static on TS2, this same peer separately
     keying up the same TG on TS1)."""
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     tg = str(tgid)
     if peer_is_simplex(peer):
         return tg in ts1 or tg in ts2
@@ -1788,9 +1976,9 @@ def peer_single_blocks_foreign_same_tg_downlink(
 
 def peer_static_options_tg_count(peer: dict[str, Any]) -> int:
     """Count distinct static group TGs listed in peer OPTIONS (TS1 ∪ TS2)."""
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     return len(set(ts1) | set(ts2))
 
 
@@ -1810,18 +1998,18 @@ def peer_receives_group_tgid(peer: dict[str, Any], slot: int, tgid: int) -> bool
     slot while self-service lists the TG on the other.
     """
     del slot
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     tg = str(tgid)
     return tg in ts1 or tg in ts2
 
 
 def peer_options_static_tg_slot(peer: dict[str, Any], tgid: int) -> int | None:
     """Timeslot (1 or 2) where peer OPTIONS list ``tgid``, when unambiguous."""
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     tg = str(tgid)
     in_ts1 = tg in ts1
     in_ts2 = tg in ts2
@@ -1878,9 +2066,9 @@ def peer_downlink_voice_slot(
     static = peer_options_static_tg_slot(peer, tgid)
     if static is not None:
         return static
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.routing.peer_downlink_index import cached_peer_static_tgs
 
-    ts1, ts2 = parse_peer_options_static(peer.get("OPTIONS"))
+    ts1, ts2 = cached_peer_static_tgs(peer)
     tg = str(tgid)
     if tg in ts1 and tg in ts2:
         # Static on both slots (peer_options_static_tg_slot returns None

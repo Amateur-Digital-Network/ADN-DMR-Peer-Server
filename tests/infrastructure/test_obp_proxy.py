@@ -22,6 +22,8 @@
 
 from __future__ import annotations
 
+import logging
+
 import pytest
 from tests.conftest import minimal_valid_config
 
@@ -32,9 +34,12 @@ from adn_server.application.proxy.deployment import (
     obp_bridge_legacy_listen_port,
     obp_proxy_bind_legacy_ports,
     obp_proxy_enabled,
+    openbridge_passphrase_collisions,
 )
 from adn_server.domain import bytes_4
 from adn_server.domain.errors import ConfigError
+from adn_server.domain.mesh_session import obp_session
+from adn_server.infrastructure.config_normalizer import normalize_obp_config
 from adn_server.infrastructure.config_validator import validate_config
 from adn_server.infrastructure.hbp_constants import DMRD
 from adn_server.infrastructure.mesh.obp_v1 import build_bcka, build_dmrd_v1
@@ -46,7 +51,11 @@ from adn_server.infrastructure.proxy.obp_fanin import (
     ObpFanInDemux,
     ObpIngressReplyTransport,
 )
-from adn_server.infrastructure.proxy.obp_runtime import build_obp_bridge_registry
+from adn_server.infrastructure.proxy.obp_runtime import (
+    apply_obp_proxy_config_reload,
+    build_obp_bridge_registry,
+    start_obp_proxy_service,
+)
 
 _PASS = b"test-passphrase\x00\x00\x00\x00\x00\x00"
 _NETWORK = bytes_4(73044)
@@ -68,12 +77,48 @@ class _RecordingTransport:
 class _RecordingObp:
     def __init__(self) -> None:
         self.packets: list[tuple[bytes, tuple[str, int]]] = []
+        self.transport: object | None = None
 
     def _obp_datagram_received(self, data: bytes, sockaddr: tuple[str, int]) -> None:
         self.packets.append((data, sockaddr))
 
 
-def _sample_dmr_voice() -> bytes:
+class _FakeSocket:
+    def setsockopt(self, *_args: object) -> None:
+        return None
+
+    def getsockopt(self, *_args: object) -> int:
+        return 0
+
+
+class _FakeUdpPort:
+    def __init__(self, port: int, protocol: object) -> None:
+        self.protocol = protocol
+        self.socket = _FakeSocket()
+        self.port = port
+
+    def getHost(self) -> _FakeUdpPort:
+        return self
+
+    def stopListening(self) -> None:
+        return None
+
+
+class _FakeReactor:
+    """listenUDP that hands each listener its own recording transport."""
+
+    def __init__(self) -> None:
+        self.transports: dict[int, _RecordingTransport] = {}
+
+    def listenUDP(self, port: int, protocol: object, interface: str = "") -> _FakeUdpPort:
+        transport = _RecordingTransport()
+        transport.port = port
+        protocol.transport = transport  # type: ignore[attr-defined]
+        self.transports[port] = transport
+        return _FakeUdpPort(port, protocol)
+
+
+def _sample_dmr_voice(stream_id: int = 0xAABBCCDD) -> bytes:
     return b"".join(
         [
             DMRD,
@@ -82,7 +127,7 @@ def _sample_dmr_voice() -> bytes:
             bytes_4(52090)[1:4],
             bytes_4(1),
             bytes([0x10]),
-            bytes_4(0xAABBCCDD),
+            bytes_4(stream_id),
             b"\x00" * 33,
         ]
     )
@@ -242,6 +287,40 @@ def test_validate_obp_proxy_duplicate_network_id() -> None:
     assert "NETWORK_ID" in str(exc.value)
 
 
+def test_shared_passphrase_between_bridges_is_reported() -> None:
+    """Control frames carry no NETWORK_ID, so a shared passphrase leaves only the
+    source address to tell two bridges apart. str and bytes are the same secret."""
+    config = _obp_config()
+    config["SYSTEMS"]["OBP-EU"] = {
+        **config["SYSTEMS"]["OBP-CL"],
+        "PORT": 62045,
+        "NETWORK_ID": 73045,
+        "PASSPHRASE": b"test-passphrase",
+    }
+    assert openbridge_passphrase_collisions(config) == [["OBP-CL", "OBP-EU"]]
+
+
+def test_distinct_passphrases_are_not_reported() -> None:
+    config = _obp_config()
+    config["SYSTEMS"]["OBP-EU"] = {
+        **config["SYSTEMS"]["OBP-CL"],
+        "PORT": 62045,
+        "NETWORK_ID": 73045,
+        "PASSPHRASE": "another-one",
+    }
+    assert openbridge_passphrase_collisions(config) == []
+
+
+def test_only_enabled_openbridge_systems_count_as_a_collision() -> None:
+    """A disabled bridge, a MASTER and an empty passphrase are not a clash."""
+    config = _obp_config()
+    config["SYSTEMS"]["OBP-OFF"] = {**config["SYSTEMS"]["OBP-CL"], "ENABLED": False, "NETWORK_ID": 73046}
+    config["SYSTEMS"]["HOTSPOT"]["PASSPHRASE"] = "test-passphrase"
+    config["SYSTEMS"]["OBP-BLANK"] = {**config["SYSTEMS"]["OBP-CL"], "NETWORK_ID": 73047, "PASSPHRASE": ""}
+    config["SYSTEMS"]["OBP-BLANK2"] = {**config["SYSTEMS"]["OBP-CL"], "NETWORK_ID": 73048, "PASSPHRASE": ""}
+    assert openbridge_passphrase_collisions(config) == []
+
+
 def test_validate_obp_proxy_migrated_bridge_port_matches_listen() -> None:
     config = _obp_config()
     config["OBP_PROXY"]["LISTEN_PORT"] = 62044
@@ -355,3 +434,252 @@ def test_build_obp_bridge_registry_starts_inject_protocol() -> None:
     )
     assert proto.started is True
     assert proto.transport is not None
+
+
+def _shared_passphrase_registry() -> tuple[ObpBridgeRegistry, dict[str, _RecordingObp]]:
+    """Two bridges, one passphrase (ADN Systems mesh), different peers."""
+    registry = ObpBridgeRegistry()
+    protos: dict[str, _RecordingObp] = {}
+    for name, network, peer in (
+        ("OBP-FR", 20840, ("82.65.127.86", 62201)),
+        ("OBP-PT", 26811, ("85.241.222.7", 62268)),
+    ):
+        proto = _RecordingObp()
+        protos[name] = proto
+        registry.register(
+            ObpBridgeEntry(
+                system_name=name,
+                network_id=bytes_4(network),
+                passphrase=_PASS,
+                sink=InProcessObpSink(proto),
+                reply_transport=ObpIngressReplyTransport(_RecordingTransport()),
+                peer_hint=peer,
+            )
+        )
+    return registry, protos
+
+
+def test_control_frame_goes_to_the_bridge_that_sent_it() -> None:
+    """BCKA carries no NETWORK_ID: with a shared passphrase, use the peer address."""
+    registry, protos = _shared_passphrase_registry()
+    demux = ObpFanInDemux(registry)
+    transport = _RecordingTransport()
+    peer = ("85.241.222.7", 62268)
+    demux.deliver(build_bcka(_PASS), peer, local_port=62032, transport=transport)
+    assert protos["OBP-PT"].packets, "the keepalive was attributed to the wrong bridge"
+    assert not protos["OBP-FR"].packets
+
+
+def test_control_frame_matches_peer_answering_from_another_port() -> None:
+    """A peer whose own fan-in answers from LISTEN_PORT still resolves by IP."""
+    registry, protos = _shared_passphrase_registry()
+    demux = ObpFanInDemux(registry)
+    demux.deliver(
+        build_bcka(_PASS),
+        ("85.241.222.7", 62032),
+        local_port=62032,
+        transport=_RecordingTransport(),
+    )
+    assert protos["OBP-PT"].packets
+    assert not protos["OBP-FR"].packets
+
+
+def test_control_frame_unknown_peer_falls_back_to_passphrase() -> None:
+    """No address evidence: the shared passphrase can only pick the first bridge."""
+    registry, protos = _shared_passphrase_registry()
+    demux = ObpFanInDemux(registry)
+    demux.deliver(
+        build_bcka(_PASS),
+        ("203.0.113.9", 62044),
+        local_port=62032,
+        transport=_RecordingTransport(),
+    )
+    assert protos["OBP-FR"].packets
+    assert not protos["OBP-PT"].packets
+
+
+def test_reply_transport_prefers_pinned_socket() -> None:
+    fanin = _RecordingTransport()
+    legacy = _RecordingTransport()
+    legacy.port = 62268
+    ingress = _RecordingTransport()
+    reply = ObpIngressReplyTransport(fanin)
+    reply.pin(legacy)
+    reply.note_ingress(ingress)
+    reply.write(b"ping", _ADDR)
+    assert legacy.sent and not fanin.sent and not ingress.sent
+
+
+def test_yaml_loader_keeps_obp_proxy_block(tmp_path) -> None:
+    """OBP_PROXY was dropped while normalizing top-level keys, so ENABLED/LISTEN_PORT
+    in adn-server.yaml were silently ignored."""
+    import yaml as _yaml
+
+    from adn_server.infrastructure.config_loader import YamlConfigLoader
+
+    raw = minimal_valid_config()
+    raw["SYSTEMS"]["OBP-CL"] = {
+        "MODE": "OPENBRIDGE",
+        "ENABLED": True,
+        "PORT": 62044,
+        "NETWORK_ID": 73044,
+        "PASSPHRASE": "test-passphrase",
+        "TARGET_IP": "127.0.0.1",
+        "TARGET_PORT": 62030,
+    }
+    raw["OBP_PROXY"] = {"ENABLED": False, "LISTEN_PORT": 62099}
+    path = tmp_path / "adn-server.yaml"
+    path.write_text(_yaml.safe_dump(raw), encoding="utf-8")
+    config = YamlConfigLoader().load(str(path))
+    assert config.get("OBP_PROXY") == {"ENABLED": False, "LISTEN_PORT": 62099}
+    assert not obp_proxy_enabled(config)
+
+
+def _obp_mesh_config() -> dict:
+    """Two bridges on their own legacy ports, one shared passphrase."""
+    config = _obp_config()
+    del config["SYSTEMS"]["OBP-CL"]
+    for name, network, port, peer in (
+        ("OBP-FR", 20840, 62201, ("82.65.127.86", 62201)),
+        ("OBP-PT", 26811, 62268, ("85.241.222.7", 62268)),
+    ):
+        config["SYSTEMS"][name] = {
+            "MODE": "OPENBRIDGE",
+            "ENABLED": True,
+            "PORT": port,
+            "NETWORK_ID": network,
+            "PASSPHRASE": "test-passphrase",
+            "TARGET_IP": peer[0],
+            "TARGET_PORT": peer[1],
+        }
+    normalize_obp_config(config)
+    normalize_obp_proxy_targets(config)
+    return config
+
+
+def test_reload_keeps_egress_pinned_to_the_bridge_socket(monkeypatch) -> None:
+    """SIGHUP rebuilds the registry: the new reply transports must be re-pinned,
+    or egress silently goes back out of the shared fan-in port."""
+    import logging
+
+    from adn_server.infrastructure.proxy import obp_runtime
+
+    fake = _FakeReactor()
+    monkeypatch.setattr(obp_runtime, "reactor", fake)
+    config = _obp_mesh_config()
+    protocols = {name: _RecordingObp() for name in ("OBP-FR", "OBP-PT")}
+    logger = logging.getLogger("test-obp-proxy")
+
+    state = start_obp_proxy_service(config, protocols, logger=logger)
+    state.registry.bridges["OBP-FR"].reply_transport.write(b"ping", ("82.65.127.86", 62201))
+    assert len(fake.transports[62201].sent) == 1
+
+    for _ in range(2):
+        apply_obp_proxy_config_reload(state, config, protocols, logger=logger)
+
+    state.registry.bridges["OBP-FR"].reply_transport.write(b"ping", ("82.65.127.86", 62201))
+    state.registry.bridges["OBP-PT"].reply_transport.write(b"ping", ("85.241.222.7", 62268))
+    assert len(fake.transports[62201].sent) == 2
+    assert len(fake.transports[62268].sent) == 1
+    assert fake.transports[62032].sent == []
+
+
+def test_sighup_applies_obp_proxy_debug_and_warns_on_a_bind_change(monkeypatch, caplog) -> None:
+    """The reload merge never copied OBP_PROXY: DEBUG stayed as at start and a bind change
+    went unnoticed."""
+    import copy
+    import logging
+
+    from adn_server.infrastructure.config_reload import merge_top_level_config
+    from adn_server.infrastructure.proxy import obp_runtime
+
+    monkeypatch.setattr(obp_runtime, "reactor", _FakeReactor())
+    config = _obp_mesh_config()
+    protocols = {name: _RecordingObp() for name in ("OBP-FR", "OBP-PT")}
+    logger = logging.getLogger("test-obp-proxy")
+    state = start_obp_proxy_service(config, protocols, logger=logger)
+    assert not state.demux.debug
+
+    incoming = copy.deepcopy(config)
+    incoming["OBP_PROXY"]["DEBUG"] = True
+    incoming["OBP_PROXY"]["LISTEN_PORT"] = 62099
+    merge_top_level_config(config, incoming)
+    with caplog.at_level(logging.WARNING, logger="test-obp-proxy"):
+        apply_obp_proxy_config_reload(state, config, protocols, logger=logger)
+
+    assert state.demux.debug
+    assert state.listen_port == 62032  # still bound where it started
+    assert "bind change ignored" in caplog.text
+
+
+def test_control_frame_prefers_configured_peer_over_learned_one() -> None:
+    """A bridge that learned another bridge's address must not start stealing that
+    peer's control frames: the configured peer outranks anything learned."""
+    config = _obp_mesh_config()
+    protocols = {name: _RecordingObp() for name in ("OBP-FR", "OBP-PT")}
+    registry = build_obp_bridge_registry(
+        config,
+        protocols,
+        bind_legacy_ports=True,
+        listen_port=62032,
+        primary_transport=_RecordingTransport(),
+    )
+    peer_pt = ("85.241.222.7", 62268)
+    obp_session(config, "OBP-FR").learn_peer(peer_pt, at=1.0)
+
+    demux = ObpFanInDemux(registry)
+    demux.deliver(build_bcka(_PASS), peer_pt, local_port=62032, transport=_RecordingTransport())
+    assert protocols["OBP-PT"].packets
+    assert not protocols["OBP-FR"].packets
+
+
+def test_control_frame_follows_a_peer_that_moved() -> None:
+    """Voice (DMRD/DMRE, which carries NETWORK_ID) teaches the session where a peer
+    really is; control frames from there must resolve to it, not to whichever bridge
+    happens to be registered first."""
+    config = _obp_mesh_config()
+    protocols = {name: _RecordingObp() for name in ("OBP-FR", "OBP-PT")}
+    registry = build_obp_bridge_registry(
+        config,
+        protocols,
+        bind_legacy_ports=True,
+        listen_port=62032,
+        primary_transport=_RecordingTransport(),
+    )
+    moved_to = ("129.80.176.29", 62268)
+    obp_session(config, "OBP-PT").learn_peer(moved_to, at=1.0)
+
+    demux = ObpFanInDemux(registry)
+    demux.deliver(build_bcka(_PASS), moved_to, local_port=62032, transport=_RecordingTransport())
+    assert protocols["OBP-PT"].packets, "the keepalive did not follow the peer that moved"
+    assert not protocols["OBP-FR"].packets
+
+
+def test_debug_does_not_log_voice_packets(caplog) -> None:
+    """DMRD/DMRE demux by NETWORK_ID, never ambiguous, and *CALL START*/*CALL END*
+    (routing_use_cases.py) already give once-per-call visibility. Concurrent calls
+    on the same bridge (BOTH_SLOTS, several TGs) interleave stream_ids packet by
+    packet, so any per-stream tracking here would still log almost every packet —
+    so voice frames are not logged at all, only control frames are."""
+    receiver = _RecordingObp()
+    transport = _RecordingTransport()
+    registry = ObpBridgeRegistry()
+    registry.register(
+        ObpBridgeEntry(
+            system_name="OBP-CL",
+            network_id=_NETWORK,
+            passphrase=_PASS,
+            sink=InProcessObpSink(receiver),
+            reply_transport=ObpIngressReplyTransport(transport),
+        )
+    )
+    demux = ObpFanInDemux(registry, debug=True)
+    caplog.set_level(logging.DEBUG)
+
+    for stream in (0x11111111, 0x22222222, 0x11111111, 0x22222222):
+        wire = build_dmrd_v1(_sample_dmr_voice(stream_id=stream), _NETWORK, _PASS)
+        demux.deliver(wire, _ADDR, local_port=62032, transport=transport)
+    assert not any("RX" in r.getMessage() for r in caplog.records)
+
+    demux.deliver(build_bcka(_PASS), _ADDR, local_port=62032, transport=transport)
+    assert sum("RX" in r.getMessage() for r in caplog.records) == 1
