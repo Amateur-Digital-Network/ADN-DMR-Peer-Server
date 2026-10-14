@@ -584,6 +584,34 @@ def test_reload_keeps_egress_pinned_to_the_bridge_socket(monkeypatch) -> None:
     assert fake.transports[62032].sent == []
 
 
+def test_sighup_applies_obp_proxy_debug_and_warns_on_a_bind_change(monkeypatch, caplog) -> None:
+    """The reload merge never copied OBP_PROXY: DEBUG stayed as at start and a bind change
+    went unnoticed."""
+    import copy
+    import logging
+
+    from adn_server.infrastructure.config_reload import merge_top_level_config
+    from adn_server.infrastructure.proxy import obp_runtime
+
+    monkeypatch.setattr(obp_runtime, "reactor", _FakeReactor())
+    config = _obp_mesh_config()
+    protocols = {name: _RecordingObp() for name in ("OBP-FR", "OBP-PT")}
+    logger = logging.getLogger("test-obp-proxy")
+    state = start_obp_proxy_service(config, protocols, logger=logger)
+    assert not state.demux.debug
+
+    incoming = copy.deepcopy(config)
+    incoming["OBP_PROXY"]["DEBUG"] = True
+    incoming["OBP_PROXY"]["LISTEN_PORT"] = 62099
+    merge_top_level_config(config, incoming)
+    with caplog.at_level(logging.WARNING, logger="test-obp-proxy"):
+        apply_obp_proxy_config_reload(state, config, protocols, logger=logger)
+
+    assert state.demux.debug
+    assert state.listen_port == 62032  # still bound where it started
+    assert "bind change ignored" in caplog.text
+
+
 def test_control_frame_prefers_configured_peer_over_learned_one() -> None:
     """A bridge that learned another bridge's address must not start stealing that
     peer's control frames: the configured peer outranks anything learned."""

@@ -31,7 +31,7 @@ Example unit: **`examples/systemd/adn-server.service`** (copy to `/etc/systemd/s
 
 **Reload applies:** `GLOBAL`, `REPORTS`, `ALIASES`, **`LOGGER.LOG_LEVEL`** (without process restart), **`PROXY`** (timeouts, debug, block lists — not bind or target), **`SELF_SERVICE`** (PBKDF2 flags merged; enabling/disabling DB loops needs restart), **`PLUGINS`** (see [Plugins](plugins.md)), per-system settings (including a MASTER's **`TS1_STATIC`** / **`TS2_STATIC`**, pushed to its connected hotspots and bridge legs), **new/removed SYSTEMS** (including `GENERATOR` expansion/collapse and new OpenBridge legs), and updated bind addresses (listener restart for that system only).
 
-**Not reloaded:** **`DATABASE`** (MariaDB pool and `peer_dynamic_tgs` bootstrap), `adn-voice.yaml` (separate 15 s loop), Python code, subscriber alias files (separate periodic reload). **BRIDGES** table is not rebuilt on reload — restart if bridge rules changed in a way that requires a full reset. **`PROXY.LISTEN_PORT`**, **`LISTEN_IP`**, and **`TARGET_SYSTEM`** require a **full restart** to take effect, and so does any change to the **`OBP_PROXY`** block.
+**Not reloaded:** **`DATABASE`** (MariaDB pool and `peer_dynamic_tgs` bootstrap), `adn-voice.yaml` (separate 15 s loop), Python code, subscriber alias files (separate periodic reload). **BRIDGES** table is not rebuilt on reload — restart if bridge rules changed in a way that requires a full reset. **`PROXY.LISTEN_PORT`**, **`LISTEN_IP`**, and **`TARGET_SYSTEM`** require a **full restart** to take effect, and so do **`OBP_PROXY`**'s `LISTEN_PORT`, `LISTEN_IP` and `BIND_LEGACY_PORTS` (its `DEBUG` reloads).
 
 **Secrets:** Never commit real passphrases, security URLs, or `user_passwords.json` / `encryption_key.secret`. Use placeholders in templates and keep production files local.
 
@@ -175,7 +175,7 @@ Active when **`OBP_PROXY`** is present or when any **OPENBRIDGE** system exists 
 | **ENABLED** | Set `false` to restore per-bridge UDP bind (legacy mode). |
 | **DEBUG** | Logs control frames (BCKA, BCSQ, …) and dropped packets at `DEBUG`; never accepted voice frames. |
 
-**LISTEN_PORT** must differ from **`PROXY.LISTEN_PORT`**: the validator rejects both on the same port. On `SIGHUP` the bridge registry is rebuilt (OPENBRIDGE systems added or removed); changes to the `OBP_PROXY` keys themselves need a restart.
+**LISTEN_PORT** must differ from **`PROXY.LISTEN_PORT`**: the validator rejects both on the same port. On `SIGHUP` the bridge registry is rebuilt (OPENBRIDGE systems added or removed); `DEBUG` applies; `LISTEN_PORT`, `LISTEN_IP` and `BIND_LEGACY_PORTS` need a restart (a warning is logged).
 
 ---
 
