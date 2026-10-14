@@ -101,7 +101,7 @@ Repeat **`postrotate`** with **`kill -USR2`** for **`adn-echo`** and **`adn-moni
 
 ## What reaches a hotspot (`tools/hotspot_probe.py`)
 
-When users report cut or choppy calls, `tools/hotspot_probe.py` shows what the server actually delivers to one hotspot. It logs in to a MASTER like a hotspot, subscribes to talkgroups through OPTIONS and never transmits. For every group voice stream it writes one CSV row: start and end (UTC), slot, TG, source, stream ID, frames received, the longest silence between two frames (`max_gap_s`), and whether it ended with a terminator (`terminated`).
+When users report cut or choppy calls, `tools/hotspot_probe.py` shows what the server actually delivers to one hotspot. It logs in to a MASTER like a hotspot, subscribes to talkgroups through OPTIONS and never transmits. For every group voice stream it writes one CSV row: start and end (UTC date and time, `YYYY-MM-DDTHH:MM:SS.s`), slot, TG, source, stream ID, frames received, the longest silence between two frames (`max_gap_s`), and whether it ended with a terminator (`terminated`).
 
 ```bash
 ADN_PROBE_PASSWORD='...' python3 tools/hotspot_probe.py --callsign CALL 127.0.0.1 62031 213003599 \
