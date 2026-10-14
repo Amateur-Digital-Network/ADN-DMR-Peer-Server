@@ -128,7 +128,8 @@ class Probe:
         s = self.streams.pop(sid)
 
         def ts(t: float) -> str:
-            return time.strftime("%H:%M:%S", time.gmtime(t)) + f".{int(t % 1 * 10)}"
+            # Date included: a probe runs for days, and HH:MM:SS alone repeats every day.
+            return time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(t)) + f".{int(t % 1 * 10)}"
 
         self.csv.writerow([ts(s["t0"]), ts(s["t1"]), s["slot"], s["tg"], s["src"], sid, s["n"],
                            f"{s['gap']:.2f}", int(terminated)])
@@ -181,20 +182,25 @@ class Probe:
                     self._frame(data, last_rx)
 
 
+def _hour(start_utc: str) -> str:
+    """``YYYY-MM-DDTHH`` of a row; just ``HH`` for rows written before the date was added."""
+    return start_utc[:13] if "T" in start_utc else start_utc[:2]
+
+
 def summary(path: str, gap_s: float) -> None:
     """Per hour and TG: streams, streams with a silence over gap_s, streams that stopped without a terminator."""
     rows = collections.defaultdict(lambda: [0, 0, 0, 0])
     with open(path) as fh:
         records = list(csv.DictReader(fh))
     for r in records:
-        k = (r["start_utc"][:2], r["tg"])
+        k = (_hour(r["start_utc"]), r["tg"])
         rows[k][0] += 1
         rows[k][1] += float(r["max_gap_s"]) > gap_s
         rows[k][2] += r["terminated"] == "0"
         rows[k][3] += int(r["frames"])
-    print(f"{'hour':>4} {'tg':>8} {'streams':>8} {'gap>' + str(gap_s) + 's':>9} {'no_term':>8} {'frames':>8}")
+    print(f"{'hour (UTC)':>13} {'tg':>8} {'streams':>8} {'gap>' + str(gap_s) + 's':>9} {'no_term':>8} {'frames':>8}")
     for (hour, tg), (n, gaps, cuts, frames) in sorted(rows.items()):
-        print(f"{hour:>4} {tg:>8} {n:>8} {gaps:>9} {cuts:>8} {frames:>8}")
+        print(f"{hour:>13} {tg:>8} {n:>8} {gaps:>9} {cuts:>8} {frames:>8}")
 
 
 def main() -> None:

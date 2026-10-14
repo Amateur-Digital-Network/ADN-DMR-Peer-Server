@@ -101,7 +101,7 @@ Repite **`postrotate`** con **`kill -USR2`** para **`adn-echo`** y **`adn-monito
 
 ## Qué le llega a un hotspot (`tools/hotspot_probe.py`)
 
-Cuando llegan quejas de llamadas cortadas o entrecortadas, `tools/hotspot_probe.py` muestra lo que el servidor entrega de verdad a un hotspot. Se conecta a un MASTER como un hotspot, se suscribe a TGs mediante OPTIONS y nunca transmite. Por cada stream de voz de grupo escribe una fila CSV: inicio y fin (UTC), slot, TG, origen, stream ID, tramas recibidas, el silencio más largo entre dos tramas (`max_gap_s`) y si terminó con terminador (`terminated`).
+Cuando llegan quejas de llamadas cortadas o entrecortadas, `tools/hotspot_probe.py` muestra lo que el servidor entrega de verdad a un hotspot. Se conecta a un MASTER como un hotspot, se suscribe a TGs mediante OPTIONS y nunca transmite. Por cada stream de voz de grupo escribe una fila CSV: inicio y fin (fecha y hora UTC, `AAAA-MM-DDTHH:MM:SS.s`), slot, TG, origen, stream ID, tramas recibidas, el silencio más largo entre dos tramas (`max_gap_s`) y si terminó con terminador (`terminated`).
 
 ```bash
 ADN_PROBE_PASSWORD='...' python3 tools/hotspot_probe.py --callsign INDICATIVO 127.0.0.1 62031 213003599 \

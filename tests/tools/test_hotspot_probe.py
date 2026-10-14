@@ -123,3 +123,28 @@ def test_private_calls_are_ignored(tmp_path: Path) -> None:
     probe._frame(_dmrd(9, 0x80 | 0x40 | 0x20 | 1), 1000.0)
     probe.close()
     assert probe.streams == {}
+
+
+def test_rows_carry_the_utc_date(tmp_path: Path) -> None:
+    """A probe runs for days: HH:MM:SS alone would mix the same hour of different days."""
+    out = tmp_path / "p.csv"
+    probe = hotspot_probe.Probe("127.0.0.1", 9, PEER, PASSWORD, "", str(out))
+    probe._frame(_dmrd(7, 0x80 | 0x20 | 1), 1_760_428_848.5)  # 2025-10-14 08:00:48.5 UTC
+    probe._close(7, False)
+    probe.close()
+    with open(out) as fh:
+        row = next(csv.DictReader(fh))
+    assert row["start_utc"] == "2025-10-14T08:00:48.5" == row["end_utc"]
+
+
+def test_summary_keeps_days_apart_and_reads_old_rows(tmp_path: Path, capsys) -> None:
+    path = tmp_path / "p.csv"
+    path.write_text(
+        ",".join(hotspot_probe.FIELDS) + "\n"
+        "2026-10-13T08:00:26.8,2026-10-13T08:00:33.4,2,213,1000001,1,115,0.07,1\n"
+        "2026-10-14T08:00:48.3,2026-10-14T08:00:54.9,2,213,1000001,2,115,0.06,1\n"
+        "08:00:10.0,08:00:12.0,2,213,2130035,3,30,0.06,0\n"  # written before dates were added
+    )
+    hotspot_probe.summary(str(path), 1.5)
+    lines = capsys.readouterr().out.splitlines()[1:]
+    assert [line.split()[0] for line in lines] == ["08", "2026-10-13T08", "2026-10-14T08"]
