@@ -49,7 +49,7 @@ from hashlib import blake2b
 from time import perf_counter
 from typing import Any
 
-from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, int_id
+from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, int_id
 from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
 from ..subscription.obp_source_ops import ensure_obp_source_for_tg_store, obp_source_needs_ensure
@@ -394,7 +394,10 @@ class ObpForwardMixin:
                     ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
                 )
                 return False
-            _step = seq_advance(st["lastSeq"], seq, pkt_time - st.get("lastSeqTime", pkt_time))
+            _step = seq_advance(
+                st["lastSeq"], seq, pkt_time - st.get("lastSeqTime", pkt_time),
+                terminator=frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM,
+            )
             if _step == 0:
                 st["loss"] += 1
                 logger.debug(

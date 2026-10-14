@@ -71,7 +71,7 @@ SIMPLEX_VOICE_SLOT = 2
 SEQ_RESYNC_SILENCE_S = 1.0
 
 
-def seq_advance(last_seq: Any, seq: int, silence: float = 0.0) -> int:
+def seq_advance(last_seq: Any, seq: int, silence: float = 0.0, *, terminator: bool = False) -> int:
     """Steps from ``last_seq`` to ``seq`` on the 8-bit HBP/OBP sequence, which wraps 255 -> 0.
 
     1: the next packet (or no previous one: ``last_seq`` False/None). 2..127: a forward jump,
@@ -85,6 +85,10 @@ def seq_advance(last_seq: Any, seq: int, silence: float = 0.0) -> int:
     ``SEQ_RESYNC_SILENCE_S`` the stream is resuming from a pause, where the jump can be
     128 or more (or a whole lap, 0): the frame is taken as a forward jump of ``step`` (at
     least 1) and the caller resyncs to it.
+
+    A ``terminator`` behind ``last_seq`` is still the next packet: it closes the call, and
+    DVSwitch Mobile sends it with ``seq`` 0 whatever came before (dropped, the call only ended
+    on the 5 s stream timeout).
     """
     if last_seq is False or last_seq is None:
         return 1
@@ -94,7 +98,7 @@ def seq_advance(last_seq: Any, seq: int, silence: float = 0.0) -> int:
     if step == 0 and seq == 0:
         return 1
     if step >= 128:
-        return 1 if seq == 1 else -1
+        return 1 if seq == 1 or terminator else -1
     return step
 
 

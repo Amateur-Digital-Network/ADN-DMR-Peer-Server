@@ -111,6 +111,8 @@ def test_seq_advance_wraps_and_keeps_late_packets_behind() -> None:
     assert seq_advance(10, 9) == -1
     assert seq_advance(9, 9) == 0
     assert seq_advance(0, 0) == 1  # repeated voice header
+    assert seq_advance(29, 0, terminator=True) == 1  # a terminator closes the call whatever its sequence
+    assert seq_advance(29, 0) == -1
     assert seq_advance(50, 1) == 1  # source restarting its count (1 behind the last)
     # after a silence the stream is resuming, whatever the jump
     assert seq_advance(10, 160, silence=9.0) == 150
@@ -137,3 +139,22 @@ def test_a_stream_resuming_after_a_long_pause_is_forwarded(caplog: pytest.LogCap
     line = _call_end(caplog, _PAUSE, sent)
     assert sent[-41:] == list(range(160, 201)), "all 40 frames after the pause and the terminator"
     assert _field(line, "Max gap") == pytest.approx(9.0, abs=0.01)
+
+
+def test_a_terminator_with_its_sequence_reset_ends_the_call(caplog: pytest.LogCaptureFixture) -> None:
+    # DVSwitch Mobile sends the terminator with seq 0: dropped as late, no CALL END until the stream timeout.
+    config = minimal_config(("MASTER-A",))
+    add_openbridge_system(config, "OBP-1")
+    sc = DeterministicScenario(config=config)
+    sc.seed_routing_table(active_routing_table(_TG, (("MASTER-A", 2), ("OBP-1", 1))))
+    spec = PacketSpec(dst_id=_TG, stream_id=0x0D0D0D0D, rf_src=7300391, slot=1)
+    with caplog.at_level(logging.INFO), patch_routing_wall_time(sc.clock):
+        sc.inject_obp("OBP-1", DeterministicScenario.voice_head_spec(spec))
+        for seq in range(1, 30):
+            sc.clock.advance(0.06)
+            sc.inject_obp("OBP-1", DeterministicScenario.voice_burst_spec(spec, seq=seq, dtype_vseq=(seq - 1) % 6 + 1))
+        sc.clock.advance(0.06)
+        sc.inject_obp("OBP-1", DeterministicScenario.voice_term_spec(spec, seq=0))
+    lines = [r.getMessage() for r in caplog.records if "*CALL END*" in r.getMessage()]
+    assert len(lines) == 1, "no CALL END: the terminator was dropped"
+    assert _field(lines[0], "Loss") == 0.0
