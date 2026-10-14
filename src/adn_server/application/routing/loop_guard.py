@@ -44,8 +44,8 @@ A bridge echo starts while the original is still on air (bridge delay under
 parrot's fixed replay delay (``PLAYBACK_DELAY_S``, 2.0 s), so the parrot is
 never taken for a loop whatever its system or TG is called.
 
-Per system ``LOOP_GUARD``: ``log`` (default) writes one ``*LoopGuard*`` line per
-echo and lets it through, ``true`` drops it, ``false`` neither checks nor
+Per system ``LOOP_GUARD``: ``true`` (default) drops the echo, ``log`` writes one
+``*LoopGuard*`` line per echo and lets it through, ``false`` neither checks nor
 records streams entering there (the parrot replays each over with the caller's
 ID 2 s after it ends; the hold already keeps it out, ``false`` is an extra
 option). Server voice IDs and plugin frames are exempt.
@@ -80,13 +80,13 @@ _FORGET_AFTER_S = 300.0
 
 
 def loop_guard_mode(sys_cfg: dict[str, Any] | None) -> str:
-    """``LOOP_GUARD`` of a system: ``log`` unless set to ``true`` (drop) or ``false`` (off)."""
-    value = (sys_cfg or {}).get("LOOP_GUARD", LOOP_GUARD_LOG)
-    if value is True:
-        return LOOP_GUARD_DROP
+    """``LOOP_GUARD`` of a system: drop unless set to ``log`` or ``false`` (off)."""
+    value = (sys_cfg or {}).get("LOOP_GUARD", True)
     if value is False:
         return LOOP_GUARD_OFF
-    return LOOP_GUARD_LOG
+    if value == LOOP_GUARD_LOG:
+        return LOOP_GUARD_LOG
+    return LOOP_GUARD_DROP
 
 
 def loop_guard_hold(config: dict[str, Any]) -> float:

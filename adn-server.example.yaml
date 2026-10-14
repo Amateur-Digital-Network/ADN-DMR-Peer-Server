@@ -141,8 +141,14 @@ SYSTEMS:
     ALLOW_UNREG_ID: false
     PROXY_CONTROL: false
     OVERRIDE_IDENT_TG: ""
-    # Bridge loop echoes entering here: log (default) only logs them, true drops them, false skips the check
-    LOOP_GUARD: log
+    # Loop guard for bridges that transcode (EchoLink/ASL, YSF2DMR, DVSwitch). They re-encode
+    # the audio with a new stream ID, so the usual stream-ID loop control cannot see a call
+    # that goes out through one and comes back in. They keep the caller's ID, though: a
+    # stream entering here from the same caller on the same TG while that caller is still
+    # on air from another ingress (or ended under GLOBAL.LOOP_GUARD_HOLD ago) is an echo.
+    # true (default) drops it, log only writes a *LoopGuard* line and lets it through,
+    # false skips the check. Stream-ID loop control, HOPS and BCSQ always apply.
+    LOOP_GUARD: true
     # Answer a hotspot's TG / ID 4000 with its link status, to that hotspot only (default true)
     TG4000_VOICE: true
 
