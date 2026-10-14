@@ -61,7 +61,7 @@ def test_an_over_resuming_after_a_long_pause_is_forwarded() -> None:
 
 
 def test_a_terminator_with_its_sequence_reset_ends_the_over() -> None:
-    # DVSwitch Mobile, as captured on 7302: header seq 0, bursts 1..29, terminator seq 0 again.
+    # A client app, as captured on 7302: header seq 0, bursts 1..29, terminator seq 0 again.
     # Taken as a late packet it was dropped, and the over only ended on the 5 s stream timeout.
     scenario = DeterministicScenario(routing_table=active_routing_table(91, (("MASTER-A", 2), ("MASTER-B", 2))))
     base = PacketSpec(dst_id=91, stream_id=0x10101010, rf_src=7300391, peer_id=1001)
