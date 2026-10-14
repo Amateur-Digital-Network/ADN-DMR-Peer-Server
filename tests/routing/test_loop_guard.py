@@ -91,8 +91,8 @@ def _loop_lines(caplog: pytest.LogCaptureFixture) -> list[str]:
 
 
 def test_mode_parsing() -> None:
-    assert loop_guard_mode({}) == "log"
-    assert loop_guard_mode(None) == "log"
+    assert loop_guard_mode({}) == "drop"
+    assert loop_guard_mode(None) == "drop"
     assert loop_guard_mode({"LOOP_GUARD": "log"}) == "log"
     assert loop_guard_mode({"LOOP_GUARD": True}) == "drop"
     assert loop_guard_mode({"LOOP_GUARD": False}) == "off"
@@ -111,9 +111,20 @@ def test_echo_on_same_tg_from_another_ingress_is_dropped(caplog: pytest.LogCaptu
     assert "dropped" in lines[0] and f"SUB {_CALLER}" in lines[0] and f"TG {_TG}" in lines[0]
 
 
-def test_log_mode_is_the_default_and_only_logs(caplog: pytest.LogCaptureFixture) -> None:
+def test_the_default_drops_the_echo(caplog: pytest.LogCaptureFixture) -> None:
     scenario = _scenario(guard="log")
     del scenario.config["SYSTEMS"]["BRIDGE-B"]["LOOP_GUARD"]  # default
+    t0 = scenario.clock.time()
+    with caplog.at_level(logging.WARNING):
+        _over(scenario, "MASTER-A", _ORIGINAL, t0)
+        _over(scenario, "BRIDGE-B", _ECHO, t0 + 0.5)
+
+    assert _routed(scenario) == {_ORIGINAL}
+    assert "dropped" in _loop_lines(caplog)[0]
+
+
+def test_log_mode_only_logs(caplog: pytest.LogCaptureFixture) -> None:
+    scenario = _scenario(guard="log")
     t0 = scenario.clock.time()
     with caplog.at_level(logging.WARNING):
         _over(scenario, "MASTER-A", _ORIGINAL, t0)
