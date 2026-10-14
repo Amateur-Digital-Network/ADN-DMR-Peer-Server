@@ -142,7 +142,7 @@ def test_a_stream_resuming_after_a_long_pause_is_forwarded(caplog: pytest.LogCap
 
 
 def test_a_terminator_with_its_sequence_reset_ends_the_call(caplog: pytest.LogCaptureFixture) -> None:
-    # DVSwitch Mobile sends the terminator with seq 0: dropped as late, no CALL END until the stream timeout.
+    # Some client apps send the terminator with seq 0: dropped as late, no CALL END until the stream timeout.
     config = minimal_config(("MASTER-A",))
     add_openbridge_system(config, "OBP-1")
     sc = DeterministicScenario(config=config)

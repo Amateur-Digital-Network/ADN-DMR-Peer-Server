@@ -87,7 +87,7 @@ def seq_advance(last_seq: Any, seq: int, silence: float = 0.0, *, terminator: bo
     least 1) and the caller resyncs to it.
 
     A ``terminator`` behind ``last_seq`` is still the next packet: it closes the call, and
-    DVSwitch Mobile sends it with ``seq`` 0 whatever came before (dropped, the call only ended
+    some client apps send it with ``seq`` 0 whatever came before (dropped, the call only ended
     on the 5 s stream timeout).
     """
     if last_seq is False or last_seq is None:
