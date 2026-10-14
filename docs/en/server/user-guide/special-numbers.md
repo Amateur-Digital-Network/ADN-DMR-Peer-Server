@@ -82,7 +82,7 @@ In-band bridge activation/deactivation is applied on **voice terminator (VTERM)*
 
 Other hotspots on a shared MASTER do not hear it, it never goes to OpenBridge, and it stops if that hotspot starts receiving another stream on the slot. It is paced on the reactor, one frame every 58 ms. One reply per over; none if the terminator is lost.
 
-**Shared MASTER, legs:** a dynamic leg the sender was the only one using (no other connected hotspot holds that TG on that slot as a dynamic session, an OPTIONS static or a YAML static) is set IDLE right away instead of waiting for its timer.
+**Shared MASTER, legs:** a 4000 never releases a leg that **any** connected hotspot, the sender included, has on that slot as a static (OPTIONS or the MASTER's YAML); another hotspot's dynamic session on it also keeps it. Any other dynamic leg the sender held is set IDLE right away instead of waiting for its timer.
 
 ### `SINGLE_MODE` impact on in-band deactivation
 
@@ -115,7 +115,7 @@ The **audio** is sent with the **configured source ID** and **destination TG 9**
 
 ## Private call to ID 4000
 
-A **unit** call to **4000** is treated as **disconnect dynamics** only; it is **not** routed as a normal private call.
+A **unit** call to **4000** is treated as **disconnect dynamics** only; it is **not** routed as a normal private call. With `TG4000_VOICE` (default `true`) the hotspot also gets the [voice reply](#tg--id-4000--deactivate-dynamic-bridges) as a private call from ID 4000.
 
 ## OpenBridge ingress — group TG filters {#openbridge-ingress--group-tg-filters}
 
@@ -131,8 +131,8 @@ Many small IDs (0–5, 9, etc.) and the **999x service** range are excluded from
 |------------|------|
 | **VOICE.DMR_ID** (source) | Server-generated voice — **caller ID** on receivers (default **1000001**) |
 | **5000** (destination) | No auto user-activated bridge if missing from `BRIDGES` |
-| **4000** (group) | Deactivate dynamic bridges |
-| **4000** (unit) | Disconnect dynamics; not routed as PC |
+| **4000** (group) | Deactivate dynamic bridges; voice status reply on TG 4000 (`TG4000_VOICE`, default `true`) |
+| **4000** (unit) | Disconnect dynamics; not routed as PC; voice status reply from ID 4000 (`TG4000_VOICE`) |
 | **9991–9999** | On-demand / information audio (trigger TG); playback uses `VOICE.DMR_ID` → TG **9** (TS2) |
 | **9** | Service/prompt lane (short server audio); reserved for auto-bridges; internal **TGID** on TS2 legs |
 | **9990** | Echo bridge TG (with ECHO system) |

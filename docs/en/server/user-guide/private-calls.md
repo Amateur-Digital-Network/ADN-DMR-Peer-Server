@@ -9,6 +9,12 @@
 - Populated when stations register traffic; persisted via configured **`SUB_MAP`** pickle path under **`ALIASES`**.
 - Used to resolve **destination radio ID** to a **target system** and **slot** for private forwarding.
 - Unit data (SMS, ACKs) whose destination was last heard on the same hotspot it came from is not sent back to that hotspot: both radios hear each other on RF, and the echo would transmit over their own exchange.
+- Unit data to an individual ID last heard on a non-OPENBRIDGE system less than 900 s ago is not fanned out to the OpenBridges; the `SUB_MAP` lookup delivers it locally. Subscribers learned over an OpenBridge, or older entries, keep the fan-out.
+
+<a id="sub_map-persistence"></a>
+### SUB_MAP persistence
+
+With `ALIASES.SUB_MAP_FILE` set, `SUB_MAP` is checked every **300 s** (entries older than 24 h are trimmed) and written only when a route changed or an entry's timestamp moved to a new hour. The file is written to a `.tmp` and renamed, so a crash never leaves it truncated. `SIGHUP` and shutdown always write it.
 
 <a id="service-systems-sub_map_learn"></a>
 ### Service systems (`SUB_MAP_LEARN`)

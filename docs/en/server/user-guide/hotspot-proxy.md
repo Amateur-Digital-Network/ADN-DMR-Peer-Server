@@ -92,6 +92,9 @@ Details of the dashboard flow: [Self-service](../../monitor/self-service.md).
 ## Multi-hotspot behaviour
 
 - Each authenticated hotspot is a **peer** on the inject-only MASTER with its own **OPTIONS** (static TGs). **Repeat** and monitor fan-out respect **per-peer OPTIONS** — traffic for a TG is not sent to peers that did not select it.
+- **`TS1_STATIC`** / **`TS2_STATIC`** on the MASTER are added to every connected hotspot's statics, on top of its OPTIONS (TGs 0–5, 9 and 9990–9999 are ignored). A **SIGHUP** updates connected hotspots and the MASTER's bridge legs; the monitor shows each hotspot's resulting list, yaml TGs first.
+- Hotspots talking at once on the same MASTER slot are tracked **per stream**: each one times out on its own and gets its own END with its real duration.
+- A failed login, a callsign mismatch or one hotspot leaving no longer resets the MASTER's bridges; the reset (default OPTIONS restored, its bridge legs set idle) happens only when its **last** peer is gone.
 - **Parrot / echo** talkgroups **9990–9999** are **point-to-point**: they bypass the OPTIONS filter and return **only** to the exact peer that originated the call (`RX_PEER` on the slot), never to other hotspots of the same user. With a single connected peer, it is delivered to that peer (legacy behaviour). See [Echo — Multi-hotspot behaviour](echo.md#multi-hotspot-behaviour-inject-only-proxy) and [Special numbers](special-numbers.md).
 
 ---

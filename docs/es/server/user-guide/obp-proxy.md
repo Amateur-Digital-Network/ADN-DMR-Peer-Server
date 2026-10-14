@@ -24,6 +24,8 @@ OBP_PROXY:
 
 Las secciones OPENBRIDGE no cambian (`PORT`, `NETWORK_ID`, `PASSPHRASE`, `TARGET_*`, ACL, etc.). Con proxy activo, `PORT` se conserva como metadato (`_REPORT_PORT` internamente) para monitor/report y listeners legacy opcionales.
 
+`DEBUG: true` registra las tramas de control y los paquetes descartados, nunca las tramas de voz aceptadas (`*CALL START*` / `*CALL END*` ya cubren las llamadas). Con `SIGHUP` se reconstruye el registro de bridges para los sistemas OPENBRIDGE nuevos o eliminados; los cambios en las propias claves de `OBP_PROXY` (`DEBUG`, `LISTEN_PORT`, `LISTEN_IP`, `BIND_LEGACY_PORTS`) requieren reinicio.
+
 ## Migración por bridge (`BIND_LEGACY_PORTS: true`)
 
 Con el flag global activo, cada OPENBRIDGE migra de forma individual:
@@ -42,9 +44,14 @@ Ejemplo: migrar `OBP-CL2` al fan-in compartido mientras `OBP-EU` conserva `PORT:
 2. Opcionalmente añadir bloque `OBP_PROXY` explícito para ajustar `LISTEN_PORT` / `BIND_LEGACY_PORTS`.
 3. `BIND_LEGACY_PORTS: false` y cerrar puertos legacy cuando todos usen `LISTEN_PORT`.
 
+## Requisitos
+
 - `NETWORK_ID` único entre OPENBRIDGE habilitados.
 - `LISTEN_PORT` sin colisión con ningún `PORT` de sección si `BIND_LEGACY_PORTS` es true.
+- `LISTEN_PORT` distinto de `PROXY.LISTEN_PORT`: el validador rechaza los dos en el mismo puerto.
 - `RELAX_CHECKS: true` recomendado para aprender la dirección del peer del primer paquete válido. Lo aprendido vive en la sesión del bridge, no en la config: `TARGET_IP` / `TARGET_PORT` se quedan como están escritos, y una recarga devuelve el enlace a ellos.
+- Para un peer con IP dinámica conviene poner un nombre en `TARGET_IP`: el bridge queda anclado al host que da el DNS, las tramas de otros hosts se rechazan aunque haya `RELAX_CHECKS`, y el nombre se vuelve a resolver cuando el peer cambia de dirección (ver [Configuración](configuration.md#systems-openbridge)).
+- Las tramas de control (BCKA, BCSQ, BCST, BCVE) no llevan `NETWORK_ID`, así que el fan-in las asigna por la dirección del peer (IP:puerto configurado, IP:puerto aprendido, IP configurada, IP aprendida) y solo después por passphrase, en orden de registro. Dale a cada bridge su propia `PASSPHRASE`: los bridges que comparten una reciben un aviso al arrancar y en `--doctor`.
 
 ## ¿Por qué no cruzó esa llamada?
 

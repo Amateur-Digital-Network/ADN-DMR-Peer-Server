@@ -29,9 +29,9 @@ kill -HUP $(pidof adn-server.py)    # o: systemctl reload adn-server
 
 Unidad de ejemplo: **`examples/systemd/adn-server.service`** (copiar a `/etc/systemd/system/`; incluye `ExecReload` para `systemctl reload`).
 
-**Se recarga:** `GLOBAL`, `REPORTS`, `ALIASES`, **`LOGGER.LOG_LEVEL`** (sin reiniciar el proceso), **`PROXY`** (timeouts, debug, listas de bloqueo — no bind ni destino), **`SELF_SERVICE`** (flags PBKDF2 fusionados; activar/desactivar bucles BD requiere reinicio), parámetros por system, **systems nuevos/eliminados** (incluida expansión/colapso `GENERATOR` y OBP nuevos), y cambios de IP/puerto (solo reinicia el listener de ese system).
+**Se recarga:** `GLOBAL`, `REPORTS`, `ALIASES`, **`LOGGER.LOG_LEVEL`** (sin reiniciar el proceso), **`PROXY`** (timeouts, debug, listas de bloqueo — no bind ni destino), **`SELF_SERVICE`** (flags PBKDF2 fusionados; activar/desactivar bucles BD requiere reinicio), **`PLUGINS`** (ver [Plugins](plugins.md)), parámetros por system (incluidos **`TS1_STATIC`** / **`TS2_STATIC`** de un MASTER, que llegan a sus hotspots conectados y a sus piernas de bridge), **systems nuevos/eliminados** (incluida expansión/colapso `GENERATOR` y OBP nuevos), y cambios de IP/puerto (solo reinicia el listener de ese system).
 
-**No se recarga:** **`DATABASE`** (pool MariaDB y bootstrap `peer_dynamic_tgs`), `adn-voice.yaml` (loop aparte cada 15 s), código Python, ficheros de alias (recarga periódica). La tabla **BRIDGES** no se reconstruye — reinicia si cambiaste reglas de bridge que exijan reset completo. **`PROXY.LISTEN_PORT`**, **`LISTEN_IP`** y **`TARGET_SYSTEM`** requieren **reinicio completo** para aplicarse.
+**No se recarga:** **`DATABASE`** (pool MariaDB y bootstrap `peer_dynamic_tgs`), `adn-voice.yaml` (loop aparte cada 15 s), código Python, ficheros de alias (recarga periódica). La tabla **BRIDGES** no se reconstruye — reinicia si cambiaste reglas de bridge que exijan reset completo. **`PROXY.LISTEN_PORT`**, **`LISTEN_IP`** y **`TARGET_SYSTEM`** requieren **reinicio completo** para aplicarse, igual que cualquier cambio en el bloque **`OBP_PROXY`**.
 
 **Secretos:** no versionar passphrases reales, URLs de seguridad ni `user_passwords.json` / `encryption_key.secret`. Usa placeholders en plantillas y mantén producción en local.
 
@@ -99,7 +99,7 @@ Aparecen principalmente en **MASTER** (y a menudo en **PEER**). OpenBridge usa u
 | **MODE** | `MASTER`, `PEER` u `OPENBRIDGE`. |
 | **ENABLED** | Si es `false`, el sistema se omite. |
 | **IP** / **PORT** | Dirección UDP de escucha para el listener HBP u OpenBridge de este sistema. |
-| **PASSPHRASE** | Secreto compartido para autenticación HBP (MASTER ↔ PEER). Debe coincidir entre PEER y su MASTER. |
+| **PASSPHRASE** | Secreto compartido para autenticación HBP (MASTER ↔ PEER). Debe coincidir entre PEER y su MASTER. En **OPENBRIDGE** firma las tramas de control (BCKA, BCSQ, …); dale a cada bridge la suya (ver [Proxy OBP](obp-proxy.md#requisitos)). |
 | **USE_ACL** | Sobrescribe ACL por sistema si es true (usa `REG_ACL` / `SUB_ACL` / `TGID_TS*_ACL` del sistema). |
 | **GROUP_HANGTIME** | Tiempo de hang (segundos) para el estado de voz de grupo. |
 | **DEFAULT_UA_TIMER** | Tiempo de espera por defecto (minutos en muchos sitios) para bridges **activados por usuario**. |
@@ -120,7 +120,7 @@ Aparecen principalmente en **MASTER** (y a menudo en **PEER**). OpenBridge usa u
 | **EXPORT_AMBE** | Flag de exportación AMBE (si está habilitado en el build). |
 | **SINGLE_MODE** | Afecta a OPTIONS / expansión del generador (estilo un solo usuario). |
 | **VOICE_IDENT** | Habilita **identificación por voz** periódica cuando se cumplen condiciones (ver `IdentUseCases`). |
-| **TS1_STATIC** / **TS2_STATIC** | Listas estáticas de TG separadas por comas, enviadas vía manejo OPTIONS (ver `options_config`). |
+| **TS1_STATIC** / **TS2_STATIC** | TG estáticos separados por comas que se suman a **cada** hotspot conectado a este MASTER, además de sus propias OPTIONS (se ignoran los TG 0–5, 9 y 9990–9999). Un `SIGHUP` actualiza los hotspots conectados y las piernas de bridge del MASTER; el monitor muestra la lista resultante de cada hotspot, primero estos. |
 | **DEFAULT_REFLECTOR** | Número de **reflector** por defecto para bridges de marcado `#` (0 = ninguno). |
 | **OVERRIDE_IDENT_TG** | TG opcional para ident por voz en lugar de all-call. |
 | **GENERATOR** | Si es **> 1**, este MASTER se expande en **`NAME-0`**, **`NAME-1`**, … con puertos consecutivos (ver `expand_generator` en código). El **`adn-proxy`** independiente legado usaba el mismo rango; el proxy **integrado** usa **`PROXY.TARGET_SYSTEM`** solo inyección (sin puertos UDP por hotspot en el servidor). |
@@ -150,9 +150,9 @@ El ejemplo **echo** (`adn-echo.example.yaml`) es un PEER que se une al MASTER **
 | Clave | Significado |
 |-------|-------------|
 | **NETWORK_ID** | Debe coincidir con el **NETWORK_ID** del par en paquetes OpenBridge. |
-| **TARGET_IP** / **TARGET_PORT** | Par OpenBridge remoto (UDP). |
-| **TGID_ACL** (o **TG1_ACL**) | ACL de talkgroup para OpenBridge (a menudo estilo `DENY:0-82,…` por rangos). |
-| **RELAX_CHECKS** | Permitir paquetes cuando el socket del par no coincide estrictamente con `TARGET` (usar con cuidado). |
+| **TARGET_IP** / **TARGET_PORT** | Par OpenBridge remoto (UDP). **TARGET_IP** puede ser un nombre: el bridge queda anclado al host que da el DNS (el puerto puede variar), las tramas de otros hosts se rechazan aunque haya `RELAX_CHECKS`, y el nombre se vuelve a resolver cada 300 s y cuando llega una trama rechazada (como mucho cada 15 s). Si el resolver falla se mantiene la dirección actual; un nombre que nunca resolvió vuelve a `RELAX_CHECKS`. |
+| **TGID_ACL** (o **TG1_ACL**) | ACL de talkgroup para OpenBridge (a menudo estilo `DENY:0-82,…` por rangos). **TGID_ACL** prevalece sobre `TGID_TS1_ACL` / `TG1_ACL` y se comprueba en la entrada (con el `USE_ACL` del sistema) y en la salida (con `GLOBAL.USE_ACL`). |
+| **RELAX_CHECKS** | Permitir paquetes cuando el socket del par no coincide estrictamente con `TARGET` (usar con cuidado). Se ignora con un **TARGET_IP** con nombre que ya resolvió: solo se acepta ese host. |
 | **ENHANCED_OBP** | Habilita **BCSQ** / **BCKA** y control de bucle multipath — **debería ser `true`** en enlaces inter-servidor ADN Systems (ver abajo). |
 | **PROTO_VER** | Versión de protocolo **DMRE** embebida; **`5`** selecciona **DMRE / OpenBridge v5** (trama de 89 bytes, BLAKE2b). El valor por defecto en código es **5**; usa **5** en nuevos despliegues ADN. |
 
@@ -173,6 +173,9 @@ Activo cuando existe **`OBP_PROXY`** o algún sistema **OPENBRIDGE** (se aplican
 | **LISTEN_PORT** / **LISTEN_IP** | Bind UDP del fan-in OpenBridge (pareja del **`PROXY`** hotspot **62031**). |
 | **BIND_LEGACY_PORTS** | Con `true`, también escucha cada **`SYSTEMS.*.PORT`** distinto de **`LISTEN_PORT`** (migración bridge a bridge). |
 | **ENABLED** | `false` restaura bind UDP por bridge (modo legacy). |
+| **DEBUG** | Registra en `DEBUG` las tramas de control (BCKA, BCSQ, …) y los paquetes descartados; nunca las tramas de voz aceptadas. |
+
+**LISTEN_PORT** tiene que ser distinto de **`PROXY.LISTEN_PORT`**: el validador rechaza los dos en el mismo puerto. Con `SIGHUP` se reconstruye el registro de bridges (sistemas OPENBRIDGE nuevos o eliminados); los cambios en las claves de `OBP_PROXY` requieren reinicio.
 
 ---
 
@@ -276,8 +279,13 @@ Descargas y ficheros locales para **IDs de peer**, **IDs de suscriptor**, **etiq
 | **TRY_DOWNLOAD** | Si se deben obtener desde URLs cuando están obsoletos. |
 | **PEER_FILE** / **SUBSCRIBER_FILE** / **TGID_FILE** | Nombres de ficheros locales. |
 | **\*_URL** | Orígenes remotos para descargas. |
-| **SUB_MAP_FILE** | Ruta pickle para **SUB_MAP** (enrutado de llamadas privadas); nombre por defecto si está vacío. |
-| **STALE_DAYS** | Umbral de refresco para descargas. |
+| **SUB_MAP_FILE** | Ruta pickle para **SUB_MAP** (enrutado de llamadas privadas); nombre por defecto si está vacío. Ver [Llamadas privadas](private-calls.md#sub_map-persistence). |
+| **POLL_INTERVAL_SEC** | Cada cuánto se revisa si hay que descargar las listas (por defecto **900**). |
+| **CHECKSUM_URL** / **CHECKSUM_FILE** | Checksums publicados, que se descargan en cada revisión; una lista solo se descarga cuando su checksum ya no coincide con el fichero en disco (un checksum que no coincide se reintenta una vez por hora). |
+| **SERVER_ID_URL** / **SERVER_ID_FILE** | Lista de IDs de servidor (la usa `VALIDATE_SERVER_IDS`). |
+| **LOCAL_SUBSCRIBER_FILE** | Fichero local de IDs de suscriptor. |
+| **KEYS_FILE** | Almacén de claves del sistema (por defecto `keys.json`), que se guarda al apagar. |
+| **STALE_DAYS** | Umbral de refresco para descargas; solo aplica sin fichero de checksums. |
 
 ---
 

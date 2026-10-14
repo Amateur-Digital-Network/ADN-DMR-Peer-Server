@@ -9,6 +9,12 @@ Las llamadas **unitarias (privadas)** usan un camino distinto a la voz de **grup
 - Se rellena cuando las estaciones registran tráfico; persiste vía ruta pickle **`SUB_MAP`** configurada bajo **`ALIASES`**.
 - Sirve para resolver **ID de radio de destino** a un **sistema destino** y **slot** para el reenvío privado.
 - Los datos unitarios (SMS, ACK) cuyo destino se oyó por última vez en el mismo hotspot del que llegan no se devuelven a ese hotspot: las dos radios se oyen por RF y el eco transmitiría encima de su propio intercambio.
+- Los datos unitarios a un ID individual oído por última vez en un sistema que no es OPENBRIDGE hace menos de 900 s no se reparten a los OpenBridge; la búsqueda en `SUB_MAP` los entrega localmente. Los suscriptores aprendidos por un OpenBridge, o las entradas más antiguas, mantienen el reparto.
+
+<a id="sub_map-persistence"></a>
+### Persistencia de SUB_MAP
+
+Con `ALIASES.SUB_MAP_FILE` definido, `SUB_MAP` se revisa cada **300 s** (las entradas de más de 24 h se podan) y solo se escribe cuando cambió una ruta o la marca de tiempo de una entrada pasó a una hora nueva. El fichero se escribe en un `.tmp` y se renombra, así que una caída nunca lo deja truncado. `SIGHUP` y el apagado siempre lo escriben.
 
 <a id="service-systems-sub_map_learn"></a>
 ### Sistemas de servicio (`SUB_MAP_LEARN`)

@@ -13,7 +13,7 @@ On the wire, extended OpenBridge uses the **`DMRE`** opcode. The **embedded prot
 - **`DMRD`** version 1 — HMAC-SHA1 authenticated payload (compatibility mode); or
 - **`DMRE`** — extended frame with **BLAKE2b** MAC, embedded version, timestamps, **hops**, source server/repeater IDs, etc. (**DMRE v5** = embedded version 5, recommended above).
 
-This stack implements the **OPENBRIDGE** peer mode in **`udp_hbp.py`** and voice routing in **`RoutingUseCases`** (`application/routing/`, `application/subscription/`).
+This stack implements the **OPENBRIDGE** peer mode in **`udp_hbp.py`** (UDP adapter), with admission rules, the per-frame engine and the link session in **`domain/mesh_admission.py`**, **`domain/mesh_engine.py`** and **`domain/mesh_session.py`**, and voice routing in **`RoutingUseCases`** (`application/routing/`, `application/subscription/`).
 
 ## Ingress (DMRE)
 
@@ -39,7 +39,7 @@ For **group** voice on OpenBridge:
 
 - **Meaning:** “Do not forward this **`stream_id`** on this **TG** to my leg.”
 - **Sent by** the **losing** OBP in loop control to its **peer** (not a global broadcast).
-- **Honoured** when **forwarding** to another OBP: if the destination’s `_bcsq` matches, **skip** `send_system`.
+- **Honoured** when **forwarding** to another OBP: if the destination’s session has quenched that stream on that TG, **skip** `send_system`.
 
 ## BCKA (keepalive)
 
@@ -51,7 +51,7 @@ Per destination row: dedupe `(SYSTEM, TS)`, check **BCSQ**, **BCKA**, **ACL**, r
 
 ## Ingress filters (group TG)
 
-For **group** (and **vcsbk**) traffic, OpenBridge applies **TG filters** before traffic reaches the bridge router. Dropped streams may trigger **BCSQ** back to the peer. The exact rules differ between **DMRD v1** and **DMRE** paths in `udp_hbp.py`; in general they reject traffic that is treated as **local-only** or **wrong server** for the destination, for example:
+For **group** (and **vcsbk**) traffic, OpenBridge applies **TG filters** before traffic reaches the bridge router. Dropped streams may trigger **BCSQ** back to the peer. The exact rules differ between **DMRD v1** and **DMRE** paths in `domain/mesh_admission.py`; in general they reject traffic that is treated as **local-only** or **wrong server** for the destination, for example:
 
 - Low TG numbers (e.g. **≤ 79** on DMRE; DMRD v1 also combines **9990–9999**, **92–199**, **900999** in one check).
 - **9990–9999** and **900999** (service / local-server ranges on DMRE).

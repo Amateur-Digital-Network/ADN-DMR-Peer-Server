@@ -8,7 +8,7 @@ Los intervalos forman parte del **comportamiento observable** del producto (oper
 
 ## Visibilidad de la configuración
 
-El estado en tiempo de ejecución vive en un **`config` dict** compartido: opciones de peers, `SUB_MAP`, campos de plano de control OpenBridge (`_bcsq`, `_bcka`), y similares. Los adaptadores actualizan esta estructura; los casos de uso la leen. Así coincide con cómo se inspecciona el proceso en ejecución en logs y escenarios de soporte.
+El estado en tiempo de ejecución vive en un **`config` dict** compartido: opciones de peers, `SUB_MAP` y similares. Los adaptadores actualizan esta estructura; los casos de uso la leen. El estado de cada enlace OpenBridge (keepalive, dirección aprendida del par, tabla de quench) vive en un `ObpBridgeSession` por bridge (`domain/mesh_session.py`), no en la config; en `STATUS` solo queda el flag `_bcsq` por stream (BCSQ ya enviado). Así coincide con cómo se inspecciona el proceso en ejecución en logs y escenarios de soporte.
 
 ## Intervalos clave de temporizadores (contrato operativo)
 
@@ -18,7 +18,7 @@ Los siguientes intervalos forman parte del comportamiento actual en ejecución:
 |------|-----------|-----|
 | `rule_timer` | **52s** | Progresión de timeout y estado on/off de bridges. |
 | `stream_trimmer` | **5s** | Limpieza de streams, manejo de timeout y cierre de estado de llamada. |
-| `bridge_reset` | **6s** | Limpieza de flags de reset y cierre de resets pendientes. |
+| `bridge_reset` | **6s** | Limpieza de flags de reset y cierre de resets pendientes. Un MASTER se marca para reset solo cuando se va su **último** peer, no por un login fallido, un indicativo que no coincide o la salida de un hotspot. |
 | OPTIONS refresh | **por evento** | TG estáticas / reflector vía **RPTO**, **startup/reload** (`apply_startup_bridges`), fallback **dmrd** sin source. Sin loop periódico de 26s (**D-28**). |
 | `dynamic_tg_purge_loop` | **60s** | Purga filas **SINGLE=1** expiradas de `peer_dynamic_tgs` y `_PEER_UA_SESSIONS` en memoria. |
 | `lst_seen` (reconcile self-service) | **120s** | Reconcilia `Clients.logged_in` contra los peers conectados actualmente: los conectados quedan `logged_in=1`, el resto `0`. Corre con `now=True` en el primer tick para limpiar flags obsoletos inmediatamente tras un reinicio del servidor. Evita que el monitor autentique hotspots desconectados vía login-by-IP. |
@@ -49,11 +49,15 @@ No se aplica en rutas VTERM **unit/private**.
 
 ## Notas de comportamiento de packet-control
 
-Comportamiento actual para deduplicación y orden de streams:
+Comportamiento actual para deduplicación y orden de streams (`seq_advance` en `application/routing/helpers.py`, en la entrada OBP y HBP):
 
-- La deduplicación por hash en OBP se evalúa con guardia **`seq > 0`**.
-- En HBP se calcula/guarda CRC también para `seq == 0`, pero la caída por duplicado por CRC sigue guardada por **`seq > 0`**.
-- Esto evita sobre-descartar casos de primer paquete y mantiene protección de duplicados de stream.
+- La secuencia de 8 bits se compara **módulo 256**, así que el paso 255 → 0 es el paquete siguiente.
+- Un salto hacia adelante cuenta como **Loss** cada paquete saltado. La misma secuencia otra vez es un duplicado: se descarta y cuenta como Loss.
+- Un paquete **detrás** del último llega tarde: se descarta, cuenta como Loss y se conserva la última secuencia.
+- Un seq 0 repetido (cabecera de voz) y un reinicio en seq 1 se toman como el paquete siguiente.
+- Tras más de **1 s** de silencio (`SEQ_RESYNC_SILENCE_S`) el stream se resincroniza con la secuencia que llegue.
+- Un **terminador** siempre se acepta, aunque venga detrás (algunas apps cliente lo envían con seq 0), así que la llamada termina en el acto y no al timeout de 5 s del stream.
+- La caída de duplicados por hash del payload sigue con guardia **`seq > 0`** en OBP y HBP (HBP igual guarda el hash de `seq == 0`).
 
 <a id="loop-guard"></a>
 ## Loop guard (protección contra bucles)

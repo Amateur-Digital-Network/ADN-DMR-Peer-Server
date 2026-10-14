@@ -24,6 +24,8 @@ OBP_PROXY:
 
 OPENBRIDGE sections stay unchanged (`PORT`, `NETWORK_ID`, `PASSPHRASE`, `TARGET_*`, ACL, etc.). With proxy enabled, `PORT` is kept as metadata (`_REPORT_PORT` internally) for monitor/report and optional legacy listeners.
 
+`DEBUG: true` logs control frames and dropped packets, never accepted voice frames (`*CALL START*` / `*CALL END*` already cover calls). On `SIGHUP` the bridge registry is rebuilt for OPENBRIDGE systems added or removed; changes to the `OBP_PROXY` keys themselves (`DEBUG`, `LISTEN_PORT`, `LISTEN_IP`, `BIND_LEGACY_PORTS`) need a restart.
+
 ## Per-bridge migration (`BIND_LEGACY_PORTS: true`)
 
 When the global flag is true, each OPENBRIDGE can migrate individually:
@@ -46,7 +48,10 @@ Example: migrate `OBP-CL2` to the shared fan-in while `OBP-EU` keeps `PORT: 6299
 
 - `NETWORK_ID` must be unique among enabled OPENBRIDGE systems.
 - `LISTEN_PORT` must not collide with any OPENBRIDGE `PORT` when `BIND_LEGACY_PORTS` is true.
+- `LISTEN_PORT` must differ from `PROXY.LISTEN_PORT`: the validator rejects both on the same port.
 - `RELAX_CHECKS: true` is recommended so the peer address is learned from the first valid packet. What is learned lives in the bridge's session, not in the config: `TARGET_IP` / `TARGET_PORT` stay as written, and a reload puts the link back on them.
+- A peer on a dynamic IP is better given by hostname in `TARGET_IP`: the bridge is anchored to the host DNS gives, frames from other hosts are refused even with `RELAX_CHECKS`, and the name is re-resolved when the peer moves (see [Configuration](configuration.md#systems-openbridge)).
+- Control frames (BCKA, BCSQ, BCST, BCVE) carry no `NETWORK_ID`, so the fan-in matches them by peer address (configured IP:port, learned IP:port, configured IP, learned IP) and only then by passphrase, in registration order. Give each bridge its own `PASSPHRASE`: bridges sharing one get a warning at startup and in `--doctor`.
 
 ## Why did that call not cross?
 
