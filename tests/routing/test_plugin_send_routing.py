@@ -421,3 +421,68 @@ def test_the_servers_own_voice_does_not_count() -> None:
     assert all(_play(sc, ingress, _beacon()))  # a plugin announcement on TG 213, routed everywhere
     sc.clock.advance(1.0)
     assert ingress.tg_quiet_for(TG) == math.inf
+
+
+def test_a_live_over_sharing_its_slot_with_another_tg_is_live() -> None:
+    """Shared SYSTEM: hotspot A talks on TG 213 while hotspot B talks on TG 91 on the same slot,
+    B's frame last. The slot's flat RX fields say 91; A's stream in RX_STREAMS is still live."""
+    sc, ingress = _qso_scenario()
+    a = PacketSpec(rf_src=2130035, dst_id=TG, peer_id=1001, slot=2, stream_id=0x0F0F0F01)
+    b = PacketSpec(rf_src=2130036, dst_id=91, peer_id=1002, slot=2, stream_id=0x0F0F0F02)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_hbp("SYSTEM", DeterministicScenario.voice_head_spec(a), ingress_pkt_time=sc.clock.time())
+        sc.inject_hbp("SYSTEM", DeterministicScenario.voice_head_spec(b), ingress_pkt_time=sc.clock.time())
+        for n in range(1, 70):  # ~4 s of interleaved bursts, B's last
+            for spec in (a, b):
+                sc.clock.advance(0.03)
+                sc.inject_hbp("SYSTEM", DeterministicScenario.voice_burst_spec(spec, seq=n, dtype_vseq=(n - 1) % 6 + 1),
+                              ingress_pkt_time=sc.clock.time())
+    assert int_id(sc.protocols["SYSTEM"].STATUS[2]["RX_TGID"]) == 91
+    assert ingress.tg_quiet_for(TG) == 0.0
+
+
+def _trim(sc) -> None:
+    with patch_routing_wall_time(sc.clock):
+        sc.routing.stream_trimmer_loop()
+
+
+def test_a_hotspot_over_without_terminator_is_quiet_from_its_last_frame() -> None:
+    sc, ingress = _qso_scenario()
+    spec = PacketSpec(rf_src=2130035, dst_id=TG, peer_id=2001, slot=2, stream_id=0x10101010)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_hbp("SYSTEM-B", DeterministicScenario.voice_head_spec(spec), ingress_pkt_time=sc.clock.time())
+        for n in range(1, 67):  # a 4 s over that loses its terminator
+            sc.clock.advance(0.06)
+            sc.inject_hbp("SYSTEM-B", DeterministicScenario.voice_burst_spec(spec, seq=n, dtype_vseq=(n - 1) % 6 + 1),
+                          ingress_pkt_time=sc.clock.time())
+    last = sc.clock.time()
+    sc.clock.advance(6.0)
+    _trim(sc)  # the stream times out (5 s idle)
+    assert ingress.tg_quiet_for(TG) == pytest.approx(sc.clock.time() - last, abs=0.01)  # 6 s, not 10
+
+
+def test_a_mesh_over_without_terminator_is_quiet_from_its_last_frame() -> None:
+    sc, ingress = _qso_scenario()
+    spec = PacketSpec(rf_src=3340062, dst_id=TG, peer_id=26811, slot=1, stream_id=0x11111111)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_obp("OBP-1", DeterministicScenario.voice_head_spec(spec))
+        for n in range(1, 67):
+            sc.clock.advance(0.06)
+            sc.inject_obp("OBP-1", DeterministicScenario.voice_burst_spec(spec, seq=n, dtype_vseq=(n - 1) % 6 + 1))
+    last = sc.clock.time()
+    sc.clock.advance(6.0)
+    _trim(sc)
+    assert ingress.tg_quiet_for(TG) == pytest.approx(sc.clock.time() - last, abs=0.01)
+
+
+def test_a_core_announcement_does_not_count() -> None:
+    """Voice ident / 999x playback route as synthetic announcements without a plugin origin."""
+    sc, ingress = _qso_scenario()
+    spec = PacketSpec(rf_src=1000001, dst_id=TG, peer_id=2131, slot=2, stream_id=0x12121212)
+    with patch_routing_wall_time(sc.clock):
+        for frame in (DeterministicScenario.voice_head_spec(spec), DeterministicScenario.voice_term_spec(spec, seq=1)):
+            sc.routing.dmrd_received("SYSTEM", ingress_pkt_time=sc.clock.time(), synthetic_announcement=True,
+                                     **frame.decoded_hbp_args())
+            sc.clock.advance(0.06)
+    sc.clock.advance(1.0)  # its copies on the other legs are no longer live
+    assert ingress.tg_quiet_for(TG) == math.inf  # and the record never noted it

@@ -294,6 +294,9 @@ class RoutingTimerMixin:
                             tgid = st.get("TGID", b"\x00\x00\x00")
                             start = st.get("START", now)
                             duration = max(0.0, last - start)
+                            # Over that lost its terminator: it ended at its last frame.
+                            if hasattr(self, "_note_tg_heard"):
+                                self._note_tg_heard(tgid, last)
                             self._send_routing_event(
                                 "GROUP VOICE,END,RX,{},{},{},{},{},{},{:.2f}".format(
                                     system_name, int_id(stream_id), int_id(peer), int_id(rfs), 1, int_id(tgid), duration
@@ -341,6 +344,8 @@ class RoutingTimerMixin:
                     if last < now - 5:
                         del _slot["RX_STREAMS"][stream_id]
                         ended.add(stream_id)
+                        if hasattr(self, "_note_tg_heard"):  # hotspot over without a terminator
+                            self._note_tg_heard(tgid, last)
                         self._report_rx_timeout(system_name, slot, stream_id, peer, rfs, tgid, start, last)
                 if _slot.get("RX_TYPE") != HBPF_SLT_VTERM and _slot.get("RX_TIME", 0) < now - 5:
                     _slot["RX_TYPE"] = HBPF_SLT_VTERM

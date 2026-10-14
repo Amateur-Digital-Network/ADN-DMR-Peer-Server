@@ -195,9 +195,12 @@ class RoutingUseCases(
     _TG_LAST_HEARD_KEEP_S = 600.0
 
     def _note_tg_heard(self, dst_id: bytes, pkt_time: float) -> None:
-        """Start or end of an over on a talkgroup (voice header / terminator, not every frame)."""
+        """Start or end of an over on a talkgroup: voice header / terminator, or the stream's
+        last frame when it times out without a terminator. Never moves the record back."""
         heard = self._tg_last_heard
-        heard[int_id(dst_id)] = pkt_time
+        tg = int_id(dst_id)
+        if pkt_time > heard.get(tg, 0.0):
+            heard[tg] = pkt_time
         if len(heard) > self._TG_LAST_HEARD_MAX:
             for tg in [t for t, at in heard.items() if pkt_time - at > self._TG_LAST_HEARD_KEEP_S]:
                 del heard[tg]
@@ -210,10 +213,21 @@ class RoutingUseCases(
         """
         now = time.time() if now is None else now
         protocols = self._get_protocols() if self._get_protocols else {}
-        if tg_has_active_conversation(
-            protocols, self._config.get("SYSTEMS", {}), bytes_3(int(tg)), b"", b"\x00\x00\x00", now,
-        ):
+        systems_cfg = self._config.get("SYSTEMS", {})
+        if tg_has_active_conversation(protocols, systems_cfg, bytes_3(int(tg)), b"", b"\x00\x00\x00", now):
             return 0.0
+        # On a shared MASTER the slot's flat RX fields only hold the last frame received: each
+        # hotspot stream keeps its own [peer, rf_src, tgid, start, last] in RX_STREAMS (#129).
+        for sys_name, proto in protocols.items():
+            if systems_cfg.get(sys_name, {}).get("MODE") not in ("MASTER", "PEER"):
+                continue
+            status = getattr(proto, "STATUS", None)
+            for slot in (1, 2):
+                slot_st = status.get(slot) if isinstance(status, dict) else None
+                streams = slot_st.get("RX_STREAMS") if isinstance(slot_st, dict) else None
+                for entry in (streams or {}).values():
+                    if int_id(entry[2]) == int(tg) and now - float(entry[4]) < STREAM_TO:
+                        return 0.0
         last = self._tg_last_heard.get(int(tg))
         return math.inf if last is None else max(0.0, now - last)
 
