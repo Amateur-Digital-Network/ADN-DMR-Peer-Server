@@ -75,7 +75,7 @@ In-band bridge activation/deactivation is applied on **voice terminator (VTERM)*
 
 **TG 4000 must never appear** as a dynamic UA chip on the monitor or in `peer_dynamic_tgs`.
 
-**Voice reply (`TG4000_VOICE: true` on the MASTER):** when the 4000 over ends (its terminator), the server answers **that hotspot only** about a second later with the link status in the system's `ANNOUNCEMENT_LANGUAGE`: "linked to" and the static TGs the hotspot still has on that slot (its OPTIONS and the MASTER's `TS1_STATIC` / `TS2_STATIC`, up to four), else "linked to *N*" with a `DEFAULT_REFLECTOR`, else "not linked".
+**Voice reply (on by default; `TG4000_VOICE: false` on the MASTER turns it off):** when the 4000 over ends (its terminator), the server answers **that hotspot only** about a second later with the link status in the system's `ANNOUNCEMENT_LANGUAGE`: "linked to" and the static TGs the hotspot still has on that slot (its OPTIONS and the MASTER's `TS1_STATIC` / `TS2_STATIC`, up to four), else "linked to *N*" with a `DEFAULT_REFLECTOR`, else "not linked".
 
 - A **group** call to TG 4000 is answered with a group call from the server voice ID to **TG 4000** on that slot: the radio hears it on the contact it just used.
 - A **private** call to ID 4000 is answered with a private call **from ID 4000** to the caller, which hotspot configurations map back to the private contact (e.g. `PCRewrite …,84000,…,4000,…`).

@@ -103,11 +103,13 @@ def test_the_statics_left_on_that_slot_are_passed_on() -> None:
     assert reply.call_args.kwargs["linked"] == (214, 21472)
 
 
-def test_no_reply_unless_the_system_asks_for_it() -> None:
-    for voice in (None, False):
-        stack, reply = _stack(voice=voice)
-        _over_4000(stack)
-        reply.assert_not_called()
+def test_the_reply_is_on_unless_the_system_turns_it_off() -> None:
+    stack, reply = _stack(voice=None)  # TG4000_VOICE absent
+    _over_4000(stack)
+    reply.assert_called_once()
+    stack, reply = _stack(voice=False)
+    _over_4000(stack)
+    reply.assert_not_called()
 
 
 # --- releasing the legs only the sender held (shared MASTER) ----------------------------------

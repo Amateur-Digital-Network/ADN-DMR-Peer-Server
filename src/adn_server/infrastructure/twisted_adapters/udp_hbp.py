@@ -731,7 +731,7 @@ class HBPProtocol(DatagramProtocol):
     ) -> bool:
         """Legacy early return for TG/ID 4000; reset once per PTT on voice header only.
 
-        With ``TG4000_VOICE`` the terminator of the over also queues one voice reply to this
+        Unless ``TG4000_VOICE: false``, the terminator of the over also queues one voice reply to this
         hotspot (``VoiceUseCases.tg4000_voice``): a group 4000 on TG 4000, a private 4000 as a
         private call from ID 4000 to the caller, naming the statics it still has on that slot.
         """
@@ -745,7 +745,7 @@ class HBPProtocol(DatagramProtocol):
             frame_type == HBPF_DATA_SYNC
             and dtype_vseq == HBPF_SLT_VTERM
             and self._on_tg4000_voice is not None
-            and self._config.get("TG4000_VOICE") is True
+            and self._config.get("TG4000_VOICE", True) is True
             and stream_id not in self._tg4000_answered
         ):
             now = time.time()
