@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import time
 from typing import Any, Callable
 
@@ -78,6 +79,12 @@ class PluginIngress:
     def set_routing(self, routing: Any) -> None:
         """Bootstrap builds the plugin manager before routing; routing is set before any load."""
         self._routing = routing
+
+    def tg_quiet_for(self, tg: int) -> float:
+        """Seconds ``tg`` has been quiet anywhere (0.0 while live); see ``RoutingUseCases.tg_quiet_for``."""
+        if self._routing is None or not hasattr(self._routing, "tg_quiet_for"):
+            return math.inf
+        return float(self._routing.tg_quiet_for(int(tg), self._clock()))
 
     def voice_slot_for_tg(self, tg: int) -> int | None:
         """The MASTER slot a plugin should speak ``tg`` on now, or None while every slot is busy.

@@ -37,3 +37,5 @@ class ServerContext:
     send_dmrd: Callable[[bytes], bool] | None = None
     # With group voice granted: the MASTER slot to speak a TG on now, None while all are busy.
     voice_slot_for_tg: Callable[[int], int | None] | None = None
+    # With group voice granted: seconds a TG has been quiet anywhere (0.0 while someone talks on it).
+    tg_quiet_for: Callable[[int], float] | None = None

@@ -543,6 +543,13 @@ class DeterministicScenario:
         st["RX_STREAM_ID"] = args["stream_id"]
         if args["frame_type"] == HBPF_DATA_SYNC and args["dtype_vseq"] == HBPF_SLT_VHEAD:
             st["RX_LC"] = bytes_3(0) + args["dst_id"] + args["rf_src"]
+        if args["call_type"] in ("group", "vcsbk"):  # per-stream record, as udp_hbp keeps it (#129)
+            from adn_server.application.routing.helpers import track_rx_stream
+
+            track_rx_stream(
+                st, args["stream_id"], args["peer_id"], args["rf_src"], args["dst_id"], self.clock.time(),
+                ended=args["frame_type"] == HBPF_DATA_SYNC and args["dtype_vseq"] == HBPF_SLT_VTERM,
+            )
 
     def inject_hbp(
         self,
