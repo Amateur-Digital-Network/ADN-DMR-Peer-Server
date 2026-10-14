@@ -333,3 +333,73 @@ def test_voice_slot_is_free_while_routed_voice_for_another_tg_uses_the_tx_leg() 
         TX_STREAM_ID=b"\x0d" * 4, TX_TGID=bytes_3(214),
     )
     assert ingress.voice_slot_for_tg(TG) == 2
+
+
+def _qso_scenario():
+    """SYSTEM (announcements) and SYSTEM-B bridged on TG 213 TS2, plus an OpenBridge link."""
+    config = minimal_config(("SYSTEM", "SYSTEM-B"))
+    config["SYSTEMS"]["SYSTEM"]["PEERS"] = {b"\x00\x00\x03\xe9": {"CALLSIGN": "HOTSPOT", "CONNECTION": "YES"}}
+    add_openbridge_system(config, "OBP-1")
+    table = active_routing_table(TG, (("SYSTEM", 2), ("SYSTEM-B", 2), ("OBP-1", 1)), timeout_minutes=10**6)
+    sc = DeterministicScenario(config=config, routing_table=table)
+    sc.routing.apply_startup_subscriptions()
+    for name in ("SYSTEM", "SYSTEM-B"):
+        sc.protocols[name].STATUS[2] = idle_hbp_slot()
+    ingress = PluginIngress(sc.routing, sc.config, lambda: sc.protocols, lambda *a: None, clock=sc.clock.time)
+    return sc, ingress
+
+
+def _mesh_over(sc, tg: int = TG, stream: int = 0x0C0C0C0C) -> None:
+    spec = PacketSpec(rf_src=3340062, dst_id=tg, peer_id=26811, slot=1, stream_id=stream)
+    with patch_routing_wall_time(sc.clock):
+        sc.inject_obp("OBP-1", DeterministicScenario.voice_head_spec(spec))
+        for n in range(1, 6):
+            sc.clock.advance(0.06)
+            sc.inject_obp("OBP-1", DeterministicScenario.voice_burst_spec(spec, seq=n, dtype_vseq=n))
+        sc.clock.advance(0.06)
+        sc.inject_obp("OBP-1", DeterministicScenario.voice_term_spec(spec, seq=6))
+
+
+def test_an_announcement_waits_through_the_pause_between_overs_of_a_mesh_qso() -> None:
+    """A QSO on the announcement's TG coming in over the mesh: between two overs the TG
+    looks free (no live stream), but starting there would take it from the next over."""
+    sc, ingress = _qso_scenario()
+    _mesh_over(sc)
+    sc.clock.advance(2.0)  # the usual pause before the reply
+    assert ingress.voice_slot_for_tg(TG) is None
+    sc.clock.advance(3.5)  # quiet for longer than the window (no GROUP_HANGTIME: 5 s)
+    assert ingress.voice_slot_for_tg(TG) == 2
+
+
+def test_the_quiet_window_is_the_masters_group_hangtime() -> None:
+    sc, ingress = _qso_scenario()
+    sc.config["SYSTEMS"]["SYSTEM"]["GROUP_HANGTIME"] = 15
+    _mesh_over(sc)
+    sc.clock.advance(10.0)
+    assert ingress.voice_slot_for_tg(TG) is None
+    sc.clock.advance(6.0)
+    assert ingress.voice_slot_for_tg(TG) == 2
+
+
+def test_voice_on_another_talkgroup_does_not_hold_an_announcement() -> None:
+    sc, ingress = _qso_scenario()
+    _mesh_over(sc, tg=214)
+    sc.clock.advance(1.0)
+    assert ingress.voice_slot_for_tg(TG) == 2
+
+
+def test_an_over_from_a_hotspot_on_another_master_holds_it_too() -> None:
+    sc, ingress = _qso_scenario()
+    spec = PacketSpec(rf_src=2130035, dst_id=TG, peer_id=1001, slot=2, stream_id=0x0D0D0D0D)
+    t = sc.clock.time()
+    sc.inject_hbp("SYSTEM-B", DeterministicScenario.voice_head_spec(spec), ingress_pkt_time=t)
+    sc.inject_hbp("SYSTEM-B", DeterministicScenario.voice_term_spec(spec, seq=1), ingress_pkt_time=t + 0.06)
+    sc.clock.advance(2.0)
+    assert ingress.voice_slot_for_tg(TG) is None
+
+
+def test_the_plugins_own_last_announcement_does_not_hold_the_next_one() -> None:
+    sc, ingress = _qso_scenario()
+    assert all(_play(sc, ingress, _beacon()))  # forwarded to SYSTEM-B and the mesh as well
+    sc.clock.advance(1.0)
+    assert ingress.voice_slot_for_tg(TG) == 2

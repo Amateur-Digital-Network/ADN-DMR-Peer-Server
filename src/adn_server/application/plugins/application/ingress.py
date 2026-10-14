@@ -32,10 +32,14 @@ from ....domain.dmr.const import LC_OPT
 from ....domain.hbp_protocol import STREAM_TO
 from ....domain.mesh_engine import server_id_bytes
 from ...routing.announcement_ptt_inject import announcement_ptt_system, inject_plugin_dmrd
-from ...routing.helpers import master_dynamic_tg_slots
+from ...routing.helpers import master_dynamic_tg_slots, tg_voice_heard_within
 from ..domain.send import GROUP_VOICE, UNIT_DATA, parse_dmrd_header, plugin_frame_kind
 
 logger = logging.getLogger(__name__)
+
+# How long a talkgroup must be silent before a plugin speaks on it, when the announcement
+# MASTER has no GROUP_HANGTIME: longer than the usual pause between the overs of a QSO.
+TG_QUIET_DEFAULT_S = 5.0
 
 _SILENT_STREAM_S = 1.0
 
@@ -74,6 +78,9 @@ class PluginIngress:
         self._send_routing_event = send_routing_event
         # Plugin voice streams on air: stream_id -> [master, slot, tg, rf_src, start, last frame, refusal logged].
         self._on_air: dict[bytes, list[Any]] = {}
+        # Plugin streams of the last minute: not "someone else's voice" when a plugin waits
+        # for its talkgroup to be quiet.
+        self._own_streams: dict[bytes, float] = {}
 
     def set_routing(self, routing: Any) -> None:
         """Bootstrap builds the plugin manager before routing; routing is set before any load."""
@@ -84,15 +91,27 @@ class PluginIngress:
 
         Same choice as scheduled announcements: the slot where ``tg`` is a dynamic UA
         session or has an active bridge leg on that MASTER first, then TS2, then TS1.
+
+        None as well while ``tg`` itself carried voice anywhere (a local hotspot, a bridge,
+        the mesh) in the last ``GROUP_HANGTIME`` of that MASTER (``TG_QUIET_DEFAULT_S`` when
+        unset): an announcement waits for a QSO on its talkgroup to end, pauses between
+        overs included, instead of taking the TG from the next over.
         """
         master = announcement_ptt_system(self._config)
-        proto = self._get_protocols().get(master) if master else None
+        protocols = self._get_protocols()
+        proto = protocols.get(master) if master else None
         status = getattr(proto, "STATUS", None)
-        sys_cfg = self._config.get("SYSTEMS", {}).get(master or "", {})
+        systems_cfg = self._config.get("SYSTEMS", {})
+        sys_cfg = systems_cfg.get(master or "", {})
         if not status or sys_cfg.get("MODE") != "MASTER":
             return None
         now = self._clock()
         self._end_silent_streams(now)
+        quiet = float(sys_cfg.get("GROUP_HANGTIME", 0) or 0) or TG_QUIET_DEFAULT_S
+        for sid in [k for k, t in self._own_streams.items() if now - t > 60.0]:
+            del self._own_streams[sid]
+        if tg_voice_heard_within(protocols, systems_cfg, int(tg), now, quiet, ignore_streams=self._own_streams):
+            return None
         dynamic = master_dynamic_tg_slots(sys_cfg, int(tg))
         bridged = self._active_bridge_slots(int(tg), master)
         for ts in dict.fromkeys([*sorted(dynamic, reverse=True), *sorted(bridged, reverse=True), 2, 1]):
@@ -163,6 +182,7 @@ class PluginIngress:
         """Monitor TX on the MASTER itself: its hotspots hear the stream, which no bridge leg reports."""
         tg, rf_src = int_id(header.dst_id), int_id(header.rf_src)
         self._on_air[header.stream_id] = [master, header.slot, tg, rf_src, now, now, False]
+        self._own_streams[header.stream_id] = now
         self._report("START", master, header.stream_id, header.slot, tg, rf_src)
 
     def _end_silent_streams(self, now: float) -> None:

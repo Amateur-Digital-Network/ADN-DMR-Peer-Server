@@ -1011,6 +1011,51 @@ def tg_has_active_conversation(
     return False
 
 
+def tg_voice_heard_within(
+    protocols: dict[str, Any],
+    systems_cfg: dict[str, Any],
+    tgid: int,
+    now: float,
+    window: float,
+    ignore_streams: Any = (),
+) -> bool:
+    """True when TG ``tgid`` carried group voice in the last ``window`` seconds, anywhere.
+
+    Any MASTER/PEER slot (its RX or TX leg) or OpenBridge stream counts. Unlike
+    ``tg_has_active_conversation`` (a live stream, last frame within ``STREAM_TO``), this
+    also covers the pause between the overs of a QSO, so a server announcement does not
+    start in it and take the TG from the next over. Streams in ``ignore_streams`` (the
+    caller's own, e.g. a plugin's last announcement) do not count.
+    """
+    for sys_name, proto in protocols.items():
+        mode = systems_cfg.get(sys_name, {}).get("MODE")
+        status = getattr(proto, "STATUS", None)
+        if not isinstance(status, dict):
+            continue
+        if mode in ("MASTER", "PEER"):
+            for slot_key in (1, 2):
+                slot_st = status.get(slot_key)
+                if not isinstance(slot_st, dict):
+                    continue
+                for leg in ("RX", "TX"):
+                    leg_tg = slot_st.get(f"{leg}_TGID")
+                    leg_time = float(slot_st.get(f"{leg}_TIME", 0) or 0)
+                    if not leg_tg or int_id(leg_tg) != tgid or not leg_time or now - leg_time >= window:
+                        continue
+                    if slot_st.get(f"{leg}_STREAM_ID") not in ignore_streams:
+                        return True
+        elif mode == "OPENBRIDGE":
+            for key, st in status.items():
+                if isinstance(key, int) or not isinstance(st, dict) or "TGID" not in st:
+                    continue
+                if int_id(st.get("TGID", b"")) != tgid or key in ignore_streams:
+                    continue
+                last = float(st.get("LAST", st.get("START", 0)) or 0)
+                if last and now - last < window:
+                    return True
+    return False
+
+
 def group_voice_tg_ingress_collision(
     protocols: dict[str, Any],
     systems_cfg: dict[str, Any],
