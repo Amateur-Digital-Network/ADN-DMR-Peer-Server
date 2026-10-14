@@ -13,7 +13,7 @@ En cable, OpenBridge extendido usa el opcode **`DMRE`**. El **byte de versión d
 - **`DMRD`** versión 1 — carga autenticada HMAC-SHA1 (modo de compatibilidad); o
 - **`DMRE`** — trama extendida con MAC **BLAKE2b**, versión embebida, marcas de tiempo, **saltos**, IDs servidor/repetidor de origen, etc. (**DMRE v5** = versión embebida 5, recomendada arriba).
 
-Esta pila implementa el modo par **OPENBRIDGE** en **`udp_hbp.py`** y el enrutado de voz en **`RoutingUseCases`** (`application/routing/`, `application/subscription/`).
+Esta pila implementa el modo par **OPENBRIDGE** en **`udp_hbp.py`** (adaptador UDP), con las reglas de admisión, el motor por trama y la sesión del enlace en **`domain/mesh_admission.py`**, **`domain/mesh_engine.py`** y **`domain/mesh_session.py`**, y el enrutado de voz en **`RoutingUseCases`** (`application/routing/`, `application/subscription/`).
 
 ## Ingreso (DMRE)
 
@@ -39,7 +39,7 @@ Para voz de **grupo** en OpenBridge:
 
 - **Significado:** «No reenvíes este **`stream_id`** en esta **TG** hacia mi pata.»
 - **Lo envía** el OBP **perdedor** en control de bucle hacia su **par** (no es broadcast global).
-- **Se respeta** al reenviar a otro OBP: si el `_bcsq` del destino coincide, **omitir** `send_system`.
+- **Se respeta** al reenviar a otro OBP: si la sesión del destino tiene ese stream en quench para ese TG, **omitir** `send_system`.
 
 ## BCKA (keepalive)
 
@@ -51,7 +51,7 @@ Por fila de destino: deduplicar `(SYSTEM, TS)`, comprobar **BCSQ**, **BCKA**, **
 
 ## Filtros de ingreso (TG de grupo) {#ingress-filters-group-tg}
 
-Para tráfico de **grupo** (y **vcsbk**), OpenBridge aplica **filtros TG** antes de que el flujo llegue al router de bridges. Los flujos descartados pueden disparar **BCSQ** hacia el par. Las reglas exactas difieren entre **DMRD v1** y **DMRE** en `udp_hbp.py`; en general rechazan tráfico tratado como **solo local** o **servidor incorrecto** para el destino, por ejemplo:
+Para tráfico de **grupo** (y **vcsbk**), OpenBridge aplica **filtros TG** antes de que el flujo llegue al router de bridges. Los flujos descartados pueden disparar **BCSQ** hacia el par. Las reglas exactas difieren entre **DMRD v1** y **DMRE** en `domain/mesh_admission.py`; en general rechazan tráfico tratado como **solo local** o **servidor incorrecto** para el destino, por ejemplo:
 
 - TG bajas (p. ej. **≤ 79** en DMRE; DMRD v1 también combina **9990–9999**, **92–199**, **900999** en una comprobación).
 - **9990–9999** y **900999** (rangos de servicio / servidor local en DMRE).

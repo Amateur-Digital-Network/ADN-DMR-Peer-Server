@@ -29,9 +29,9 @@ kill -HUP $(pidof adn-server.py)    # or: systemctl reload adn-server
 
 Example unit: **`examples/systemd/adn-server.service`** (copy to `/etc/systemd/system/`; includes `ExecReload` for `systemctl reload`).
 
-**Reload applies:** `GLOBAL`, `REPORTS`, `ALIASES`, **`LOGGER.LOG_LEVEL`** (without process restart), **`PROXY`** (timeouts, debug, block lists — not bind or target), **`SELF_SERVICE`** (PBKDF2 flags merged; enabling/disabling DB loops needs restart), per-system settings, **new/removed SYSTEMS** (including `GENERATOR` expansion/collapse and new OpenBridge legs), and updated bind addresses (listener restart for that system only).
+**Reload applies:** `GLOBAL`, `REPORTS`, `ALIASES`, **`LOGGER.LOG_LEVEL`** (without process restart), **`PROXY`** (timeouts, debug, block lists — not bind or target), **`SELF_SERVICE`** (PBKDF2 flags merged; enabling/disabling DB loops needs restart), **`PLUGINS`** (see [Plugins](plugins.md)), per-system settings (including a MASTER's **`TS1_STATIC`** / **`TS2_STATIC`**, pushed to its connected hotspots and bridge legs), **new/removed SYSTEMS** (including `GENERATOR` expansion/collapse and new OpenBridge legs), and updated bind addresses (listener restart for that system only).
 
-**Not reloaded:** **`DATABASE`** (MariaDB pool and `peer_dynamic_tgs` bootstrap), `adn-voice.yaml` (separate 15 s loop), Python code, subscriber alias files (separate periodic reload). **BRIDGES** table is not rebuilt on reload — restart if bridge rules changed in a way that requires a full reset. **`PROXY.LISTEN_PORT`**, **`LISTEN_IP`**, and **`TARGET_SYSTEM`** require a **full restart** to take effect.
+**Not reloaded:** **`DATABASE`** (MariaDB pool and `peer_dynamic_tgs` bootstrap), `adn-voice.yaml` (separate 15 s loop), Python code, subscriber alias files (separate periodic reload). **BRIDGES** table is not rebuilt on reload — restart if bridge rules changed in a way that requires a full reset. **`PROXY.LISTEN_PORT`**, **`LISTEN_IP`**, and **`TARGET_SYSTEM`** require a **full restart** to take effect, and so does any change to the **`OBP_PROXY`** block.
 
 **Secrets:** Never commit real passphrases, security URLs, or `user_passwords.json` / `encryption_key.secret`. Use placeholders in templates and keep production files local.
 
@@ -99,7 +99,7 @@ These appear mainly on **MASTER** (and often on **PEER**). OpenBridge uses a dif
 | **MODE** | `MASTER`, `PEER`, or `OPENBRIDGE`. |
 | **ENABLED** | If `false`, the system is skipped. |
 | **IP** / **PORT** | UDP bind address for this system’s HBP or OpenBridge listener. |
-| **PASSPHRASE** | Shared secret for HBP authentication (MASTER ↔ PEER). Must match between a PEER and its MASTER. |
+| **PASSPHRASE** | Shared secret for HBP authentication (MASTER ↔ PEER). Must match between a PEER and its MASTER. On **OPENBRIDGE** it signs the control frames (BCKA, BCSQ, …); give each bridge its own (see [OBP proxy](obp-proxy.md#requirements)). |
 | **USE_ACL** | Per-system ACL override when true (uses system-level `REG_ACL` / `SUB_ACL` / `TGID_TS*_ACL`). |
 | **GROUP_HANGTIME** | Hang time (seconds) for group voice state. |
 | **DEFAULT_UA_TIMER** | Default timeout (minutes in many places) for **user-activated** bridges. |
@@ -120,7 +120,7 @@ These appear mainly on **MASTER** (and often on **PEER**). OpenBridge uses a dif
 | **EXPORT_AMBE** | Feature flag for AMBE export (if enabled in build). |
 | **SINGLE_MODE** | Affects OPTIONS / generator expansion (single-user style). |
 | **VOICE_IDENT** | Enables periodic **voice ident** when conditions are met (see `IdentUseCases`). |
-| **TS1_STATIC** / **TS2_STATIC** | Comma-separated static TG lists pushed via OPTIONS handling (see `options_config`). |
+| **TS1_STATIC** / **TS2_STATIC** | Comma-separated static TGs added to **every** connected hotspot of this MASTER, on top of its own OPTIONS (TGs 0–5, 9 and 9990–9999 are ignored). A `SIGHUP` updates connected hotspots and the MASTER's bridge legs; the monitor shows each hotspot's resulting list, these first. |
 | **DEFAULT_REFLECTOR** | Default **reflector** number for `#` dial bridges (0 = none). |
 | **OVERRIDE_IDENT_TG** | Optional TG for voice ident instead of all-call. |
 | **GENERATOR** | If **> 1**, this MASTER is expanded into **`NAME-0`**, **`NAME-1`**, … with consecutive ports (see `expand_generator` in code). Legacy standalone **`adn-proxy`** used the same range; the **integrated** proxy instead uses **inject-only** **`PROXY.TARGET_SYSTEM`** (no per-hotspot UDP ports on the server). |
@@ -150,9 +150,9 @@ The **echo** example (`adn-echo.example.yaml`) is a PEER that attaches to the **
 | Key | Meaning |
 |-----|---------|
 | **NETWORK_ID** | Must match the peer’s **NETWORK_ID** in OpenBridge packets. |
-| **TARGET_IP** / **TARGET_PORT** | Remote OpenBridge peer (UDP). |
-| **TGID_ACL** (or **TG1_ACL**) | Talkgroup ACL for OpenBridge (often `DENY:0-82,…` style ranges). |
-| **RELAX_CHECKS** | Allow packets when peer socket does not match `TARGET` strictly (use with care). |
+| **TARGET_IP** / **TARGET_PORT** | Remote OpenBridge peer (UDP). **TARGET_IP** may be a hostname: the bridge is then anchored to the host DNS gives (the port may differ), frames from other hosts are refused even with `RELAX_CHECKS`, and the name is re-resolved every 300 s and when a refused frame arrives (at most every 15 s). A resolver failure keeps the current address; a name that never resolved falls back to `RELAX_CHECKS`. |
+| **TGID_ACL** (or **TG1_ACL**) | Talkgroup ACL for OpenBridge (often `DENY:0-82,…` style ranges). **TGID_ACL** wins over `TGID_TS1_ACL` / `TG1_ACL` and is checked on ingress (with the system's `USE_ACL`) and egress (with `GLOBAL.USE_ACL`). |
+| **RELAX_CHECKS** | Allow packets when peer socket does not match `TARGET` strictly (use with care). Ignored for a **TARGET_IP** hostname that has resolved: only that host is accepted. |
 | **ENHANCED_OBP** | Enables **BCSQ** / **BCKA** and multi-path loop control — **should be `true`** for ADN Systems inter-server links (see below). |
 | **PROTO_VER** | Embedded **DMRE** protocol version; **`5`** selects **DMRE / OpenBridge v5** (89-byte frame, BLAKE2b). Default in code is **5**; use **5** for new ADN deployments. |
 
@@ -173,6 +173,9 @@ Active when **`OBP_PROXY`** is present or when any **OPENBRIDGE** system exists 
 | **LISTEN_PORT** / **LISTEN_IP** | UDP bind for OpenBridge fan-in (pair to hotspot **`PROXY`** **62031**). |
 | **BIND_LEGACY_PORTS** | When `true`, also listen each **`SYSTEMS.*.PORT`** that differs from **`LISTEN_PORT`** (per-bridge migration). |
 | **ENABLED** | Set `false` to restore per-bridge UDP bind (legacy mode). |
+| **DEBUG** | Logs control frames (BCKA, BCSQ, …) and dropped packets at `DEBUG`; never accepted voice frames. |
+
+**LISTEN_PORT** must differ from **`PROXY.LISTEN_PORT`**: the validator rejects both on the same port. On `SIGHUP` the bridge registry is rebuilt (OPENBRIDGE systems added or removed); changes to the `OBP_PROXY` keys themselves need a restart.
 
 ---
 
@@ -276,8 +279,13 @@ Downloads and local files for **peer IDs**, **subscriber IDs**, **talkgroup labe
 | **TRY_DOWNLOAD** | Whether to fetch from URLs when stale. |
 | **PEER_FILE** / **SUBSCRIBER_FILE** / **TGID_FILE** | Local filenames. |
 | **\*_URL** | Remote sources for downloads. |
-| **SUB_MAP_FILE** | Pickle path for **SUB_MAP** (private call routing); default name if empty. |
-| **STALE_DAYS** | Refresh threshold for downloads. |
+| **SUB_MAP_FILE** | Pickle path for **SUB_MAP** (private call routing); default name if empty. See [Private calls](private-calls.md#sub_map-persistence). |
+| **POLL_INTERVAL_SEC** | How often the lists are checked for download (default **900**). |
+| **CHECKSUM_URL** / **CHECKSUM_FILE** | Published checksums, fetched on every poll; a list is downloaded only when its checksum no longer matches the file on disk (an unmatched checksum is retried once an hour). |
+| **SERVER_ID_URL** / **SERVER_ID_FILE** | Server ID list (used by `VALIDATE_SERVER_IDS`). |
+| **LOCAL_SUBSCRIBER_FILE** | Local subscriber ID file. |
+| **KEYS_FILE** | System keys store (default `keys.json`), saved on shutdown. |
+| **STALE_DAYS** | Refresh threshold for downloads; only applies without a checksum file. |
 
 ---
 

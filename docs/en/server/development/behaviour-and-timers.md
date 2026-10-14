@@ -8,7 +8,7 @@ Intervals are part of the **observable behaviour** of the product (operators and
 
 ## Configuration visibility
 
-Runtime state lives in a shared **`config`** dict: options from peers, `SUB_MAP`, OpenBridge control-plane fields (`_bcsq`, `_bcka`), and similar. Adapters update this structure; use cases read it. This matches how the running process is inspected in logs and support scenarios.
+Runtime state lives in a shared **`config`** dict: options from peers, `SUB_MAP`, and similar. Adapters update this structure; use cases read it. OpenBridge link state (keepalive, learned peer address, quench table) lives in one `ObpBridgeSession` per bridge (`domain/mesh_session.py`), not in the config; only the per-stream `_bcsq` flag (BCSQ already sent) remains in `STATUS`. This matches how the running process is inspected in logs and support scenarios.
 
 ## Core timer intervals (operational contract)
 
@@ -18,7 +18,7 @@ The following intervals are part of the current runtime behavior:
 |------|----------|------|
 | `rule_timer` | **52s** | Bridge timeout/on-off state progression. |
 | `stream_trimmer` | **5s** | Stream cleanup, timeout handling, end-of-call state trimming. |
-| `bridge_reset` | **6s** | Bridge reset flag cleanup and pending reset completion. |
+| `bridge_reset` | **6s** | Bridge reset flag cleanup and pending reset completion. A MASTER is flagged for reset only when its **last** peer is gone, not on a failed login, a callsign mismatch or one hotspot leaving. |
 | OPTIONS refresh | **event-driven** | Static TG / reflector from **RPTO**, **startup/reload** (`apply_startup_bridges`), **dmrd** no-source fallback. No periodic 26s loop (**D-28**). |
 | `dynamic_tg_purge_loop` | **60s** | Purge expired **SINGLE=1** rows from `peer_dynamic_tgs` and in-memory `_PEER_UA_SESSIONS`. |
 | `lst_seen` (self-service reconcile) | **120s** | Reconcile `Clients.logged_in` against currently connected peers: connected peers get `logged_in=1`, the rest `0`. Runs with `now=True` on first tick so stale flags clear immediately after a server restart. Prevents the monitor from authenticating disconnected hotspots via login-by-IP. |
@@ -49,11 +49,15 @@ It is not applied on **unit/private** VTERM paths.
 
 ## Packet-control behavior notes
 
-Current packet-control behavior for stream dedup and ordering:
+Current packet-control behavior for stream dedup and ordering (`seq_advance` in `application/routing/helpers.py`, on OBP and HBP ingress):
 
-- OBP hash duplicate-drop checks are evaluated with **`seq > 0`** guard.
-- HBP still computes/stores CRC for `seq == 0`, while duplicate-drop by CRC remains guarded by **`seq > 0`**.
-- This avoids over-dropping first-packet edge cases while preserving stream duplicate protection.
+- The 8-bit sequence is compared **modulo 256**, so the wrap 255 → 0 is the next packet.
+- A forward jump counts every skipped packet as **Loss**. The same sequence again is a duplicate: dropped and counted as Loss.
+- A packet **behind** the last one is late: dropped, counted as Loss, and the last sequence is kept.
+- A repeated seq 0 (voice header) and a seq 1 restart are taken as the next packet.
+- After more than **1 s** of silence (`SEQ_RESYNC_SILENCE_S`) the stream resyncs to whatever sequence arrives.
+- A **terminator** is always accepted, even when behind (some client apps send it with seq 0), so the call ends at once instead of on the 5 s stream timeout.
+- The payload-hash duplicate drop stays guarded by **`seq > 0`** on OBP and HBP (HBP still stores the hash of `seq == 0`).
 
 <a id="loop-guard"></a>
 ## Loop guard

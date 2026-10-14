@@ -2,7 +2,7 @@
 
 Drop-in **plugins** extend the peer server without modifying core code. The framework lives in `src/adn_server/application/plugins/`; each plugin is a directory under `plugins/<name>/` loaded at runtime.
 
-The repository ships one reference skeleton: `plugins/example/` (disabled by default).
+The repository ships two plugins: `plugins/voice-announcements/` (scheduled announcements, TTS and voice beacons; **enabled by default**, see [Voice, announcements, and TTS](voice-and-tts.md)) and the reference skeleton `plugins/example/` (disabled by default).
 
 ---
 
@@ -43,7 +43,7 @@ PLUGINS:
 | Key | Role |
 |-----|------|
 | `directory` | Absolute path or relative to project root |
-| `master_kill` | Emergency disable — no plugins loaded |
+| `master_kill` | Emergency disable — no plugins loaded, so scheduled announcements and TTS stop too |
 | `overrides` | Per-plugin config patches without editing `plugins/<name>/config.yaml` |
 | `send` | Per-plugin permission to send unit data and group voice — see [Sending](#sending-unit-data-and-group-voice-opt-in) |
 
@@ -96,6 +96,7 @@ Passed to `on_load` as `server_ctx` (`application/plugins/application/context.py
 | `call_from_reactor(fn, *args)` | Schedule callback on reactor thread |
 | `call_later(delay_s, fn, *args)` | Reactor timer |
 | `send_dmrd(pkt) -> bool` | Send one DMRD frame — **only** for a plugin granted it in `PLUGINS.send`, otherwise `None` ([Sending](#sending-unit-data-and-group-voice-opt-in)) |
+| `voice_slot_for_tg(tg)` | MASTER slot to speak `tg` on now (where it has a dynamic session or an active bridge leg first, then TS2, then TS1), `None` while every slot is busy or `tg` is not in the plugin's `group_voice_tgs` |
 
 **Pattern:** do only dispatch in `on_event`; call `defer_to_thread` for file writes, HTTP, heavy CPU.
 
@@ -110,13 +111,13 @@ PLUGINS:
   send:
     d-aprs:
       allowed_src_ids: [900999]   # rf_src the plugin may send as; required
-      max_frames_per_s: 40        # per-plugin token bucket (default 40)
+      max_frames_per_s: 40        # per-plugin token bucket (default 40 + 18 × group_voice_tgs)
     beacon:
       allowed_src_ids: [2130035]
       group_voice_tgs: [213]      # group voice only on these TGs; none: unit data only
 ```
 
-- `send_dmrd` is `None` unless the plugin has an entry with at least one source ID.
+- `send_dmrd` is `None` unless the plugin has an entry with at least one source ID. `voice-announcements` without an entry gets the TGs and DMR IDs its `adn-voice.yaml` items use.
 - The allowlist and the rate limit guard against a **buggy** plugin (sending as a radio, flooding the mesh). They are no sandbox: a plugin runs in-process with the live config and could rewrite its own entry, so only install plugins you trust.
 - Each frame is checked against the **current** config: removing the entry (SIGHUP) or `master_kill` stops sending at once. Granting it to a plugin already loaded needs that plugin reloaded.
 - Rejected frames (not unit data, source not allowed, over the rate) return `False` and are logged and counted; the first frame of each stream is logged at INFO.
@@ -132,7 +133,7 @@ How the server treats them:
 | OpenBridge / `DATA-GATEWAY` | No fan-out: plugin frames stay on this server |
 | Events | Reach plugins with `is_synthetic=True`, so a plugin can ignore its own frames |
 
-Group voice is routed **like a scheduled announcement** (synthetic PTT on the same MASTER): through the TG's bridges, OpenBridge legs included, and to the hotspots of that MASTER. While a plugin stream plays it holds that MASTER slot, so routed calls find it busy; a radio or another stream on the slot makes the next frame fail. The terminator frees the slot. Private voice can't be sent.
+Group voice is routed **like a scheduled announcement** (synthetic PTT on the same MASTER): through the TG's bridges, OpenBridge legs included, and to the hotspots of that MASTER. Routed voice may still take the slot's TX leg (each hotspot keeps the stream it hears first); only a radio or another plugin stream on the RX leg makes the next frame fail. A frame routing refuses is still played to the MASTER's hotspots, with one WARNING per stream. The terminator frees the slot. Private voice can't be sent.
 
 Pacing (about 60 ms per burst) is the plugin's job, e.g. with `call_later`.
 

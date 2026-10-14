@@ -63,9 +63,11 @@ Configura **`TTS_VOCODER_CMD`** o **`TTS_AMBESERVER_HOST`** / **`TTS_AMBESERVER_
 
 ## Anti-colisión (QSO) con anuncios
 
-Al programar anuncios, el servidor puede **esperar** si los slots objetivo están ocupados, **descartar** objetivos si aparece un QSO en vivo a mitad, y solo marcar estado de anuncio **horario** tras una lista de objetivos con éxito — evita pisar tráfico en vivo.
+El plugin reproduce **un anuncio por TG a la vez**; los demás del mismo TG esperan en orden, con 1,5 s entre uno y otro. Un ítem que se dispara con su TG al aire se reintenta cada 3 s. El slot lo da `voice_slot_for_tg` (donde el TG tiene una sesión dinámica o una pierna de bridge activa en el MASTER, luego TS2, luego TS1); mientras todos los slots están ocupados reintenta cada 5 s, hasta 60 veces, y después se salta esa reproducción. Las tramas salen cada 58 ms tras un retardo inicial de 0,5 s.
 
-El plugin envía cada trama con `send_dmrd`, y el núcleo la inyecta como **PTT sintético de hotspot** en `PROXY.TARGET_SYSTEM` (el mismo MASTER que usa el proxy integrado). El enrutamiento reparte a hotspots puenteados y piernas OPENBRIDGE; los peers locales en ese MASTER siguen recibiendo tramas vía `send_system`. Mientras suena, la emisión ocupa ese slot del MASTER; una radio que lo toma la corta.
+El plugin envía cada trama con `send_dmrd`, y el núcleo la inyecta como **PTT sintético de hotspot** en `PROXY.TARGET_SYSTEM` (el mismo MASTER que usa el proxy integrado). El enrutamiento reparte a hotspots puenteados y piernas OPENBRIDGE; los peers locales en ese MASTER siguen recibiendo tramas vía `send_system`. La voz enrutada puede igual tomar la pierna TX del slot (cada hotspot se queda con el stream que oye primero); solo una radio u otro stream de plugin en la pierna RX corta el anuncio. Una trama que el enrutado rechaza se reproduce igual a los hotspots del MASTER, con un WARNING por stream.
+
+Los avisos del núcleo (ident de voz, 999x a demanda, aviso de desconexión) ocupan el **TS2** mientras suenan; una radio u otro stream en el slot los corta. El anuncio de otro servidor que llega por OpenBridge es voz normal de la malla y no recibe esa reserva.
 
 ## Cola de emisión
 

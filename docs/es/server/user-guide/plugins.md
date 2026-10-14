@@ -2,7 +2,7 @@
 
 Los **plugins** drop-in amplían el peer server sin modificar el código del núcleo. El framework está en `src/adn_server/application/plugins/`; cada plugin es un directorio bajo `plugins/<name>/` cargado en tiempo de ejecución.
 
-El repositorio incluye un skeleton de referencia: `plugins/example/` (deshabilitado por defecto).
+El repositorio incluye dos plugins: `plugins/voice-announcements/` (anuncios programados, TTS y balizas de voz; **activado por defecto**, ver [Voz, anuncios y TTS](voice-and-tts.md)) y el skeleton de referencia `plugins/example/` (deshabilitado por defecto).
 
 ---
 
@@ -43,7 +43,7 @@ PLUGINS:
 | Clave | Función |
 |-------|---------|
 | `directory` | Ruta absoluta o relativa al project root |
-| `master_kill` | Desactivación de emergencia — no carga plugins |
+| `master_kill` | Desactivación de emergencia — no carga plugins, así que también se detienen los anuncios programados y el TTS |
 | `overrides` | Parches por plugin sin editar `plugins/<name>/config.yaml` |
 | `send` | Permiso por plugin para enviar datos y voz de grupo — ver [Envío](#envío-de-datos-y-voz-de-grupo-opcional) |
 
@@ -96,6 +96,7 @@ Se pasa a `on_load` como `server_ctx` (`application/plugins/application/context.
 | `call_from_reactor(fn, *args)` | Programar callback en el hilo del reactor |
 | `call_later(delay_s, fn, *args)` | Temporizador del reactor |
 | `send_dmrd(pkt) -> bool` | Enviar una trama DMRD — **solo** para un plugin autorizado en `PLUGINS.send`; si no, `None` ([Envío](#envío-de-datos-y-voz-de-grupo-opcional)) |
+| `voice_slot_for_tg(tg)` | Slot del MASTER en el que hablar `tg` ahora (primero donde tiene una sesión dinámica o una pierna de bridge activa, luego TS2, luego TS1); `None` mientras todos los slots están ocupados o si `tg` no está en los `group_voice_tgs` del plugin |
 
 **Patrón:** solo despachar en `on_event`; usar `defer_to_thread` para archivos, HTTP o CPU intensiva.
 
@@ -110,13 +111,13 @@ PLUGINS:
   send:
     d-aprs:
       allowed_src_ids: [900999]   # rf_src con el que puede enviar; obligatorio
-      max_frames_per_s: 40        # cubo de tokens por plugin (por defecto 40)
+      max_frames_per_s: 40        # cubo de tokens por plugin (por defecto 40 + 18 × group_voice_tgs)
     baliza:
       allowed_src_ids: [2130035]
       group_voice_tgs: [213]      # voz de grupo solo en estos TGs; sin ella, solo datos
 ```
 
-- `send_dmrd` es `None` salvo que el plugin tenga una entrada con al menos un ID de origen.
+- `send_dmrd` es `None` salvo que el plugin tenga una entrada con al menos un ID de origen. `voice-announcements` sin entrada recibe los TGs e IDs DMR que usan sus ítems de `adn-voice.yaml`.
 - La lista de IDs permitidos y el límite de ritmo protegen frente a un plugin **con fallos** (que emita como una radio o inunde la red). No son un aislamiento: un plugin corre en el mismo proceso con la configuración viva y podría reescribir su propia entrada, así que instala solo plugins de confianza.
 - Cada trama se comprueba contra la configuración **actual**: quitar la entrada (SIGHUP) o `master_kill` corta el envío al instante. Autorizar a un plugin ya cargado exige recargar ese plugin.
 - Las tramas rechazadas (no son datos, origen no permitido, exceso de ritmo) devuelven `False` y se registran y cuentan; la primera trama de cada stream se registra en INFO.
@@ -132,7 +133,7 @@ Cómo las trata el servidor:
 | OpenBridge / `DATA-GATEWAY` | Sin reparto: las tramas del plugin se quedan en este servidor |
 | Eventos | Llegan a los plugins con `is_synthetic=True`, para que un plugin ignore sus propias tramas |
 
-La voz de grupo se enruta **como un anuncio programado** (PTT sintético en el mismo MASTER): por los puentes del TG, OpenBridge incluidos, y a los hotspots de ese MASTER. Mientras suena, el stream del plugin ocupa ese slot del MASTER, así que las llamadas enrutadas lo encuentran ocupado; una radio u otro stream en el slot hace fallar la trama siguiente. El terminador libera el slot. No se puede enviar voz privada.
+La voz de grupo se enruta **como un anuncio programado** (PTT sintético en el mismo MASTER): por los puentes del TG, OpenBridge incluidos, y a los hotspots de ese MASTER. La voz enrutada puede igual tomar la pierna TX del slot (cada hotspot se queda con el stream que oye primero); solo una radio u otro stream de plugin en la pierna RX hace fallar la trama siguiente. Una trama que el enrutado rechaza se reproduce igual a los hotspots del MASTER, con un WARNING por stream. El terminador libera el slot. No se puede enviar voz privada.
 
 El ritmo (unos 60 ms por ráfaga) lo marca el plugin, por ejemplo con `call_later`.
 
