@@ -31,7 +31,7 @@ Unidad de ejemplo: **`examples/systemd/adn-server.service`** (copiar a `/etc/sys
 
 **Se recarga:** `GLOBAL`, `REPORTS`, `ALIASES`, **`LOGGER.LOG_LEVEL`** (sin reiniciar el proceso), **`PROXY`** (timeouts, debug, listas de bloqueo — no bind ni destino), **`SELF_SERVICE`** (flags PBKDF2 fusionados; activar/desactivar bucles BD requiere reinicio), **`PLUGINS`** (ver [Plugins](plugins.md)), parámetros por system (incluidos **`TS1_STATIC`** / **`TS2_STATIC`** de un MASTER, que llegan a sus hotspots conectados y a sus piernas de bridge), **systems nuevos/eliminados** (incluida expansión/colapso `GENERATOR` y OBP nuevos), y cambios de IP/puerto (solo reinicia el listener de ese system).
 
-**No se recarga:** **`DATABASE`** (pool MariaDB y bootstrap `peer_dynamic_tgs`), `adn-voice.yaml` (loop aparte cada 15 s), código Python, ficheros de alias (recarga periódica). La tabla **BRIDGES** no se reconstruye — reinicia si cambiaste reglas de bridge que exijan reset completo. **`PROXY.LISTEN_PORT`**, **`LISTEN_IP`** y **`TARGET_SYSTEM`** requieren **reinicio completo** para aplicarse, igual que cualquier cambio en el bloque **`OBP_PROXY`**.
+**No se recarga:** **`DATABASE`** (pool MariaDB y bootstrap `peer_dynamic_tgs`), `adn-voice.yaml` (loop aparte cada 15 s), código Python, ficheros de alias (recarga periódica). La tabla **BRIDGES** no se reconstruye — reinicia si cambiaste reglas de bridge que exijan reset completo. **`PROXY.LISTEN_PORT`**, **`LISTEN_IP`** y **`TARGET_SYSTEM`** requieren **reinicio completo** para aplicarse, igual que `LISTEN_PORT`, `LISTEN_IP` y `BIND_LEGACY_PORTS` de **`OBP_PROXY`** (su `DEBUG` sí se recarga).
 
 **Secretos:** no versionar passphrases reales, URLs de seguridad ni `user_passwords.json` / `encryption_key.secret`. Usa placeholders en plantillas y mantén producción en local.
 
@@ -175,7 +175,7 @@ Activo cuando existe **`OBP_PROXY`** o algún sistema **OPENBRIDGE** (se aplican
 | **ENABLED** | `false` restaura bind UDP por bridge (modo legacy). |
 | **DEBUG** | Registra en `DEBUG` las tramas de control (BCKA, BCSQ, …) y los paquetes descartados; nunca las tramas de voz aceptadas. |
 
-**LISTEN_PORT** tiene que ser distinto de **`PROXY.LISTEN_PORT`**: el validador rechaza los dos en el mismo puerto. Con `SIGHUP` se reconstruye el registro de bridges (sistemas OPENBRIDGE nuevos o eliminados); los cambios en las claves de `OBP_PROXY` requieren reinicio.
+**LISTEN_PORT** tiene que ser distinto de **`PROXY.LISTEN_PORT`**: el validador rechaza los dos en el mismo puerto. Con `SIGHUP` se reconstruye el registro de bridges (sistemas OPENBRIDGE nuevos o eliminados); `DEBUG` se aplica; `LISTEN_PORT`, `LISTEN_IP` y `BIND_LEGACY_PORTS` requieren reinicio (queda un aviso en el log).
 
 ---
 

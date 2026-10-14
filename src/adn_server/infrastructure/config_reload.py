@@ -122,7 +122,7 @@ def merge_system_config(old_cfg: dict[str, Any], new_cfg: dict[str, Any]) -> dic
 def merge_top_level_config(config: dict[str, Any], incoming: dict[str, Any]) -> None:
     """Update GLOBAL / REPORTS / ALIASES / LOGGER / … / PLUGINS in the live config dict."""
     kill_flag = config.get("GLOBAL", {}).get("_KILL_SERVER")
-    for key in ("GLOBAL", "REPORTS", "ALIASES", "LOGGER", "PROXY", "DATABASE", "SELF_SERVICE"):
+    for key in ("GLOBAL", "REPORTS", "ALIASES", "LOGGER", "PROXY", "OBP_PROXY", "DATABASE", "SELF_SERVICE"):
         if key not in incoming:
             continue
         config[key] = copy.deepcopy(incoming[key])

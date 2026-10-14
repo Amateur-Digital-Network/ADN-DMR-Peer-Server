@@ -24,7 +24,7 @@ OBP_PROXY:
 
 OPENBRIDGE sections stay unchanged (`PORT`, `NETWORK_ID`, `PASSPHRASE`, `TARGET_*`, ACL, etc.). With proxy enabled, `PORT` is kept as metadata (`_REPORT_PORT` internally) for monitor/report and optional legacy listeners.
 
-`DEBUG: true` logs control frames and dropped packets, never accepted voice frames (`*CALL START*` / `*CALL END*` already cover calls). On `SIGHUP` the bridge registry is rebuilt for OPENBRIDGE systems added or removed; changes to the `OBP_PROXY` keys themselves (`DEBUG`, `LISTEN_PORT`, `LISTEN_IP`, `BIND_LEGACY_PORTS`) need a restart.
+`DEBUG: true` logs control frames and dropped packets, never accepted voice frames (`*CALL START*` / `*CALL END*` already cover calls). On `SIGHUP` the bridge registry is rebuilt for OPENBRIDGE systems added or removed; `DEBUG` applies; `LISTEN_PORT`, `LISTEN_IP` and `BIND_LEGACY_PORTS` need a restart (a warning is logged).
 
 ## Per-bridge migration (`BIND_LEGACY_PORTS: true`)
 
