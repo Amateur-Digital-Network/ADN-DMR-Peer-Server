@@ -75,7 +75,7 @@ La activación/desactivación in-band de bridges se aplica sobre **voice termina
 
 **TG 4000 no debe aparecer** como chip UA dinámico en el monitor ni en `peer_dynamic_tgs`.
 
-**Respuesta de voz (`TG4000_VOICE: true` en el MASTER):** al terminar la pasada al 4000 (su terminador), el servidor responde **solo a ese hotspot**, alrededor de un segundo después, con el estado de enlace en el `ANNOUNCEMENT_LANGUAGE` del sistema: «enlazado a» y los TG estáticos que el hotspot conserva en ese slot (sus OPTIONS y los `TS1_STATIC` / `TS2_STATIC` del MASTER, hasta cuatro); si no tiene, «enlazado a *N*» si hay `DEFAULT_REFLECTOR`; si no, «no enlazado».
+**Respuesta de voz (activa por defecto; `TG4000_VOICE: false` en el MASTER la desactiva):** al terminar la pasada al 4000 (su terminador), el servidor responde **solo a ese hotspot**, alrededor de un segundo después, con el estado de enlace en el `ANNOUNCEMENT_LANGUAGE` del sistema: «enlazado a» y los TG estáticos que el hotspot conserva en ese slot (sus OPTIONS y los `TS1_STATIC` / `TS2_STATIC` del MASTER, hasta cuatro); si no tiene, «enlazado a *N*» si hay `DEFAULT_REFLECTOR`; si no, «no enlazado».
 
 - Una llamada de **grupo** al TG 4000 se responde con una llamada de grupo del ID de voz del servidor al **TG 4000** por ese slot: la radio la oye en el contacto que acaba de usar.
 - Una llamada **privada** al ID 4000 se responde con una llamada privada **desde el ID 4000** a quien llamó, que las configuraciones de los hotspots devuelven al contacto privado (p. ej. `PCRewrite …,84000,…,4000,…`).
