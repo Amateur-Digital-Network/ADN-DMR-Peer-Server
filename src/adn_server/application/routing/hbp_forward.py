@@ -174,6 +174,7 @@ class HbpForwardMixin:
         pkt_time: float,
         *,
         loop_guard_check: bool = True,
+        terminator: bool = False,
     ) -> bool:
         """Legacy routerHBP group/vcsbk packet control (~3270-3399).
 
@@ -343,7 +344,10 @@ class HbpForwardMixin:
                             src_proto._obp_send_bcsq(dst_id, stream_id)
                         _slot_st["_bcsq"] = True
                     return False
-        _step = seq_advance(_slot_st.get("lastSeq"), seq, pkt_time - _slot_st.get("lastSeqTime", pkt_time))
+        _step = seq_advance(
+            _slot_st.get("lastSeq"), seq, pkt_time - _slot_st.get("lastSeqTime", pkt_time),
+            terminator=terminator,
+        )
         if _step <= 0:  # same sequence again, or a late / out-of-order packet
             _slot_st["loss"] = _slot_st.get("loss", 0) + 1
             return False
