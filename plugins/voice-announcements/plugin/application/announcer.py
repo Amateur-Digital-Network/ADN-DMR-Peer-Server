@@ -49,6 +49,10 @@ GAP_BETWEEN_PLAYBACKS_S = 1.5
 TG_BUSY_RETRY_S = 3.0
 SLOT_BUSY_RETRY_S = 5.0
 MAX_RETRIES = 60
+# Default ``tg_quiet_s``: a talkgroup must have been quiet this long (no over starting or
+# ending on it anywhere) before an announcement starts, longer than the usual pause
+# between the overs of a QSO.
+TG_QUIET_S = 3.0
 
 
 class Announcer:
@@ -58,8 +62,10 @@ class Announcer:
         voice: Any,
         tts: Callable[[dict[str, Any], dict[str, Any], str], str | None] | None = None,
         now: Callable[[], datetime] = datetime.now,
+        tg_quiet_s: float = TG_QUIET_S,
     ) -> None:
         self._ctx = ctx
+        self.tg_quiet_s = float(tg_quiet_s)
         self._voice = voice
         self._tts = tts if tts is not None else ensure_tts_ambe
         self._now = now
@@ -165,6 +171,16 @@ class Announcer:
     def _begin(self, item: Item, ambe: list, retry: int = 0) -> None:
         """Holds the TG in the queue while it waits for a free slot."""
         if self._stopped:
+            return
+        quiet_for = getattr(self._ctx, "tg_quiet_for", None)
+        quiet = quiet_for(item.tg) if quiet_for is not None else None
+        if quiet is not None and quiet < self.tg_quiet_s and retry < MAX_RETRIES:
+            if retry == 0:
+                logger.info("(%s) TG %s in use (QSO), waiting until it has been quiet for %.0f s...",
+                            item.label, item.tg, self.tg_quiet_s)
+            # Live voice: check again like a busy slot; in a pause: right when it is quiet enough.
+            delay = SLOT_BUSY_RETRY_S if quiet == 0.0 else max(0.5, self.tg_quiet_s - quiet)
+            self._ctx.call_later(delay, self._begin, item, ambe, retry + 1)
             return
         slot_for_tg = getattr(self._ctx, "voice_slot_for_tg", None)
         slot = slot_for_tg(item.tg) if slot_for_tg is not None else None

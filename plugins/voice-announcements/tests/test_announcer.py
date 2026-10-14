@@ -256,3 +256,44 @@ def test_the_server_grants_the_plugin_what_voice_configures() -> None:
     assert send_permission(config, "voice-announcements").group_voice_tgs == {9}  # an explicit entry wins
     config["PLUGINS"] = {"master_kill": True}
     assert send_permission(config, "voice-announcements") is None
+
+
+def test_an_announcement_waits_until_its_talkgroup_has_been_quiet(reactor) -> None:
+    """A QSO on the TG: live voice (0 s quiet), then a pause; it starts only once the TG has
+    been quiet for tg_quiet_s (3 s by default), not in the pause between two overs."""
+    ctx, sent = _ctx(reactor, {"ANNOUNCEMENTS": [_ann()]})
+    last_heard = {"t": None}  # None: someone is talking now
+    ctx.tg_quiet_for = lambda tg: 0.0 if last_heard["t"] is None else reactor.now - last_heard["t"]
+    a = Announcer(ctx, Voice())
+    a.reconcile()
+    reactor.advance(61)  # due: an over is live
+    assert sent == []
+    last_heard["t"] = reactor.now  # the over ends; the pause starts
+    reactor.advance(5)  # the next check comes 5 s later (live voice), 5 s quiet by then
+    assert len(sent) == Voice.frames
+
+
+def test_a_pause_shorter_than_tg_quiet_s_keeps_it_waiting(reactor) -> None:
+    ctx, sent = _ctx(reactor, {"ANNOUNCEMENTS": [_ann()]})
+    ctx.tg_quiet_for = lambda tg: 1.0  # an over ended a second ago, every time it asks
+    a = Announcer(ctx, Voice(), tg_quiet_s=3.0)
+    a.reconcile()
+    reactor.advance(61 + 30)
+    assert sent == []
+
+
+def test_tg_quiet_s_zero_turns_the_wait_off(reactor) -> None:
+    ctx, sent = _ctx(reactor, {"ANNOUNCEMENTS": [_ann()]})
+    ctx.tg_quiet_for = lambda tg: 0.0
+    a = Announcer(ctx, Voice(), tg_quiet_s=0.0)
+    a.reconcile()
+    reactor.advance(62)
+    assert len(sent) == Voice.frames
+
+
+def test_without_tg_quiet_for_it_plays_as_before(reactor) -> None:
+    ctx, sent = _ctx(reactor, {"ANNOUNCEMENTS": [_ann()]})  # an older server: no tg_quiet_for
+    a = Announcer(ctx, Voice())
+    a.reconcile()
+    reactor.advance(62)
+    assert len(sent) == Voice.frames

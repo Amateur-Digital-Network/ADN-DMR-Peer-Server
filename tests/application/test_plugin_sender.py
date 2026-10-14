@@ -295,3 +295,12 @@ def test_the_announcements_plugin_runs_on_the_root_config_alone(tmp_path) -> Non
     permission = send_permission(config, ANNOUNCEMENTS_PLUGIN)
     assert permission is not None and permission.group_voice_tgs == {730777}
     assert 1000001 in permission.allowed_src_ids
+
+
+def test_tg_quiet_for_is_answered_for_granted_talkgroups_only() -> None:
+    sender = PluginDmrdSender(
+        "d-aprs", _config(group_voice_tgs=[213]), lambda *a: True, call_from_reactor=lambda *a: None,
+        quiet_for_tg=lambda tg: 7.5,
+    )
+    assert sender.tg_quiet_for(213) == 7.5
+    assert sender.tg_quiet_for(214) == 0.0  # not granted: never reported quiet

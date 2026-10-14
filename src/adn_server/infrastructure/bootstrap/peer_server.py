@@ -466,6 +466,7 @@ def run_peer_server(
         sender_factory=lambda name: PluginDmrdSender(
             name, config, plugin_ingress.deliver, reactor.callFromThread,
             in_reactor_thread=isInIOThread, slot_for_tg=plugin_ingress.voice_slot_for_tg,
+            quiet_for_tg=plugin_ingress.tg_quiet_for,
         ),
     )
     voice_plugin_bridge = VoicePluginBridge(plugin_bus, config, get_dmra_blocks=get_dmra_blocks)

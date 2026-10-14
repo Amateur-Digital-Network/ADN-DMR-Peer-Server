@@ -30,6 +30,7 @@ Helpers live in application/routing/ (timers, OBP/HBP forward, LC/TA, subscripti
 from __future__ import annotations
 
 import logging
+import math
 import time
 from time import perf_counter
 from typing import Any
@@ -67,6 +68,7 @@ from .routing.helpers import (
     obp_sync_flat_bridge_tx_times,
     resolve_voice_peer_id,
     slot_has_active_voice,
+    tg_has_active_conversation,
     unit_data_hbp_target_idle,
     unit_data_reportable,
 )
@@ -138,6 +140,8 @@ class RoutingUseCases(
         self._get_protocols = get_protocols  # () -> dict[str, protocol]
         self._reporting = reporting
         self._on_relay_deactivated = on_relay_deactivated  # (system_name: str) -> None; legacy disconnectedVoice
+        # TG -> when an over on it last started or ended (any ingress, not the server's own voice).
+        self._tg_last_heard: dict[int, float] = {}
         self._send_bcsq = send_bcsq  # (system_name, tgid, stream_id) -> None; legacy OBP send_bcsq from router
         self._send_dmra_to_system = send_dmra_to_system
         self._get_dmra_blocks = get_dmra_blocks
@@ -186,6 +190,32 @@ class RoutingUseCases(
         """Check ID against ACL. Legacy acl_check."""
         return self._acl_router.acl_check(id_val, acl)
 
+
+    _TG_LAST_HEARD_MAX = 2048
+    _TG_LAST_HEARD_KEEP_S = 600.0
+
+    def _note_tg_heard(self, dst_id: bytes, pkt_time: float) -> None:
+        """Start or end of an over on a talkgroup (voice header / terminator, not every frame)."""
+        heard = self._tg_last_heard
+        heard[int_id(dst_id)] = pkt_time
+        if len(heard) > self._TG_LAST_HEARD_MAX:
+            for tg in [t for t, at in heard.items() if pkt_time - at > self._TG_LAST_HEARD_KEEP_S]:
+                del heard[tg]
+
+    def tg_quiet_for(self, tg: int, now: float | None = None) -> float:
+        """Seconds talkgroup ``tg`` has been quiet: 0.0 while a stream on it is live anywhere
+        (any MASTER/PEER slot or OpenBridge stream), else the time since an over on it last
+        started or ended; ``math.inf`` if never heard. The server's own voice (announcements,
+        plugin frames) is not counted, so a plugin waiting on it is not held by itself.
+        """
+        now = time.time() if now is None else now
+        protocols = self._get_protocols() if self._get_protocols else {}
+        if tg_has_active_conversation(
+            protocols, self._config.get("SYSTEMS", {}), bytes_3(int(tg)), b"", b"\x00\x00\x00", now,
+        ):
+            return 0.0
+        last = self._tg_last_heard.get(int(tg))
+        return math.inf if last is None else max(0.0, now - last)
 
     def dmrd_received(
         self,
@@ -275,6 +305,14 @@ class RoutingUseCases(
         systems_cfg = self._config.get("SYSTEMS", {})
         source_is_obp = systems_cfg.get(system_name, {}).get("MODE") == "OPENBRIDGE"
         pkt_time = ingress_pkt_time if ingress_pkt_time is not None else time.time()
+        if (
+            call_type == "group"
+            and frame_type == HBPF_DATA_SYNC
+            and dtype_vseq in (HBPF_SLT_VHEAD, HBPF_SLT_VTERM)
+            and plugin_origin is None
+            and not synthetic_announcement
+        ):
+            self._note_tg_heard(dst_id, pkt_time)
         if not source_is_obp and call_type in ("group", "vcsbk"):
             if not self._hbp_group_voice_ingress_controls(
                 system_name, peer_id, rf_src, dst_id, seq, slot, stream_id, data, pkt_time,

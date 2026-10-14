@@ -10,7 +10,8 @@ It is the same as the core announcements it replaces:
 
 - **Schedule:** `MODE: interval` plays every `INTERVAL` s. `MODE: hourly` plays once in the first minute of each hour.
 - **Talkgroups:** one playback per talkgroup at a time; others wait their turn, 1.5 s apart.
-- **Slot:** the slot the server chooses (`voice_slot_for_tg`) is where the TG is a dynamic session or has an active bridge on the MASTER, then TS2, then TS1. While every slot is busy, or the talkgroup carried voice anywhere (a local hotspot, a bridge, the mesh) within the announcement MASTER's `GROUP_HANGTIME` (5 s when unset), it retries every 5 s (up to 60 times): an announcement waits for a QSO on its talkgroup to end, pauses between overs included.
+- **Slot:** the slot the server chooses (`voice_slot_for_tg`) is where the TG is a dynamic session or has an active bridge on the MASTER, then TS2, then TS1. While every slot is busy it retries every 5 s (up to 60 times).
+- **QSO on the talkgroup:** it also waits until the talkgroup has been quiet for `tg_quiet_s` (`config.yaml`, default 3 s): no over starting or ending on it from any hotspot, bridge or the mesh. That covers the pause between the overs of a QSO, so an announcement does not take the talkgroup from the next over. The server's own voice does not count. `0` turns the wait off.
 - **Routing:** like any announcement, through the TG's bridges (OpenBridge included) and to the MASTER's hotspots.
 - **Pacing and collisions:** 58 ms per frame. It stops when a radio takes the slot.
 - **TTS:** `.txt` → speech → `.ambe`, encoded in a worker thread and cached, as before.

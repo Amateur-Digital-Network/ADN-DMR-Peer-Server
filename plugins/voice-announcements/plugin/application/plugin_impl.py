@@ -27,7 +27,7 @@ from typing import Any
 
 from adn_server.infrastructure.voice import DefaultVoiceProvider
 
-from .announcer import Announcer
+from .announcer import TG_QUIET_S, Announcer
 
 logger = logging.getLogger(__name__)
 
@@ -40,12 +40,14 @@ class VoiceAnnouncementsPlugin:
         self._announcer: Announcer | None = None
         self._ctx: Any = None
         self._reconcile_s = 15.0
+        self._tg_quiet_s = TG_QUIET_S
         self._timer: Any = None
 
     def on_load(self, bus: Any, config: dict[str, Any], server_ctx: Any) -> None:
         del bus
         self._ctx = server_ctx
         self._reconcile_s = float(config.get("reconcile_s", 15))
+        self._tg_quiet_s = float(config.get("tg_quiet_s", TG_QUIET_S))
         if server_ctx.send_dmrd is None or getattr(server_ctx, "voice_slot_for_tg", None) is None:
             logger.warning(
                 "(VOICE) %s is not allowed to send group voice: add it to PLUGINS.send with "
@@ -53,7 +55,7 @@ class VoiceAnnouncementsPlugin:
                 self.name,
             )
             return
-        self._announcer = Announcer(server_ctx, DefaultVoiceProvider())
+        self._announcer = Announcer(server_ctx, DefaultVoiceProvider(), tg_quiet_s=self._tg_quiet_s)
         self._reconcile()
 
     def _reconcile(self) -> None:
@@ -65,6 +67,9 @@ class VoiceAnnouncementsPlugin:
 
     def on_reload(self, config: dict[str, Any]) -> None:
         self._reconcile_s = float(config.get("reconcile_s", self._reconcile_s))
+        self._tg_quiet_s = float(config.get("tg_quiet_s", self._tg_quiet_s))
+        if self._announcer is not None:
+            self._announcer.tg_quiet_s = self._tg_quiet_s
 
     def on_shutdown(self) -> None:
         if self._announcer is not None:

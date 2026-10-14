@@ -145,7 +145,11 @@ class PluginManager:
             name, f" and group voice on TG {sorted(permission.group_voice_tgs)}" if permission.group_voice_tgs else "",
         )
         # voice_slot_for_tg checks the talkgroup grant live, like send_dmrd.
-        return replace(self._ctx, send_dmrd=sender, voice_slot_for_tg=getattr(sender, "voice_slot_for_tg", None))
+        return replace(
+            self._ctx, send_dmrd=sender,
+            voice_slot_for_tg=getattr(sender, "voice_slot_for_tg", None),
+            tg_quiet_for=getattr(sender, "tg_quiet_for", None),
+        )
 
     def shutdown_all(self) -> None:
         for name in list(self._loaded):

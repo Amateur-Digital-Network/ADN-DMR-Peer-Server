@@ -55,6 +55,7 @@ class PluginDmrdSender:
         clock: Callable[[], float] = time.monotonic,
         in_reactor_thread: Callable[[], bool] = lambda: False,
         slot_for_tg: Callable[[int], int | None] | None = None,
+        quiet_for_tg: Callable[[int], float] | None = None,
     ) -> None:
         self._plugin = plugin
         self._config = server_config
@@ -63,6 +64,7 @@ class PluginDmrdSender:
         self._clock = clock
         self._in_reactor_thread = in_reactor_thread
         self._slot_for_tg = slot_for_tg
+        self._quiet_for_tg = quiet_for_tg
         self._lock = threading.Lock()
         self._tokens = math.inf  # starts full: clamped to the rate on first use
         self._refilled = clock()
@@ -109,6 +111,13 @@ class PluginDmrdSender:
         if permission is None or int(tg) not in permission.group_voice_tgs or self._slot_for_tg is None:
             return None
         return self._slot_for_tg(int(tg))
+
+    def tg_quiet_for(self, tg: int) -> float:
+        """``ServerContext.tg_quiet_for``: only for granted talkgroups (else 0.0, never quiet); reactor thread."""
+        permission = send_permission(self._config, self._plugin)
+        if permission is None or int(tg) not in permission.group_voice_tgs or self._quiet_for_tg is None:
+            return 0.0
+        return float(self._quiet_for_tg(int(tg)))
 
     def _take_token(self, permission: SendPermission) -> bool:
         with self._lock:
