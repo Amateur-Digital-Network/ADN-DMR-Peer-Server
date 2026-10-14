@@ -129,3 +129,16 @@ def test_report_wire_bridge_event_frames_match_voice_event_example(
             continue
         assert payload[key] == value
     validator.validate({**payload, "ts": expected["ts"]})
+
+
+def test_topology_of_a_hotspot_with_options_validates(validator: jsonschema.Draft202012Validator) -> None:
+    # A logged-in hotspot with OPTIONS carries connected_at and options in its peer row.
+    from adn_server.application.report.payloads import build_topology
+
+    systems = _dashboard_systems()
+    peer = systems["MASTER-A"]["PEERS"][bytes_4(3120001)]
+    peer.update(CONNECTED=1_790_000_000, OPTIONS=b"TS2=91;TIMER=30;")
+    topology = build_topology(systems, seq=1, ts=1_790_000_100.0)
+    row = topology["systems"][0]["peers"][0]
+    assert {"connected_at", "options"} <= row.keys()
+    validator.validate(topology)
