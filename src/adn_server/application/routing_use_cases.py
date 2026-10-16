@@ -55,6 +55,7 @@ from .ports import AclRouter, DmrEmbeddedLcEncoder, SubscriptionStore, TalkerAli
 from .reporting_use_cases import ReportingUseCases
 from .routing.hbp_forward import HbpForwardMixin
 from .routing.helpers import (
+    UNIT_DATA_DTYPES,
     hbp_slot_blocks_group_voice,
     inject_only_defer_obp_hbp_slot_contention,
     is_private_subscriber_dst,
@@ -297,7 +298,7 @@ class RoutingUseCases(
             return False
         if call_type == "unit":
             _int_dst = int_id(dst_id)
-            if dtype_vseq in (6, 7, 8) or (dtype_vseq == 3 and not self._is_stream_known(system_name, stream_id, slot)):
+            if dtype_vseq in UNIT_DATA_DTYPES or (dtype_vseq == 3 and not self._is_stream_known(system_name, stream_id, slot)):
                 self._unit_data_received(
                     system_name, peer_id, rf_src, dst_id, seq, slot,
                     frame_type, dtype_vseq, stream_id, data,
@@ -1269,6 +1270,11 @@ class RoutingUseCases(
         elif dtype_vseq == 8:
             logger.info(
                 "(%s) *UNIT VCSBK 3/4 DATA BLOCK* STREAM ID: %s SUB: %s PEER: %s TGID %s TS %s",
+                system_name, int_id(stream_id), int_id(rf_src), int_id(peer_id), _int_dst_id, slot,
+            )
+        elif dtype_vseq == 10:
+            logger.info(
+                "(%s) *UNIT RATE 1 DATA BLOCK* STREAM ID: %s SUB: %s PEER: %s TGID %s TS %s",
                 system_name, int_id(stream_id), int_id(rf_src), int_id(peer_id), _int_dst_id, slot,
             )
         else:

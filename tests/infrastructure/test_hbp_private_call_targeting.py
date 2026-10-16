@@ -221,3 +221,17 @@ def test_unit_data_waits_while_destination_hotspot_receives_voice() -> None:
     for spec in _unit_data_specs(_DST_SUB):
         stack.inject_spec(dataclasses.replace(spec, stream_id=spec.stream_id + 0x100, seq=spec.seq + 10), _ADDR_TX)
     assert len(stack.transport.for_addr(_ADDR_RX)) == 5, "once the call is over the burst goes through"
+
+
+def test_rate_1_unit_data_to_unknown_destination_not_broadcast() -> None:
+    """Some radios send SMS as rate 1 blocks (dtype 10): same rule as rate 1/2 and 3/4."""
+    stack = build_hbp_repeat_stack(talker_alias=True)
+    stack.config["PROXY"] = {"TARGET_SYSTEM": stack.system_name}
+    stack.register_peer(_PEER_TX, _ADDR_TX, options="TS2=7304;")
+    stack.register_peer(_PEER_RX, _ADDR_RX, options="TS2=7304;")
+    base = dataclasses.replace(_private_spec(), dst_id=714999, frame_type=HBPF_DATA_SYNC, stream_id=0xDA7A0010)
+
+    for seq, dtype in enumerate((6, 10, 10)):
+        stack.inject_spec(dataclasses.replace(base, seq=seq, dtype_vseq=dtype), _ADDR_TX)
+
+    assert not stack.transport.for_addr(_ADDR_RX)
