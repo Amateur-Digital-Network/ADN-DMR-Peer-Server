@@ -1210,13 +1210,17 @@ def unit_data_hbp_target_idle(
     )
 
 
+# Data header, rate 1/2, rate 3/4 and rate 1 blocks (SMS, GPS, ARS); CSBK (3) is handled apart.
+UNIT_DATA_DTYPES = frozenset({6, 7, 8, 10})
+
+
 def unit_data_reportable(dtype_vseq: int) -> bool:
     """True when a unit-data frame should emit monitor/report events.
 
     CSBK prelude (dtype 3) is routed but omitted from BRDG_EVENT — same policy as
     data-log ``log_dtypes`` — to avoid SMS/GPS setup storms in logs and monitors.
     """
-    return dtype_vseq in (6, 7, 8)
+    return dtype_vseq in UNIT_DATA_DTYPES
 
 
 def is_unit_data_ingress(
@@ -1232,7 +1236,7 @@ def is_unit_data_ingress(
     """
     if call_type != "unit":
         return False
-    if dtype_vseq in (6, 7, 8):
+    if dtype_vseq in UNIT_DATA_DTYPES:
         return True
     if dtype_vseq == 3:
         return stream_id != (slot_rx_stream_id or b"\x00")

@@ -50,6 +50,7 @@ from ...application.routing.downlink import (
     track_peer_group_dmrd,
 )
 from ...application.routing.helpers import (
+    UNIT_DATA_DTYPES,
     clear_peer_rx_status_slots,
     clear_peer_ua_sessions,
     derive_peer_rf_mode,
@@ -1607,7 +1608,7 @@ class HBPProtocol(DatagramProtocol):
                         # heard here is not repeated to every peer: on a shared MASTER that keys all
                         # hotspots and cuts the voice they are receiving. Routing still delivers it
                         # by hotspot ID. A known destination's hotspot is skipped while it has voice.
-                        if _frame_type == HBPF_DATA_SYNC and _dtype_vseq in (3, 6, 7, 8):
+                        if _frame_type == HBPF_DATA_SYNC and (_dtype_vseq == 3 or _dtype_vseq in UNIT_DATA_DTYPES):
                             if _pvt_targets is None:
                                 _pvt_targets = ()
                             else:

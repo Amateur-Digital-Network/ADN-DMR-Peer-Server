@@ -426,6 +426,24 @@ def test_unit_data_sub_map_peer_unknown_not_broadcast_on_shared_master(entry_pee
 
 
 @pytest.mark.behavior
+def test_rate_1_unit_data_is_routed_as_data_not_as_private_voice() -> None:
+    """Rate 1 blocks (dtype 10) to a radio whose hotspot is gone: dropped like any unit data,
+    not broadcast on the shared MASTER as if they were a private voice call."""
+    config = minimal_config(("D-APRS", "SYSTEM"))
+    config["SYSTEMS"]["SYSTEM"]["MAX_PEERS"] = 200
+    config["_SUB_MAP"] = {bytes_3(HOTSPOT_SUB_ID): ("SYSTEM", 2, 1000.0, bytes_4(730039101))}
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["SYSTEM"].STATUS[2] = idle_hbp_slot()
+    scenario.protocols["SYSTEM"]._peers[bytes_4(730039199)] = {}
+    base = PacketSpec(call_type="unit", rf_src=DAPRS_GATEWAY_ID, dst_id=HOTSPOT_SUB_ID, stream_id=0x33416429, slot=2)
+
+    scenario.inject_unit("D-APRS", DeterministicScenario.unit_data_header_spec(base, dtype_vseq=10))
+
+    assert not scenario.protocols["SYSTEM"].sent_to_peer
+    assert_not_forwarded(scenario, "SYSTEM")
+
+
+@pytest.mark.behavior
 def test_pvt_call_unit_data_peer_gone_not_broadcast_on_shared_master() -> None:
     """Same rule on the 7-digit path (ARS/LRRP downlink to a radio); private voice keeps its fallback."""
     config = minimal_config(("D-APRS", "SYSTEM"))
