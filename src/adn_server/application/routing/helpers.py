@@ -149,6 +149,30 @@ def peer_is_simplex(peer: dict[str, Any]) -> bool:
     return peer_rf_mode(peer) == RF_MODE_SIMPLEX
 
 
+def peer_voice_busy_for_unit_data(
+    peer: dict[str, Any] | None,
+    peer_slots: PeerVoiceSlotMap | None,
+    slot: int,
+    now: float,
+) -> bool:
+    """True while the hotspot carries voice on ``slot`` (any slot when simplex: one RF path).
+
+    MMDVMHost takes a CSBK or data header in the middle of a network voice call, switches
+    the slot to data and drops the voice until the next sync burst: a radio hears it as a
+    crackle. On RF a radio never sends data over a busy slot either.
+    """
+    simplex = isinstance(peer, dict) and peer_is_simplex(peer)
+    for voice_slot, row in (peer_slots or {}).items():
+        if (
+            (simplex or int(voice_slot) == int(slot))
+            and isinstance(row, dict)
+            and row.get("stream_id")
+            and now - float(row.get("time", 0) or 0) < STREAM_TO
+        ):
+            return True
+    return False
+
+
 def _slot_leg_active(slot_st: dict[str, Any], leg: str, pkt_time: float) -> bool:
     """True when the slot's ``RX`` or ``TX`` leg carries voice (within STREAM_TO)."""
     leg_type = slot_st.get(f"{leg}_TYPE")
@@ -1186,13 +1210,17 @@ def unit_data_hbp_target_idle(
     )
 
 
+# Data header, rate 1/2, rate 3/4 and rate 1 blocks (SMS, GPS, ARS); CSBK (3) is handled apart.
+UNIT_DATA_DTYPES = frozenset({6, 7, 8, 10})
+
+
 def unit_data_reportable(dtype_vseq: int) -> bool:
     """True when a unit-data frame should emit monitor/report events.
 
     CSBK prelude (dtype 3) is routed but omitted from BRDG_EVENT — same policy as
     data-log ``log_dtypes`` — to avoid SMS/GPS setup storms in logs and monitors.
     """
-    return dtype_vseq in (6, 7, 8)
+    return dtype_vseq in UNIT_DATA_DTYPES
 
 
 def is_unit_data_ingress(
@@ -1208,7 +1236,7 @@ def is_unit_data_ingress(
     """
     if call_type != "unit":
         return False
-    if dtype_vseq in (6, 7, 8):
+    if dtype_vseq in UNIT_DATA_DTYPES:
         return True
     if dtype_vseq == 3:
         return stream_id != (slot_rx_stream_id or b"\x00")

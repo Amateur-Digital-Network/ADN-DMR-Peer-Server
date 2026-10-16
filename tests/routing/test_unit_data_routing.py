@@ -22,6 +22,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from tests.harness.assertions import assert_forwarded, assert_not_forwarded
 from tests.harness.deterministic import (
@@ -35,6 +37,7 @@ from tests.harness.deterministic import (
 )
 from tests.routing.unit_data_helpers import idle_hbp_slot
 
+from adn_server.application.routing.helpers import RF_MODE_DUPLEX, RF_MODE_SIMPLEX, peer_voice_busy_for_unit_data
 from adn_server.domain import bytes_3, bytes_4
 from adn_server.domain.hbp_protocol import HBPF_SLT_VHEAD, HBPF_SLT_VTERM
 
@@ -403,6 +406,65 @@ def test_unit_data_sub_map_peer_not_connected_falls_back_to_broadcast() -> None:
 
 
 @pytest.mark.behavior
+@pytest.mark.parametrize("entry_peer", [bytes_4(730039101), None], ids=["peer_gone", "no_peer"])
+def test_unit_data_sub_map_peer_unknown_not_broadcast_on_shared_master(entry_peer: bytes | None) -> None:
+    """On a shared MASTER (MAX_PEERS > 1) the broadcast fallback would key every hotspot
+    of the server and cut the voice they are receiving: the packet is dropped instead."""
+    dst_sub = 712345
+    config = minimal_config(("MASTER-A", "MASTER-B"))
+    config["SYSTEMS"]["MASTER-B"]["MAX_PEERS"] = 200
+    config["_SUB_MAP"] = {bytes_3(dst_sub): ("MASTER-B", 2, 1000.0, entry_peer)}
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["MASTER-B"].STATUS[2] = idle_hbp_slot()
+    scenario.protocols["MASTER-B"]._peers[bytes_4(730039199)] = {}
+    base = PacketSpec(call_type="unit", dst_id=dst_sub, stream_id=0x52525255, slot=2)
+
+    scenario.inject_unit("MASTER-A", DeterministicScenario.unit_data_header_spec(base))
+
+    assert not scenario.protocols["MASTER-B"].sent_to_peer
+    assert_not_forwarded(scenario, "MASTER-B")
+
+
+@pytest.mark.behavior
+def test_rate_1_unit_data_is_routed_as_data_not_as_private_voice() -> None:
+    """Rate 1 blocks (dtype 10) to a radio whose hotspot is gone: dropped like any unit data,
+    not broadcast on the shared MASTER as if they were a private voice call."""
+    config = minimal_config(("D-APRS", "SYSTEM"))
+    config["SYSTEMS"]["SYSTEM"]["MAX_PEERS"] = 200
+    config["_SUB_MAP"] = {bytes_3(HOTSPOT_SUB_ID): ("SYSTEM", 2, 1000.0, bytes_4(730039101))}
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["SYSTEM"].STATUS[2] = idle_hbp_slot()
+    scenario.protocols["SYSTEM"]._peers[bytes_4(730039199)] = {}
+    base = PacketSpec(call_type="unit", rf_src=DAPRS_GATEWAY_ID, dst_id=HOTSPOT_SUB_ID, stream_id=0x33416429, slot=2)
+
+    scenario.inject_unit("D-APRS", DeterministicScenario.unit_data_header_spec(base, dtype_vseq=10))
+
+    assert not scenario.protocols["SYSTEM"].sent_to_peer
+    assert_not_forwarded(scenario, "SYSTEM")
+
+
+@pytest.mark.behavior
+def test_pvt_call_unit_data_peer_gone_not_broadcast_on_shared_master() -> None:
+    """Same rule on the 7-digit path (ARS/LRRP downlink to a radio); private voice keeps its fallback."""
+    config = minimal_config(("D-APRS", "SYSTEM"))
+    config["SYSTEMS"]["SYSTEM"]["MAX_PEERS"] = 200
+    config["_SUB_MAP"] = {bytes_3(HOTSPOT_SUB_ID): ("SYSTEM", 2, 1000.0, bytes_4(730039101))}
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["SYSTEM"].STATUS[2] = idle_hbp_slot()
+    scenario.protocols["SYSTEM"]._peers[bytes_4(730039199)] = {}
+    base = PacketSpec(call_type="unit", rf_src=DAPRS_GATEWAY_ID, dst_id=HOTSPOT_SUB_ID, stream_id=0x33416426, slot=2)
+
+    scenario.inject_unit("D-APRS", DeterministicScenario.unit_data_header_spec(base))
+
+    assert not scenario.protocols["SYSTEM"].sent_to_peer
+    assert_not_forwarded(scenario, "SYSTEM")
+
+    voice = PacketSpec(call_type="unit", rf_src=DAPRS_GATEWAY_ID, dst_id=HOTSPOT_SUB_ID, stream_id=0x33416427, slot=2)
+    scenario.inject_unit("D-APRS", DeterministicScenario.unit_voice_head_spec(voice))
+    assert_forwarded(scenario, "SYSTEM", count=1, call_type="unit")
+
+
+@pytest.mark.behavior
 def test_pvt_call_sub_map_with_peer_id_targets_only_that_peer() -> None:
     """Same cross-talk fix for the 7-digit pvt_call_received cross-system path (private
     voice and ARS/LRRP downlink use this, independent of the unit-data SUB_MAP branch)."""
@@ -488,3 +550,66 @@ def test_unit_data_hotspot_id_match_on_the_source_peer_is_not_sent_back(dst_id: 
 
     assert not scenario.protocols["MASTER-A"].sent_to_peer
     assert_not_forwarded(scenario, "MASTER-A")
+
+
+_NOW = 1_800_000_000.0
+
+
+@pytest.mark.parametrize(
+    ("peer", "slots", "data_slot", "busy"),
+    [
+        ({"RF_MODE": RF_MODE_DUPLEX}, {2: {"stream_id": b"\x01", "time": _NOW - 0.06}}, 2, True),
+        ({"RF_MODE": RF_MODE_DUPLEX}, {1: {"stream_id": b"\x01", "time": _NOW - 0.06}}, 2, False),
+        ({"RF_MODE": RF_MODE_SIMPLEX}, {1: {"stream_id": b"\x01", "time": _NOW - 0.06}}, 2, True),
+        ({"RF_MODE": RF_MODE_DUPLEX}, {2: {"stream_id": b"\x01", "time": _NOW - 1.0}}, 2, False),
+        ({"RF_MODE": RF_MODE_DUPLEX}, {2: {"stream_id": b"", "bridge_hold": True, "time": _NOW}}, 2, False),
+        (None, None, 2, False),
+    ],
+    ids=["same_slot", "other_slot_duplex", "other_slot_simplex", "voice_over", "bridge_hold_only", "unknown_peer"],
+)
+def test_peer_voice_busy_for_unit_data(peer, slots, data_slot, busy) -> None:
+    assert peer_voice_busy_for_unit_data(peer, slots, data_slot, _NOW) is busy
+
+
+def _receiving_voice(slot: int = 2) -> dict:
+    return {slot: {"stream_id": b"\x0a\x0b\x0c\x0d", "tgid": 730500, "time": time.time()}}
+
+
+@pytest.mark.behavior
+def test_unit_data_not_sent_to_known_peer_receiving_voice() -> None:
+    """MMDVMHost drops the network voice it is playing when a data header lands on its slot."""
+    dst_sub = 712345
+    dst_peer = bytes_4(730039101)
+    config = minimal_config(("MASTER-A", "MASTER-B"))
+    config["_SUB_MAP"] = {bytes_3(dst_sub): ("MASTER-B", 2, 1000.0, dst_peer)}
+    scenario = DeterministicScenario(config=config)
+    proto = scenario.protocols["MASTER-B"]
+    proto.STATUS[2] = idle_hbp_slot()
+    proto._peers[dst_peer] = {"RF_MODE": RF_MODE_DUPLEX}
+    proto._peer_voice_slots = {dst_peer: _receiving_voice()}
+    base = PacketSpec(call_type="unit", dst_id=dst_sub, stream_id=0x52525256, slot=2)
+
+    scenario.inject_unit("MASTER-A", DeterministicScenario.unit_data_header_spec(base))
+    assert not proto.sent_to_peer
+
+    proto._peer_voice_slots = {}
+    scenario.inject_unit("MASTER-A", DeterministicScenario.unit_data_header_spec(base))
+    assert proto.sent_to_peer and proto.sent_to_peer[0][0] == dst_peer
+
+
+@pytest.mark.behavior
+def test_pvt_call_unit_data_not_sent_to_peer_receiving_voice() -> None:
+    dst_peer = bytes_4(730039101)
+    config = minimal_config(("D-APRS", "SYSTEM"))
+    config["_SUB_MAP"] = {bytes_3(HOTSPOT_SUB_ID): ("SYSTEM", 2, 1000.0, dst_peer)}
+    scenario = DeterministicScenario(config=config)
+    proto = scenario.protocols["SYSTEM"]
+    proto.STATUS[2] = idle_hbp_slot()
+    proto._peers[dst_peer] = {"RF_MODE": RF_MODE_SIMPLEX}
+    proto._peer_voice_slots = {dst_peer: _receiving_voice(slot=1)}
+    base = PacketSpec(call_type="unit", rf_src=DAPRS_GATEWAY_ID, dst_id=HOTSPOT_SUB_ID, stream_id=0x33416428, slot=2)
+
+    scenario.inject_unit("D-APRS", DeterministicScenario.unit_data_header_spec(base))
+
+    assert not proto.sent_to_peer
+    assert_not_forwarded(scenario, "SYSTEM")

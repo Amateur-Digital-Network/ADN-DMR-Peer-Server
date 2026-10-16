@@ -55,6 +55,7 @@ from .ports import AclRouter, DmrEmbeddedLcEncoder, SubscriptionStore, TalkerAli
 from .reporting_use_cases import ReportingUseCases
 from .routing.hbp_forward import HbpForwardMixin
 from .routing.helpers import (
+    UNIT_DATA_DTYPES,
     hbp_slot_blocks_group_voice,
     inject_only_defer_obp_hbp_slot_contention,
     is_private_subscriber_dst,
@@ -66,6 +67,7 @@ from .routing.helpers import (
     obp_publish_flat_bridge_tx,
     obp_status_plugin_voice,
     obp_sync_flat_bridge_tx_times,
+    peer_voice_busy_for_unit_data,
     resolve_voice_peer_id,
     slot_has_active_voice,
     tg_has_active_conversation,
@@ -296,7 +298,7 @@ class RoutingUseCases(
             return False
         if call_type == "unit":
             _int_dst = int_id(dst_id)
-            if dtype_vseq in (6, 7, 8) or (dtype_vseq == 3 and not self._is_stream_known(system_name, stream_id, slot)):
+            if dtype_vseq in UNIT_DATA_DTYPES or (dtype_vseq == 3 and not self._is_stream_known(system_name, stream_id, slot)):
                 self._unit_data_received(
                     system_name, peer_id, rf_src, dst_id, seq, slot,
                     frame_type, dtype_vseq, stream_id, data,
@@ -1270,6 +1272,11 @@ class RoutingUseCases(
                 "(%s) *UNIT VCSBK 3/4 DATA BLOCK* STREAM ID: %s SUB: %s PEER: %s TGID %s TS %s",
                 system_name, int_id(stream_id), int_id(rf_src), int_id(peer_id), _int_dst_id, slot,
             )
+        elif dtype_vseq == 10:
+            logger.info(
+                "(%s) *UNIT RATE 1 DATA BLOCK* STREAM ID: %s SUB: %s PEER: %s TGID %s TS %s",
+                system_name, int_id(stream_id), int_id(rf_src), int_id(peer_id), _int_dst_id, slot,
+            )
         else:
             logger.info(
                 "(%s) *UNKNOWN DATA TYPE* STREAM ID: %s SUB: %s PEER: %s TGID %s TS %s",
@@ -1348,8 +1355,8 @@ class RoutingUseCases(
                 _hangtime = _d_sys_cfg.get("GROUP_HANGTIME", 5)
                 if unit_data_hbp_target_idle(_dst_slot, pkt_time, _hangtime):
                     _tmp_bits = _bits ^ (1 << 7) if slot != _d_slot else _bits
-                    _forwarded.append(_d_system)
-                    self._send_data_to_hbp(system_name, _d_system, _d_slot, dst_id, _tmp_bits, data, dmrpkt, rf_src, stream_id, peer_id, d_peer_id=_d_peer_id)
+                    if self._send_data_to_hbp(system_name, _d_system, _d_slot, dst_id, _tmp_bits, data, dmrpkt, rf_src, stream_id, peer_id, d_peer_id=_d_peer_id):
+                        _forwarded.append(_d_system)
                 elif not is_private_subscriber_dst(dst_id):
                     self._log_unit_data_hbp_busy(
                         system_name, _d_system, _d_slot, _int_dst_id, _dst_slot, _d_sys_cfg, pkt_time,
@@ -1383,8 +1390,8 @@ class RoutingUseCases(
                             _hangtime = _d_sys_cfg.get("GROUP_HANGTIME", 5)
                             if unit_data_hbp_target_idle(_dst_slot, pkt_time, _hangtime):
                                 _tmp_bits = _bits ^ (1 << 7) if slot != 2 else _bits
-                                _forwarded.append(_d_system)
-                                self._send_data_to_hbp(system_name, _d_system, _d_slot, dst_id, _tmp_bits, data, dmrpkt, rf_src, stream_id, peer_id, d_peer_id=_to_peer)
+                                if self._send_data_to_hbp(system_name, _d_system, _d_slot, dst_id, _tmp_bits, data, dmrpkt, rf_src, stream_id, peer_id, d_peer_id=_to_peer):
+                                    _forwarded.append(_d_system)
                             elif not is_private_subscriber_dst(dst_id):
                                 self._log_unit_data_hbp_busy(
                                     system_name, _d_system, _d_slot, _int_dst_id, _dst_slot, _d_sys_cfg, pkt_time,
@@ -1406,8 +1413,8 @@ class RoutingUseCases(
                             _hangtime = _d_sys_cfg.get("GROUP_HANGTIME", 5)
                             if unit_data_hbp_target_idle(_dst_slot, pkt_time, _hangtime):
                                 _tmp_bits = _bits ^ (1 << 7) if slot != 2 else _bits
-                                _forwarded.append(_d_system)
-                                self._send_data_to_hbp(system_name, _d_system, _d_slot, dst_id, _tmp_bits, data, dmrpkt, rf_src, stream_id, peer_id, d_peer_id=_to_peer)
+                                if self._send_data_to_hbp(system_name, _d_system, _d_slot, dst_id, _tmp_bits, data, dmrpkt, rf_src, stream_id, peer_id, d_peer_id=_to_peer):
+                                    _forwarded.append(_d_system)
                             elif not is_private_subscriber_dst(dst_id):
                                 self._log_unit_data_hbp_busy(
                                     system_name, _d_system, _d_slot, _int_dst_id, _dst_slot, _d_sys_cfg, pkt_time,
@@ -1565,9 +1572,24 @@ class RoutingUseCases(
                 if frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM:
                     _target_status[stream_id]["ACTIVE"] = False
             else:
+                if (
+                    _unit_data
+                    and int(_target_system.get("MAX_PEERS", 1)) > 1
+                    and _target_peer_id not in getattr(target_proto, "_peers", {})
+                ):
+                    # Same rule as _send_data_to_hbp: no unit data broadcast on a shared MASTER.
+                    continue
+                if _unit_data:
+                    _peers = getattr(target_proto, "_peers", {})
+                    _voice_slots = getattr(target_proto, "_peer_voice_slots", {})
+                    if any(
+                        peer_voice_busy_for_unit_data(_peers.get(p), _voice_slots.get(p), slot, pkt_time)
+                        for p in ((_target_peer_id,) if _target_peer_id in _peers else _peers)
+                    ):
+                        continue
                 ts_st = _target_status.get(slot, {})
-                # Voice private-call contention only. Unit data (ARS/LRRP/SMS) must
-                # pierce group/voice RX on the target slot — legacy pvt_call still
+                # Voice private-call contention only. Unit data (ARS/LRRP/SMS) is gated
+                # per hotspot above, not by the system slot — legacy pvt_call still
                 # sends via send_system even when sendDataToHBP is busy.
                 if not _unit_data:
                     if (dst_id == ts_st.get("RX_TGID")) and ((pkt_time - ts_st.get("RX_TIME", 0)) < STREAM_TO):

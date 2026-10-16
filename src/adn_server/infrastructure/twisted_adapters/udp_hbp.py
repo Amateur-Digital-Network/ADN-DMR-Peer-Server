@@ -50,6 +50,7 @@ from ...application.routing.downlink import (
     track_peer_group_dmrd,
 )
 from ...application.routing.helpers import (
+    UNIT_DATA_DTYPES,
     clear_peer_rx_status_slots,
     clear_peer_ua_sessions,
     derive_peer_rf_mode,
@@ -65,6 +66,7 @@ from ...application.routing.helpers import (
     peer_matches_rf_source,
     peer_should_receive_group_voice,
     peer_single_exclusive_tgid,
+    peer_voice_busy_for_unit_data,
     register_peer_ua_session,
     resolve_voice_peer_id,
     seed_peer_ua_session_from_status,
@@ -645,8 +647,8 @@ class HBPProtocol(DatagramProtocol):
         """Clear the sender's UA dynamics and stale STATUS on TG/ID 4000.
 
         A MASTER of its own also runs the in-band 4000 signalling and deactivates all its
-        dynamic bridges; a shared MASTER (proxy target) does not, its legs belong to every
-        hotspot on it.
+        dynamic bridges; a shared MASTER (proxy target, or MAX_PEERS > 1) does not, its legs
+        belong to every hotspot on it.
         """
         peer = self._peers.get(peer_id, {})
         held_by_sender = self._peer_dynamic_tg_slots(peer_id)
@@ -656,7 +658,7 @@ class HBPProtocol(DatagramProtocol):
             self._dynamic_tg_uc.delete_peer(peer_id, self._system)
         self._emit_tg4000_routing_event(peer_id, rf_src, stream_id, slot)
         _kind = "Private call to ID" if call_type == "unit" else "Group call to TG"
-        if self._inject_multi_peer_options_filter():
+        if self._inject_multi_peer_options_filter() or int(self._config.get("MAX_PEERS", 1)) > 1:
             # The MASTER's legs are shared by every hotspot on it: in-band 4000 signalling would
             # set all of them IDLE on this slot (dynamics and OPTIONS statics of the others).
             # This peer's own dynamics are what was cleared above; a leg only it held goes too.
@@ -1602,6 +1604,21 @@ class HBPProtocol(DatagramProtocol):
                     _repeat_pkt = b"".join([_data[:11], _peer_id, _repeat_tail])
                     if _call_type == "unit":
                         _pvt_targets = self._pvt_repeat_targets(_dst_id)
+                        # Unit data (CSBK / data header / data blocks: GPS, ARS, SMS) to an ID never
+                        # heard here is not repeated to every peer: on a shared MASTER that keys all
+                        # hotspots and cuts the voice they are receiving. Routing still delivers it
+                        # by hotspot ID. A known destination's hotspot is skipped while it has voice.
+                        if _frame_type == HBPF_DATA_SYNC and (_dtype_vseq == 3 or _dtype_vseq in UNIT_DATA_DTYPES):
+                            if _pvt_targets is None:
+                                _pvt_targets = ()
+                            else:
+                                _now = time.time()
+                                _pvt_targets = tuple(
+                                    p for p in _pvt_targets
+                                    if not peer_voice_busy_for_unit_data(
+                                        self._peers.get(p), self._peer_voice_slots.get(p), _slot, _now,
+                                    )
+                                )
                     else:
                         _pvt_targets = None
                     if _pvt_targets is None:
