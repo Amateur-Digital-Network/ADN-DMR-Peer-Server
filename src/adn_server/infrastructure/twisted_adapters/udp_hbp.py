@@ -646,8 +646,8 @@ class HBPProtocol(DatagramProtocol):
         """Clear the sender's UA dynamics and stale STATUS on TG/ID 4000.
 
         A MASTER of its own also runs the in-band 4000 signalling and deactivates all its
-        dynamic bridges; a shared MASTER (proxy target) does not, its legs belong to every
-        hotspot on it.
+        dynamic bridges; a shared MASTER (proxy target, or MAX_PEERS > 1) does not, its legs
+        belong to every hotspot on it.
         """
         peer = self._peers.get(peer_id, {})
         held_by_sender = self._peer_dynamic_tg_slots(peer_id)
@@ -657,7 +657,7 @@ class HBPProtocol(DatagramProtocol):
             self._dynamic_tg_uc.delete_peer(peer_id, self._system)
         self._emit_tg4000_routing_event(peer_id, rf_src, stream_id, slot)
         _kind = "Private call to ID" if call_type == "unit" else "Group call to TG"
-        if self._inject_multi_peer_options_filter():
+        if self._inject_multi_peer_options_filter() or int(self._config.get("MAX_PEERS", 1)) > 1:
             # The MASTER's legs are shared by every hotspot on it: in-band 4000 signalling would
             # set all of them IDLE on this slot (dynamics and OPTIONS statics of the others).
             # This peer's own dynamics are what was cleared above; a leg only it held goes too.
