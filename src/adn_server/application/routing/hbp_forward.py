@@ -44,6 +44,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from hashlib import blake2b
 
 from ...domain import bytes_4, int_id
@@ -52,6 +53,7 @@ from .helpers import (
     hbp_ingress_downlink_session_blocks_tx,
     hbp_ingress_new_stream_collision,
     master_per_peer_slot_contention,
+    peer_voice_busy_for_unit_data,
     seq_advance,
     tg_has_active_conversation,
     unit_data_reportable,
@@ -380,7 +382,7 @@ class HbpForwardMixin:
         stream_id: bytes,
         peer_id: bytes,
         d_peer_id: bytes | None = None,
-    ) -> None:
+    ) -> bool:
         """Legacy sendDataToHBP: forward a unit-data packet to an HBP (MASTER/PEER) target.
 
         ``d_peer_id`` (the exact hotspot the destination was last heard on, from SUB_MAP
@@ -388,22 +390,35 @@ class HbpForwardMixin:
         ``send_peer`` instead of ``send_system``/``send_peers`` broadcasting the private
         DATA to every other hotspot connected to ``d_system`` — the same cross-talk this
         server already avoids for private voice REPEAT (``_pvt_repeat_targets``). Falls
-        back to the system-wide broadcast when the target peer isn't known or connected
-        (unchanged legacy parity for that case)."""
+        back to the system-wide broadcast when the target peer isn't known or connected,
+        but only on a single-peer MASTER: on a shared one (MAX_PEERS > 1) that broadcast
+        keys every hotspot on the server and cuts whatever voice they are receiving.
+        Returns whether the packet was sent."""
         _tmp_data = b"".join([data[:15], tmp_bits.to_bytes(1, "big"), data[16:20], dmrpkt])
+        protocols = self._get_protocols() if self._get_protocols else {}
+        proto = protocols.get(d_system)
         try:
-            if d_peer_id is not None:
-                protocols = self._get_protocols() if self._get_protocols else {}
-                proto = protocols.get(d_system)
-                if proto is not None and d_peer_id in getattr(proto, "_peers", {}):
-                    proto.send_peer(d_peer_id, _tmp_data)
-                else:
-                    self._send_to_system(d_system, _tmp_data)
+            if d_peer_id is not None and proto is not None and d_peer_id in getattr(proto, "_peers", {}):
+                if peer_voice_busy_for_unit_data(
+                    proto._peers.get(d_peer_id), getattr(proto, "_peer_voice_slots", {}).get(d_peer_id), d_slot, time.time(),
+                ):
+                    logger.debug(
+                        "(%s) UNIT Data to %s not sent: hotspot %s is receiving voice on TS%s",
+                        source_system, int_id(dst_id), int_id(d_peer_id), d_slot,
+                    )
+                    return False
+                proto.send_peer(d_peer_id, _tmp_data)
+            elif int(self._config.get("SYSTEMS", {}).get(d_system, {}).get("MAX_PEERS", 1)) > 1:
+                logger.debug(
+                    "(%s) UNIT Data to %s not sent: its hotspot on %s is not connected",
+                    source_system, int_id(dst_id), d_system,
+                )
+                return False
             else:
                 self._send_to_system(d_system, _tmp_data)
         except Exception as exc:
             logger.warning("(%s) send_data_to_hbp %s failed: %s", source_system, d_system, exc)
-            return
+            return False
         logger.info("(%s) UNIT Data Bridged to HBP System: %s DST_ID: %s", source_system, d_system, int_id(dst_id))
         if int_id(dst_id) == 900999 and len(dmrpkt) == 33:
             logger.info(
@@ -417,3 +432,4 @@ class HbpForwardMixin:
                     d_system, int_id(stream_id), int_id(peer_id), int_id(rf_src), 1, int_id(dst_id),
                 )
             )
+        return True

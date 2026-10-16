@@ -37,7 +37,7 @@ from tests.harness.deterministic import DeterministicScenario, PacketSpec
 from tests.support.hbp_repeat_stack import build_hbp_repeat_stack
 
 from adn_server.domain import bytes_3, bytes_4
-from adn_server.infrastructure.hbp_constants import RPTC, RPTK, RPTL
+from adn_server.infrastructure.hbp_constants import HBPF_DATA_SYNC, RPTC, RPTK, RPTL
 from adn_server.infrastructure.twisted_adapters.udp_hbp import _calc_hash, _get_passphrase_bytes
 
 _PEER_TX = bytes_4(730039210)
@@ -152,3 +152,72 @@ def test_sub_map_entries_for_peer_purged_on_reconnect() -> None:
     assert stack.hbp._peers[_PEER_RX]["CONNECTION"] == "YES"
     assert bytes_3(_DST_SUB) not in stack.config["_SUB_MAP"], "entry pointing at the reconnected peer must be gone"
     assert bytes_3(1234567) in stack.config["_SUB_MAP"], "entries for other peers must be untouched"
+
+
+def _unit_data_specs(dst_id: int) -> list[PacketSpec]:
+    """A MOTOTRBO GPS/ARS burst: CSBK preambles (a new stream each), data header, data block."""
+    base = dataclasses.replace(_private_spec(), dst_id=dst_id, frame_type=HBPF_DATA_SYNC)
+    csbk = [dataclasses.replace(base, stream_id=0xC5B00000 + i, seq=i, dtype_vseq=3) for i in range(3)]
+    data = [dataclasses.replace(base, stream_id=0xDA7A0001, seq=3 + i, dtype_vseq=d) for i, d in enumerate((6, 7))]
+    return csbk + data
+
+
+def test_unit_data_to_unknown_destination_not_broadcast_on_shared_master() -> None:
+    """A radio's GPS/ARS to an ID never heard here (7141: 7140287 -> 714999) was repeated to
+    every hotspot of the shared MASTER, cutting the voice each of them was receiving."""
+    stack = build_hbp_repeat_stack(talker_alias=True)
+    stack.config["PROXY"] = {"TARGET_SYSTEM": stack.system_name}
+    stack.register_peer(_PEER_TX, _ADDR_TX, options="TS2=7304;")
+    stack.register_peer(_PEER_RX, _ADDR_RX, options="TS2=7304;")
+    stack.register_peer(_PEER_OTHER, _ADDR_OTHER, options="TS2=7304;")
+
+    for spec in _unit_data_specs(714999):
+        stack.inject_spec(spec, _ADDR_TX)
+
+    assert not stack.transport.for_addr(_ADDR_RX), "unit data to an unknown ID must not reach other hotspots"
+    assert not stack.transport.for_addr(_ADDR_OTHER), "unit data to an unknown ID must not reach other hotspots"
+
+
+def test_unit_data_to_known_destination_reaches_only_its_peer() -> None:
+    stack = build_hbp_repeat_stack(talker_alias=True)
+    stack.config["PROXY"] = {"TARGET_SYSTEM": stack.system_name}
+    stack.register_peer(_PEER_TX, _ADDR_TX, options="TS2=7304;")
+    stack.register_peer(_PEER_RX, _ADDR_RX, options="TS2=7304;")
+    stack.register_peer(_PEER_OTHER, _ADDR_OTHER, options="TS2=7304;")
+    stack.config["_SUB_MAP"] = {
+        bytes_3(_DST_SUB): (stack.system_name, 2, 1_700_000_000.0, _PEER_RX),
+    }
+
+    for spec in _unit_data_specs(_DST_SUB):
+        stack.inject_spec(spec, _ADDR_TX)
+
+    assert len(stack.transport.for_addr(_ADDR_RX)) == 5, "the destination's hotspot gets the whole burst"
+    assert not stack.transport.for_addr(_ADDR_OTHER)
+
+
+def test_unit_data_waits_while_destination_hotspot_receives_voice() -> None:
+    """The destination's hotspot is playing a group call: a data header there would make
+    MMDVMHost drop the voice, so the burst is not sent until the call is over."""
+    stack = build_hbp_repeat_stack(talker_alias=True)
+    stack.config["PROXY"] = {"TARGET_SYSTEM": stack.system_name}
+    stack.register_peer(_PEER_TX, _ADDR_TX, options="TS2=7304;")
+    stack.register_peer(_PEER_RX, _ADDR_RX, options="TS2=7304;")
+    stack.register_peer(_PEER_OTHER, _ADDR_OTHER, options="TS2=7304;")
+    stack.config["_SUB_MAP"] = {
+        bytes_3(_DST_SUB): (stack.system_name, 2, 1_700_000_000.0, _PEER_RX),
+    }
+    voice = PacketSpec(peer_id=730039199, rf_src=7300391, dst_id=7304, slot=2, stream_id=0x0E0E0E0E)
+    stack.inject_spec(DeterministicScenario.voice_head_spec(voice), _ADDR_OTHER)
+    stack.inject_spec(DeterministicScenario.voice_burst_spec(voice, seq=1, dtype_vseq=1), _ADDR_OTHER)
+    assert stack.transport.for_addr(_ADDR_RX), "precondition: RX is receiving the group call"
+    stack.transport.clear()
+
+    for spec in _unit_data_specs(_DST_SUB):
+        stack.inject_spec(spec, _ADDR_TX)
+    assert not stack.transport.for_addr(_ADDR_RX), "no data on a hotspot that is playing voice"
+
+    stack.inject_spec(DeterministicScenario.voice_term_spec(voice, seq=2), _ADDR_OTHER)
+    stack.transport.clear()
+    for spec in _unit_data_specs(_DST_SUB):
+        stack.inject_spec(dataclasses.replace(spec, stream_id=spec.stream_id + 0x100, seq=spec.seq + 10), _ADDR_TX)
+    assert len(stack.transport.for_addr(_ADDR_RX)) == 5, "once the call is over the burst goes through"
