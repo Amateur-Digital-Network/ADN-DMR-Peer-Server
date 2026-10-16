@@ -43,9 +43,13 @@ _ADDR_B = ("10.0.0.8", 62031)
 _SYSTEM = "MASTER-A"
 
 
-def _master(*, shared: bool) -> tuple[HbpRepeatStack, MagicMock, MagicMock]:
-    """The real HBPProtocol and routing; hotspot B listens to TG 3340 on TS2."""
+def _master(*, shared: bool, max_peers: int = 8) -> tuple[HbpRepeatStack, MagicMock, MagicMock]:
+    """The real HBPProtocol and routing; hotspot B listens to TG 3340 on TS2.
+
+    ``shared``: proxy target; otherwise hotspots log in to the MASTER directly.
+    """
     stack = build_hbp_repeat_stack(talker_alias=False, system_name=_SYSTEM)
+    stack.config["SYSTEMS"][_SYSTEM]["MAX_PEERS"] = max_peers
     if shared:
         stack.config["PROXY"] = {"TARGET_SYSTEM": _SYSTEM}
     hbp = stack.hbp
@@ -54,7 +58,8 @@ def _master(*, shared: bool) -> tuple[HbpRepeatStack, MagicMock, MagicMock]:
     hbp._on_deactivate_dynamic_relays = deactivate
     hbp._dynamic_tg_uc = dynamic_tgs
     stack.register_peer(_A, _ADDR_A)
-    stack.register_peer(_B, _ADDR_B)
+    if max_peers > 1:
+        stack.register_peer(_B, _ADDR_B)
     stack.bridge.ensure_dynamic_relay(bytes_3(3340), _SYSTEM, 2, 900.0)
     assert _leg_3340_active(stack)
     return stack, deactivate, dynamic_tgs
@@ -93,8 +98,17 @@ def test_a_private_call_to_4000_on_a_shared_master_does_the_same() -> None:
     dynamic_tgs.delete_peer.assert_called_once_with(_A, _SYSTEM)
 
 
+def test_a_master_many_hotspots_log_in_to_directly_is_shared_too() -> None:
+    """Same 4000 with the hotspots on a MASTER of their own port (MAX_PEERS > 1, no proxy)."""
+    stack, deactivate, dynamic_tgs = _master(shared=False)
+    _tg4000_from_a(stack)
+    assert _leg_3340_active(stack), "hotspot B still hears TG 3340"
+    deactivate.assert_not_called()
+    dynamic_tgs.delete_peer.assert_called_once_with(_A, _SYSTEM)
+
+
 def test_a_master_of_its_own_still_resets_its_legs() -> None:
-    stack, deactivate, _dynamic_tgs = _master(shared=False)
+    stack, deactivate, _dynamic_tgs = _master(shared=False, max_peers=1)
     _tg4000_from_a(stack)
     assert not _leg_3340_active(stack)  # in-band 4000 signalling, as before
     deactivate.assert_called_once_with(_SYSTEM)
