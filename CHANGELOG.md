@@ -4,6 +4,20 @@ All notable changes to **adn-server** are documented here.
 
 <!-- version list -->
 
+## v2.6.1 (2026-10-16)
+
+### Bug Fixes
+
+- **hbp**: A 4000 on a MASTER many hotspots log in to directly clears only the sender's dynamics
+  ([`6df35ff`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/6df35ff5c7fe0e6ebb8139a33850a710e64ed47f))
+
+- **routing**: Keep unit data off hotspots it is not for and off slots playing voice
+  ([`1ad6432`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/1ad6432755db56955df5db931d4db74a365669e4))
+
+- **routing**: Treat rate 1 data blocks as unit data
+  ([`ca67fe1`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/ca67fe16cc6efc30bd4c378ca40571f060a38c7f))
+
+
 ## v2.6.0 (2026-10-14)
 
 ### Bug Fixes
