@@ -65,6 +65,7 @@ from ...application.routing.helpers import (
     peer_matches_rf_source,
     peer_should_receive_group_voice,
     peer_single_exclusive_tgid,
+    peer_voice_busy_for_unit_data,
     register_peer_ua_session,
     resolve_voice_peer_id,
     seed_peer_ua_session_from_status,
@@ -1602,6 +1603,21 @@ class HBPProtocol(DatagramProtocol):
                     _repeat_pkt = b"".join([_data[:11], _peer_id, _repeat_tail])
                     if _call_type == "unit":
                         _pvt_targets = self._pvt_repeat_targets(_dst_id)
+                        # Unit data (CSBK / data header / data blocks: GPS, ARS, SMS) to an ID never
+                        # heard here is not repeated to every peer: on a shared MASTER that keys all
+                        # hotspots and cuts the voice they are receiving. Routing still delivers it
+                        # by hotspot ID. A known destination's hotspot is skipped while it has voice.
+                        if _frame_type == HBPF_DATA_SYNC and _dtype_vseq in (3, 6, 7, 8):
+                            if _pvt_targets is None:
+                                _pvt_targets = ()
+                            else:
+                                _now = time.time()
+                                _pvt_targets = tuple(
+                                    p for p in _pvt_targets
+                                    if not peer_voice_busy_for_unit_data(
+                                        self._peers.get(p), self._peer_voice_slots.get(p), _slot, _now,
+                                    )
+                                )
                     else:
                         _pvt_targets = None
                     if _pvt_targets is None:
