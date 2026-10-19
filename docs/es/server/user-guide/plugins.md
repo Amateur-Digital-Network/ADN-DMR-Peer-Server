@@ -97,6 +97,7 @@ Se pasa a `on_load` como `server_ctx` (`application/plugins/application/context.
 | `call_later(delay_s, fn, *args)` | Temporizador del reactor |
 | `send_dmrd(pkt) -> bool` | Enviar una trama DMRD — **solo** para un plugin autorizado en `PLUGINS.send`; si no, `None` ([Envío](#envío-de-datos-y-voz-de-grupo-opcional)) |
 | `voice_slot_for_tg(tg)` | Slot del MASTER en el que hablar `tg` ahora (primero donde tiene una sesión dinámica o una pierna de bridge activa, luego TS2, luego TS1); `None` mientras todos los slots están ocupados o si `tg` no está en los `group_voice_tgs` del plugin |
+| `tg_quiet_for(tg)` | Segundos que `tg` lleva en silencio: `0.0` mientras hay un stream en curso en cualquier MASTER, PEER u OpenBridge, si no el tiempo desde que empezó o terminó su último cambio; `inf` si nunca se oyó. La voz del propio servidor no cuenta. `0.0` si `tg` no está en los `group_voice_tgs` del plugin |
 
 **Patrón:** solo despachar en `on_event`; usar `defer_to_thread` para archivos, HTTP o CPU intensiva.
 

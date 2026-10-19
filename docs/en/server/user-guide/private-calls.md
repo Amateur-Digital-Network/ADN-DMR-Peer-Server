@@ -11,6 +11,16 @@
 - Unit data (SMS, ACKs) whose destination was last heard on the same hotspot it came from is not sent back to that hotspot: both radios hear each other on RF, and the echo would transmit over their own exchange.
 - Unit data to an individual ID last heard on a non-OPENBRIDGE system less than 900 s ago is not fanned out to the OpenBridges; the `SUB_MAP` lookup delivers it locally. Subscribers learned over an OpenBridge, or older entries, keep the fan-out.
 
+<a id="unit-data-shared-master"></a>
+### Unit data on a shared MASTER
+
+Unit data (CSBK preambles, data headers and rate 1/2, 3/4 and 1 blocks: SMS, GPS/LRRP, ARS) only goes to the hotspot where its destination was last heard:
+
+- To an ID never heard on the MASTER, or whose hotspot is no longer connected, it is dropped on a MASTER shared by several hotspots (`MAX_PEERS` above 1, like the integrated proxy's target) instead of being sent to all of them. A single-peer MASTER keeps the legacy broadcast.
+- It is not sent to a hotspot while that hotspot carries voice on the slot (on any slot if it is simplex). MMDVMHost takes a CSBK or data header in the middle of a network call, switches the slot to data and drops the voice until the next sync burst, so listeners heard a short crackle each time a radio sent its position. A radio never sends data over a busy slot either; what is dropped is left to the radio's own retries.
+
+Private voice is not affected.
+
 <a id="sub_map-persistence"></a>
 ### SUB_MAP persistence
 

@@ -99,7 +99,27 @@ La sección obsoleta **`WEBSOCKET_SERVER`** en YAML (Twisted en puerto distinto)
 | **SELF_SERVICE** | Si es `true`, la UI puede mostrar la entrada **Self-service** (API del monitor + MySQL). |
 | **SHOW_CONSOLE** | Mostrar página consola (mensajes inicio/fin de llamada). |
 | **MIN_DURATION** | Duración mínima de llamada (segundos) para la tabla Last Heard del **panel** (la página Last Heard puede seguir mostrando más cortas). |
+| **SERVER_STATUS_URL** | Feed JSON con la lista de servidores de la red (`/serverstatus`), servido por `GET /api/servers/status`. Por defecto `https://adn.systems/servers/status.json`. |
 | **nav_links**, **footer**, **news** | Enlaces estructurados / marquee opcionales. |
+
+Los cambios en **`DASHBOARD`** y **`MAP`** se aplican sin reiniciar: `/api/config/dashboard` los reconstruye cuando `adn-monitor.yaml` cambia en disco y mantiene la última versión válida si al guardar el archivo queda roto. Los visitantes los ven al cargar de nuevo la página. Puertos, base de datos e ingest se siguen leyendo solo al arrancar.
+
+---
+
+## `MAP`
+
+Mapas en **Home** (una bandera sobre cada país con una llamada al aire) y en **Linked Systems** (los sistemas conectados). Los marcadores salen de las coordenadas que cada peer envía al iniciar sesión (RPTC); los sistemas que no informan ninguna quedan fuera, o se ubican en su país con `APPROX_BY_COUNTRY`.
+
+| Clave | Significado |
+|-------|-------------|
+| **ENABLED** | Mostrar ambos mapas (por defecto `true`). |
+| **STYLE** | `1` (por defecto) teselas raster desde `TILE_URL`; `2` mundo vectorial: siluetas de países con su código, países activos resaltados, sin proveedor de teselas. |
+| **TILE_URL**, **TILE_URL_DARK**, **ATTRIBUTION**, **MAX_ZOOM** | Teselas raster del estilo 1. Por defecto OpenStreetMap, oscurecidas con un filtro CSS en el tema oscuro; `TILE_URL_DARK` usa en su lugar un mapa base oscuro real. Mantén `ATTRIBUTION` como lo pida el proveedor. |
+| **ZOOM**, **CENTER** | Vista inicial cuando el visitante no tiene una guardada. `auto` (por defecto) ajusta el mundo completo a cada mapa, en teléfono o escritorio; un número (en cuartos, p. ej. `6` o `7.5`) fija el zoom alrededor de `CENTER` `[lat, lon]`. |
+| **HOTSPOT_PRECISION**, **REPEATER_PRECISION** | Decimales que se conservan en las coordenadas enviadas al navegador: `2` es cerca de 1 km, `3` cerca de 100 m, `null` las deja como llegan. Los hotspots usan `2` por defecto, porque suelen estar en la casa de alguien; los repetidores `null`. |
+| **APPROX_BY_COUNTRY** | Ubicar en su país (según el prefijo del ID DMR) los sistemas sin coordenadas, con borde punteado y marcados como aproximados (por defecto `true`). |
+| **GPS_URL**, **GPS_LABEL**, **GPS_REFRESH_SEC** | Capa extra opcional desde un feed propio (gateway APRS, servicio GPS): puntos GeoJSON, una lista de `{callsign, lat, lon}` o `{"stations": [...]}`. No se ofrece mientras `GPS_URL` esté vacío. |
+| **OVERRIDES** | Coordenadas fijas para sistemas que no informan ninguna, como `ID de peer: [lat, lon]`. |
 
 ---
 

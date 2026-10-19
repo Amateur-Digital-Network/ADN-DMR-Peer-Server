@@ -171,6 +171,7 @@ Committed example: `schemas/examples/dashboard_state.json`.
 | `systems[].peers[]` | array | no | `{id, connected, ip?, port?}` per peer radio. |
 | `systems[].peers[].latitude`, `longitude`, `height` | string | no | Site data as the peer sent it in RPTC. |
 | `systems[].peers[].options` | string | no | OPTIONS line with the static TGs the peer actually gets (its own plus the MASTER's `TS1_STATIC` / `TS2_STATIC`, yaml ones first); `PASS=` stripped. |
+| `systems[].peers[].connected_at` | int | no | Unix time when the peer finished logging in. |
 | `systems[].peers[].ts1_static`, `ts2_static` | array of string | no | Static TGs the peer actually gets per slot, same order. |
 | `systems[].peers[].single_mode` | bool | no | `SINGLE=1` from the peer's OPTIONS, else the MASTER's `SINGLE_MODE`. |
 | `systems[].peers[].ua_timer_min` | number | no | `TIMER` from the peer's OPTIONS (minutes), else `DEFAULT_UA_TIMER`; omitted when infinite. |

@@ -97,6 +97,7 @@ Passed to `on_load` as `server_ctx` (`application/plugins/application/context.py
 | `call_later(delay_s, fn, *args)` | Reactor timer |
 | `send_dmrd(pkt) -> bool` | Send one DMRD frame — **only** for a plugin granted it in `PLUGINS.send`, otherwise `None` ([Sending](#sending-unit-data-and-group-voice-opt-in)) |
 | `voice_slot_for_tg(tg)` | MASTER slot to speak `tg` on now (where it has a dynamic session or an active bridge leg first, then TS2, then TS1), `None` while every slot is busy or `tg` is not in the plugin's `group_voice_tgs` |
+| `tg_quiet_for(tg)` | Seconds `tg` has been quiet: `0.0` while a stream on it is live on any MASTER, PEER or OpenBridge, else the time since an over on it last started or ended; `inf` if never heard. The server's own voice does not count. `0.0` if `tg` is not in the plugin's `group_voice_tgs` |
 
 **Pattern:** do only dispatch in `on_event`; call `defer_to_thread` for file writes, HTTP, heavy CPU.
 

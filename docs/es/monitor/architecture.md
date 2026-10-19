@@ -25,7 +25,7 @@ Un solo proceso uvicorn/FastAPI:
 | Ruta / rol | Contenido |
 |------------|-----------|
 | `/api/*` | Config dashboard, auth, self-service, proxy alias/status |
-| `/ws` | Protocolo `conf,<grupo>` — CTABLE, Last Heard, voz |
+| `/ws` | Protocolo `conf,<grupo>` — CTABLE, Last Heard, voz. Ver [Compresión del WebSocket](#websocket-compression). |
 | Ingest (fondo) | `MONITOR_APP.INGEST`: `tcp` (cliente a `ADN_CONNECTION`) **o** `mqtt` (tópicos `state` + `voice_event`) |
 | Alias (fondo) | Descarga → `FILES.PATH`; import con **staging + RENAME** (commits cada 10k en staging; swap breve); merge con commits cada 2k; **PK en `id`** |
 
@@ -38,6 +38,11 @@ Modos de ingest según el peer: legacy (pickle), v1 HELLO, v2 slim (`dashboard_s
 - **Vite + React** en `frontend/`; build → `frontend/dist/`.
 - Desarrollo: Vite hace proxy de `/api` y `/ws` a `MONITOR_APP.LISTEN_PORT` (p. ej. 8080).
 - Producción: Nginx sirve estáticos y proxifica `/api` + `/ws` al mismo puerto FastAPI.
+
+<a id="websocket-compression"></a>
+### Compresión del WebSocket
+
+El dashboard abre `/ws?z=1` cuando el navegador tiene `DecompressionStream`. Entonces cada broadcast de 512 bytes o más se comprime una sola vez con zlib y se envía como el mismo frame binario a todas esas pestañas, que lo descomprimen y procesan los mensajes en el orden en que llegan; los más cortos siguen como texto. Las pestañas sin `?z=1` (navegadores antiguos, o una pestaña que sigue con un frontend anterior) reciben texto sin comprimir. El `permessage-deflate` por conexión de uvicorn está apagado: comprimía cada mensaje una vez por pestaña, y con muchas pestañas abiertas era la mayor porción de la CPU del monitor (37 % en un servidor con 29). Los opcodes y el JSON son los mismos en ambos casos, y nginx no necesita cambios.
 
 ## Proxy hotspot
 
