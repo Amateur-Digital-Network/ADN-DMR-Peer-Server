@@ -11,6 +11,16 @@ Las llamadas **unitarias (privadas)** usan un camino distinto a la voz de **grup
 - Los datos unitarios (SMS, ACK) cuyo destino se oyó por última vez en el mismo hotspot del que llegan no se devuelven a ese hotspot: las dos radios se oyen por RF y el eco transmitiría encima de su propio intercambio.
 - Los datos unitarios a un ID individual oído por última vez en un sistema que no es OPENBRIDGE hace menos de 900 s no se reparten a los OpenBridge; la búsqueda en `SUB_MAP` los entrega localmente. Los suscriptores aprendidos por un OpenBridge, o las entradas más antiguas, mantienen el reparto.
 
+<a id="unit-data-shared-master"></a>
+### Datos unitarios en un MASTER compartido
+
+Los datos unitarios (preámbulos CSBK, cabeceras de datos y bloques rate 1/2, 3/4 y 1: SMS, GPS/LRRP, ARS) solo van al hotspot donde se oyó por última vez su destino:
+
+- A un ID que nunca se oyó en el MASTER, o cuyo hotspot ya no está conectado, se descartan en un MASTER compartido por varios hotspots (`MAX_PEERS` mayor que 1, como el destino del proxy integrado) en vez de enviarse a todos. Un MASTER de un solo peer mantiene el broadcast legacy.
+- No se envían a un hotspot mientras ese hotspot lleva voz en el slot (en cualquier slot si es simplex). MMDVMHost acepta un CSBK o una cabecera de datos en medio de una llamada de red, pasa el slot a datos y descarta la voz hasta la siguiente ráfaga de sincronismo, así que quienes escuchaban oían un chicharreo cada vez que una radio enviaba su posición. Una radio tampoco transmite datos con el slot ocupado; lo que se descarta queda a cargo de los reintentos de la propia radio.
+
+La voz privada no cambia.
+
 <a id="sub_map-persistence"></a>
 ### Persistencia de SUB_MAP
 

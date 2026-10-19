@@ -67,11 +67,11 @@ In-band bridge activation/deactivation is applied on **voice terminator (VTERM)*
 - Clears per-peer UA sessions in memory (**all slots** for that peer).
 - Deletes matching rows from **`peer_dynamic_tgs`** (MariaDB).
 - Clears stale **STATUS** RX fields so a later **RPTO** does not re-seed the old TG.
-- On a MASTER of its own, runs **in-band bridge deactivation** on the slot (same as legacy). On a shared **inject-only** MASTER it does not: its legs belong to every hotspot on it, and in-band 4000 would set them all IDLE on that slot (the other hotspots' dynamics and OPTIONS statics).
+- On a MASTER of its own, runs **in-band bridge deactivation** on the slot (same as legacy). On a MASTER shared by several hotspots (the **inject-only** proxy target, or `MAX_PEERS` above 1) it does not: its legs belong to every hotspot on it, and in-band 4000 would set them all IDLE on that slot (the other hotspots' dynamics and OPTIONS statics).
 - Sends **`GROUP VOICE,INGRESS,RX,…,4000`** to the monitor (not **START**) so **SINGLE=0** multi-dynamic chips clear **without** lighting a live TX chip.
-- On **inject-only** MASTER, pushes updated **CONFIG_SND** to the monitor.
+- On a shared MASTER, pushes updated **CONFIG_SND** to the monitor.
 
-**Inject-only vs global:** With integrated **`PROXY`**, reset is **per peer** (only that hotspot’s dynamics). Without inject-only filtering, legacy **`deactivate_all_dynamic_bridges`** still runs for the whole system.
+**Shared vs single-peer MASTER:** With integrated **`PROXY`**, or on any MASTER with `MAX_PEERS` above 1, reset is **per peer** (only that hotspot’s dynamics). On a single-peer MASTER, legacy **`deactivate_all_dynamic_bridges`** still runs for the whole system.
 
 **TG 4000 must never appear** as a dynamic UA chip on the monitor or in `peer_dynamic_tgs`.
 
