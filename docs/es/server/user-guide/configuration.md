@@ -279,7 +279,7 @@ Descargas y ficheros locales para **IDs de peer**, **IDs de suscriptor**, **etiq
 | **TRY_DOWNLOAD** | Si se deben obtener desde URLs cuando están obsoletos. |
 | **PEER_FILE** / **SUBSCRIBER_FILE** / **TGID_FILE** | Nombres de ficheros locales. |
 | **\*_URL** | Orígenes remotos para descargas. |
-| **SUB_MAP_FILE** | Ruta pickle para **SUB_MAP** (enrutado de llamadas privadas); nombre por defecto si está vacío. Ver [Llamadas privadas](private-calls.md#sub_map-persistence). |
+| **SUB_MAP_FILE** | Ruta pickle para **SUB_MAP** (enrutado de llamadas privadas), p. ej. `sub_map.pkl`. Vacío: SUB_MAP no se escribe a disco. Ver [Llamadas privadas](private-calls.md#sub_map-persistence). |
 | **POLL_INTERVAL_SEC** | Cada cuánto se revisa si hay que descargar las listas (por defecto **900**). |
 | **CHECKSUM_URL** / **CHECKSUM_FILE** | Checksums publicados, que se descargan en cada revisión; una lista solo se descarga cuando su checksum ya no coincide con el fichero en disco (un checksum que no coincide se reintenta una vez por hora). |
 | **SERVER_ID_URL** / **SERVER_ID_FILE** | Lista de IDs de servidor (la usa `VALIDATE_SERVER_IDS`). |
