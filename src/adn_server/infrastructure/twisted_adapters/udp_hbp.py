@@ -188,6 +188,11 @@ def _rptc_field_str(raw: bytes) -> str:
     return normalize_fixed_width_ascii(raw)
 
 
+def _callsign_matches(sent_call: str, db_call: object) -> bool:
+    """True when the RPTC callsign matches the DB callsign from validate_id(), ignoring case."""
+    return isinstance(db_call, str) and sent_call.strip().upper() == db_call.strip().upper()
+
+
 def _calc_hash(salt_str: bytes, password: bytes) -> bytes:
     """Same as legacy: bhex(sha256(salt_str + password).hexdigest())."""
     return bhex(sha256(salt_str + password).hexdigest())
@@ -1898,7 +1903,7 @@ class HBPProtocol(DatagramProtocol):
                     # times per voice frame.
                     _this_peer["RF_MODE"] = derive_peer_rf_mode(_this_peer)
                     _sent_call = _rptc_field_str(_this_peer["CALLSIGN"])
-                    if ("ALLOW_UNREG_ID" in self._config and not self._config["ALLOW_UNREG_ID"]) and _sent_call != self.validate_id(_peer_id):
+                    if ("ALLOW_UNREG_ID" in self._config and not self._config["ALLOW_UNREG_ID"]) and not _callsign_matches(_sent_call, self.validate_id(_peer_id)):
                         self._remove_peer(_peer_id)
                         if self._config.get("PROXY_CONTROL"):
                             self.proxy_IPBlackList(_peer_id, _sockaddr)
