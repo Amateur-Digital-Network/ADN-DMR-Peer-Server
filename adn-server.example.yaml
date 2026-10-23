@@ -18,7 +18,7 @@ GLOBAL:
   USERS_PASS: user_passwords.json
   HASH_ENCRYPT: encryption_key.secret
   # Talker Alias (embedded LC + optional HBP DMRA): see docs/en/server/user-guide/talker-alias.md
-  TALKER_ALIAS: false
+  TALKER_ALIAS: true
   TALKER_ALIAS_MODE: both
   TALKER_ALIAS_FORMAT: "{callsign} {fname}"
   # utf8 (Motorola), iso8 (Hytera), 7bit; both vendors by default

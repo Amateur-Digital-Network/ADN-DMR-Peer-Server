@@ -34,7 +34,7 @@ Bajo **`GLOBAL`** (opcional override por sistema con las mismas claves):
 
 ```yaml
 GLOBAL:
-  TALKER_ALIAS: false
+  TALKER_ALIAS: true
   TALKER_ALIAS_MODE: both
   TALKER_ALIAS_FORMAT: "{callsign} {fname}"
   TALKER_ALIAS_TEXT_FORMAT: "utf8,iso8"
@@ -43,7 +43,7 @@ GLOBAL:
 
 | Clave | Significado |
 |-------|-------------|
-| **TALKER_ALIAS** | Interruptor maestro (`false` por defecto). |
+| **TALKER_ALIAS** | Interruptor maestro (`true` por defecto). |
 | **TALKER_ALIAS_MODE** | `both`, `passthrough` o `inject`. Por defecto **`both`** si se omite. |
 | **TALKER_ALIAS_FORMAT** | Plantilla tipo Python; campos: `{callsign}`, `{fname}`, `{surname}`, `{id}`. |
 | **TALKER_ALIAS_TEXT_FORMAT** | Codificación del TA: `utf8` (Motorola), `iso8` (Hytera), `7bit`. Lista separada por comas (p. ej. `utf8,iso8`) emite ambas en LC embebido; `DMRA` UDP usa solo el **primer** formato. Por defecto **`utf8`**. |
