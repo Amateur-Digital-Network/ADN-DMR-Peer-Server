@@ -189,12 +189,7 @@ def _rptc_field_str(raw: bytes) -> str:
 
 
 def _callsign_matches(sent_call: str, db_call: object) -> bool:
-    """RPTC callsign check against the subscriber DB, ignoring case.
-
-    Callsigns are case-insensitive, and some clients (older IPSC2HBP builds) send them
-    lower case: an exact comparison NAKed them on every master with ALLOW_UNREG_ID off.
-    ``db_call`` is what validate_id() returns: the DB callsign, or False when unknown.
-    """
+    """True when the RPTC callsign matches the DB callsign from validate_id(), ignoring case."""
     return isinstance(db_call, str) and sent_call.strip().upper() == db_call.strip().upper()
 
 

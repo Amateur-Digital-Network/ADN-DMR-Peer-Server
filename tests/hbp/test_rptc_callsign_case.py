@@ -1,4 +1,4 @@
-# ADN DMR Peer Server - tests hbp bridge reset only without peers
+# ADN DMR Peer Server - tests hbp rptc callsign case
 #
 # Copyright (C) 2026  Rodrigo Pérez, CE5RPY <ce5rpy@qmd.cl>
 #
