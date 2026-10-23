@@ -24,7 +24,7 @@ Private voice is not affected.
 <a id="sub_map-persistence"></a>
 ### SUB_MAP persistence
 
-With `ALIASES.SUB_MAP_FILE` set, `SUB_MAP` is checked every **300 s** (entries older than 24 h are trimmed) and written only when a route changed or an entry's timestamp moved to a new hour. The file is written to a `.tmp` and renamed, so a crash never leaves it truncated. `SIGHUP` and shutdown always write it.
+`SUB_MAP` is persisted to `ALIASES.SUB_MAP_FILE` (`sub_map.pkl` if empty). It is checked every **300 s** (entries older than 24 h are trimmed) and written only when a route changed or an entry's timestamp moved to a new hour. The file is written to a `.tmp` and renamed, so a crash never leaves it truncated. `SIGHUP` and shutdown always write it.
 
 <a id="service-systems-sub_map_learn"></a>
 ### Service systems (`SUB_MAP_LEARN`)

@@ -279,7 +279,7 @@ Downloads and local files for **peer IDs**, **subscriber IDs**, **talkgroup labe
 | **TRY_DOWNLOAD** | Whether to fetch from URLs when stale. |
 | **PEER_FILE** / **SUBSCRIBER_FILE** / **TGID_FILE** | Local filenames. |
 | **\*_URL** | Remote sources for downloads. |
-| **SUB_MAP_FILE** | Pickle path for **SUB_MAP** (private call routing), e.g. `sub_map.pkl`. Empty: SUB_MAP is not written to disk. See [Private calls](private-calls.md#sub_map-persistence). |
+| **SUB_MAP_FILE** | Pickle path for **SUB_MAP** (private call routing), `sub_map.pkl` if empty. See [Private calls](private-calls.md#sub_map-persistence). |
 | **POLL_INTERVAL_SEC** | How often the lists are checked for download (default **900**). |
 | **CHECKSUM_URL** / **CHECKSUM_FILE** | Published checksums, fetched on every poll; a list is downloaded only when its checksum no longer matches the file on disk (an unmatched checksum is retried once an hour). |
 | **SERVER_ID_URL** / **SERVER_ID_FILE** | Server ID list (used by `VALIDATE_SERVER_IDS`). |

@@ -626,12 +626,11 @@ def run_peer_server(
         to_remove = [k for k, v in sub_map.items() if v[2] < (now - 86400)]
         for k in to_remove:
             sub_map.pop(k, None)
-        if aliases_cfg.get("SUB_MAP_FILE"):
-            try:
-                if sub_map_saver.save_if_changed():
-                    logger.info("(SUBSCRIBER) Writing SUB_MAP to disk")
-            except Exception as e:
-                logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
+        try:
+            if sub_map_saver.save_if_changed():
+                logger.info("(SUBSCRIBER) Writing SUB_MAP to disk")
+        except Exception as e:
+            logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
 
     task.LoopingCall(sub_map_trimmer_loop).start(300).addErrback(_looping_errback, logger)
 
@@ -647,8 +646,7 @@ def run_peer_server(
                 logger.info("(GLOBAL) SHUTDOWN: CONFBRIDGE IS TERMINATING - killserver called")
                 if reactor.running:
                     reactor.stop()
-                if aliases_cfg.get("SUB_MAP_FILE"):
-                    sub_map_saver.save()
+                sub_map_saver.save()
                 try:
                     keys_store.save(keys_path, keys)
                     logger.info("(KEYS) saved system keys to keystore")
@@ -661,12 +659,11 @@ def run_peer_server(
 
     def shutdown_handler():
         """On reactor shutdown: save SUB_MAP and keys."""
-        if aliases_cfg.get("SUB_MAP_FILE"):
-            try:
-                sub_map_saver.save()
-                logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (shutdown)")
-            except Exception as e:
-                logger.warning("(SUBSCRIBER) Cannot write SUB_MAP on shutdown: %s", e)
+        try:
+            sub_map_saver.save()
+            logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (shutdown)")
+        except Exception as e:
+            logger.warning("(SUBSCRIBER) Cannot write SUB_MAP on shutdown: %s", e)
         try:
             keys_store.save(keys_path, keys)
             logger.info("(KEYS) saved system keys to keystore (shutdown)")
@@ -824,12 +821,11 @@ def run_peer_server(
     def sighup_reload_config(_sig, _frame):
         """Reload adn-server.yaml (SYSTEMS, GLOBAL); keeps active streams on unchanged listeners."""
         logger.info("(CONFIG-RELOAD) SIGHUP received, scheduling reload")
-        if aliases_cfg.get("SUB_MAP_FILE"):
-            try:
-                sub_map_saver.save()
-                logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (SIGHUP)")
-            except Exception as e:
-                logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
+        try:
+            sub_map_saver.save()
+            logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (SIGHUP)")
+        except Exception as e:
+            logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
         reactor.callLater(0, _do_config_reload)
 
     signal.signal(signal.SIGTERM, sig_handler)
