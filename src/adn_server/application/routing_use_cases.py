@@ -1348,6 +1348,20 @@ class RoutingUseCases(
                     "(%s) SUB_MAP matched the source peer %s, not sending unit data back",
                     system_name, int_id(peer_id),
                 )
+            elif (
+                _d_proto and _d_system == system_name and plugin_origin is None
+                and systems_cfg.get(system_name, {}).get("REPEAT", True)
+            ):
+                # Another hotspot of this same MASTER: its local REPEAT (_pvt_repeat_targets in
+                # udp_hbp.py) already delivered the frame to that peer, with a per-hotspot voice
+                # check. Sending it again here made the hotspot get every unit-data frame twice,
+                # which breaks unconfirmed (rate 1/2) SMS reassembly on the radio. Same rule as
+                # private voice ("same system, send nothing"). Plugin frames (send_dmrd) never
+                # pass through REPEAT, so they still go out below.
+                logger.debug(
+                    "(%s) SUB_MAP matched a peer of this same MASTER, already delivered by REPEAT",
+                    system_name,
+                )
             elif _d_proto:
                 _dst_slot = getattr(_d_proto, "STATUS", {}).get(_d_slot, {})
                 logger.info("(%s) SUB_MAP matched, System: %s Slot: %s, Time: %s", system_name, _d_system, _d_slot, _d_time)
