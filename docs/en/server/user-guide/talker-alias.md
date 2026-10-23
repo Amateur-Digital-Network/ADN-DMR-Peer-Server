@@ -48,7 +48,7 @@ GLOBAL:
 
 | Key | Meaning |
 |-----|---------|
-| **TALKER_ALIAS** | Master switch (`false` if omitted; the example config enables it). |
+| **TALKER_ALIAS** | Master switch (`true` by default). |
 | **TALKER_ALIAS_MODE** | `both`, `passthrough`, or `inject`. Default **`both`** if omitted. |
 | **TALKER_ALIAS_FORMAT** | Python format string; fields: `{callsign}`, `{fname}`, `{surname}`, `{id}`. |
 | **TALKER_ALIAS_TEXT_FORMAT** | TA payload encoding: `utf8` (Motorola / MMDVMHost default), `iso8` (ISO-8859-1, many Hytera models), or `7bit` (oldest radios). Comma-separated list (e.g. `utf8,iso8`) emits **both** encodings back-to-back in embedded LC so each vendor can pick the format it displays; standalone `DMRA` UDP uses the **first** format only. Default **`utf8`**. |

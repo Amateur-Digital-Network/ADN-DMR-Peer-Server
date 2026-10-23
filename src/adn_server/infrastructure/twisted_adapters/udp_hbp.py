@@ -1061,7 +1061,7 @@ class HBPProtocol(DatagramProtocol):
         """Buffer TA from embedded LC in voice bursts B–E (MMDVM DMRSlot path)."""
         if not self._ta_buffer_enabled() or not stream_id:
             return
-        if not self._CONFIG.get("GLOBAL", {}).get("TALKER_ALIAS", False):
+        if not self._CONFIG.get("GLOBAL", {}).get("TALKER_ALIAS", True):
             return
         entry = self._dmra_by_stream.get(stream_id)
         if entry is None:
