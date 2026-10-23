@@ -72,7 +72,7 @@ ALIASES:
   # failed/missing download is retried on this short cadence instead of waiting a full
   # STALE_DAYS cycle. Optional, defaults to 900 (15 minutes).
   POLL_INTERVAL_SEC: 900
-  SUB_MAP_FILE: ""
+  SUB_MAP_FILE: sub_map.pkl
   SERVER_ID_URL: https://servers.adn.systems/server_ids.tsv
   SERVER_ID_FILE: server_ids.tsv
   CHECKSUM_URL: https://servers.adn.systems/file_checksums.json
