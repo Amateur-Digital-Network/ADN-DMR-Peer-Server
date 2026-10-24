@@ -160,6 +160,11 @@ class RoutingUseCases(
         self._both_ta_wait: dict[tuple[str, bytes], dict[str, Any]] = {}
         # Passthrough DMRA/embed relay already applied for this source stream.
         self._passthrough_relayed: set[tuple[str, bytes]] = set()
+        self._concurrent_systems: frozenset[str] = frozenset()
+
+    def set_concurrent_systems(self, systems: frozenset[str]) -> None:
+        """MASTERs whose peers each take every call at once (Tier III sites): no slot contention, one TX leg per stream."""
+        self._concurrent_systems = systems
 
     def _send_routing_event(self, event: str | bytes) -> bool:
         """Send BRDG_EVENT via ReportingUseCases when REPORT is enabled."""
@@ -258,6 +263,8 @@ class RoutingUseCases(
         obp_source_rptr: bytes = b"\x00\x00\x00\x00",
         synthetic_announcement: bool = False,
         plugin_origin: str | None = None,
+        # A source with several calls on one slot passes this call's row: read wherever the slot row would be.
+        rx_row: dict[str, Any] | None = None,
     ) -> bool:
         """Called by UDP when DMRD is received. Forward to other systems in same bridge (to_target).
 
@@ -317,7 +324,7 @@ class RoutingUseCases(
             if len(str(_int_dst)) == 7 and plugin_origin is None:
                 self._pvt_call_received(
                     system_name, peer_id, rf_src, dst_id, seq, slot,
-                    frame_type, dtype_vseq, stream_id, data,
+                    frame_type, dtype_vseq, stream_id, data, rx_row=rx_row,
                 )
             return True
         systems_cfg = self._config.get("SYSTEMS", {})
@@ -326,7 +333,9 @@ class RoutingUseCases(
         protocols = self._get_protocols() if self._get_protocols else {}
         src_proto = protocols.get(system_name)
         # An HBP source keeps its call in its slot row; an OpenBridge source keeps one row per stream.
-        src_rx = getattr(src_proto, "STATUS", {}).get(slot, {}) if src_proto and not source_is_obp else None
+        src_rx = rx_row if rx_row is not None else (
+            getattr(src_proto, "STATUS", {}).get(slot, {}) if src_proto and not source_is_obp else None
+        )
         if (
             call_type == "group"
             and frame_type == HBPF_DATA_SYNC
@@ -593,6 +602,8 @@ class RoutingUseCases(
         # not be forwarded upstream to avoid disrupting the in-progress conversation.
         _suppress_uplink = src_rx is not None and bool(src_rx.get("_suppress_uplink"))
         _leg_iter = _plan.entries
+        _concurrent = self._concurrent_systems
+        _per_stream_src = source_is_obp or rx_row is not None
 
         for _relay_table_key, entry in _leg_iter:
                 if _suppress_uplink:
@@ -763,7 +774,8 @@ class RoutingUseCases(
                     _target_connected = (
                         count_connected_peers(_tgt_peers) if isinstance(_tgt_peers, dict) else 0
                     )
-                    _defer_slot_contention = inject_only_defer_obp_hbp_slot_contention(
+                    _to_concurrent = entry["SYSTEM"] in _concurrent if _concurrent else False
+                    _defer_slot_contention = _to_concurrent or inject_only_defer_obp_hbp_slot_contention(
                         self._config,
                         entry["SYSTEM"],
                         _target_system,
@@ -771,7 +783,7 @@ class RoutingUseCases(
                         source_is_hbp=not source_is_obp,
                         connected_count=_target_connected,
                     )
-                    _obp_deferred_bridge = _defer_slot_contention and source_is_obp
+                    _obp_deferred_bridge = _defer_slot_contention and (_per_stream_src or _to_concurrent)
                     _bridge_tx_leg: dict[str, Any] | None = None
                     if _obp_deferred_bridge:
                         _bridge_tx_leg = obp_deferred_bridge_tx_leg(_ts_st, stream_id)
@@ -818,7 +830,7 @@ class RoutingUseCases(
                         )
                         if not _obp_deferred_bridge:
                             _ts_st["TX_TYPE"] = HBPF_SLT_VTERM
-                    _apply_master_slot_contention = (
+                    _apply_master_slot_contention = not _to_concurrent and (
                         not _defer_slot_contention
                         or master_slot_holds_server_broadcast(
                             _ts_st,
@@ -1459,6 +1471,8 @@ class RoutingUseCases(
         dtype_vseq: int,
         stream_id: bytes,
         data: bytes,
+        *,
+        rx_row: dict[str, Any] | None = None,
     ) -> None:
         """Legacy pvt_call_received: route private (unit) calls via SUB_MAP lookup."""
         pkt_time = time.time()
@@ -1473,6 +1487,8 @@ class RoutingUseCases(
         if source_proto:
             source_status.setdefault(slot, {})
         slot_st = source_status[slot] if source_proto and slot in source_status else {}
+        if rx_row is not None:
+            slot_st = rx_row
         _notify_pvt_start = False
         _unit_data = is_unit_data_ingress(
             "unit", dtype_vseq, stream_id, slot_st.get("RX_STREAM_ID"),
