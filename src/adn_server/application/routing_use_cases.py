@@ -32,6 +32,7 @@ from __future__ import annotations
 import logging
 import math
 import time
+from collections.abc import Collection
 from time import perf_counter
 from typing import Any
 
@@ -307,15 +308,19 @@ class RoutingUseCases(
             return False
         if call_type == "unit":
             _int_dst = int_id(dst_id)
-            if dtype_vseq in UNIT_DATA_DTYPES or (dtype_vseq == 3 and not self._is_stream_known(system_name, stream_id, slot)):
-                self._unit_data_received(
+            _data_sent_to: Collection[str] = ()
+            if dtype_vseq in UNIT_DATA_DTYPES or (dtype_vseq == 3 and not (
+                rx_row.get("RX_STREAM_ID") == stream_id if rx_row is not None
+                else self._is_stream_known(system_name, stream_id, slot)
+            )):
+                _data_sent_to = self._unit_data_received(
                     system_name, peer_id, rf_src, dst_id, seq, slot,
                     frame_type, dtype_vseq, stream_id, data,
                     obp_use_parsed=obp_use_parsed, obp_hops=obp_hops,
                     obp_source_server=obp_source_server,
                     obp_ber=obp_ber, obp_rssi=obp_rssi, obp_source_rptr=obp_source_rptr,
                     plugin_origin=plugin_origin,
-                )
+                ) or ()
             # Legacy routerHBP ~3252-3254: 7-digit routing runs after unit data, not
             # instead of it. D-APRS ARS/LRRP downlink (dst 7300392) uses pvt_call_received
             # when SUB_MAP sendDataToHBP is blocked by the strict idle check.
@@ -324,7 +329,7 @@ class RoutingUseCases(
             if len(str(_int_dst)) == 7 and plugin_origin is None:
                 self._pvt_call_received(
                     system_name, peer_id, rf_src, dst_id, seq, slot,
-                    frame_type, dtype_vseq, stream_id, data, rx_row=rx_row,
+                    frame_type, dtype_vseq, stream_id, data, rx_row=rx_row, data_sent_to=_data_sent_to,
                 )
             return True
         systems_cfg = self._config.get("SYSTEMS", {})
@@ -1165,7 +1170,7 @@ class RoutingUseCases(
         obp_rssi: bytes = b"\x00",
         obp_source_rptr: bytes = b"\x00\x00\x00\x00",
         plugin_origin: str | None = None,
-    ) -> None:
+    ) -> list[str] | None:
         """Legacy routerOBP/routerHBP unit data branch: DATA-GATEWAY + OBP fan-out + SUB_MAP/hotspot."""
         pkt_time = time.time()
         dmrpkt = data[20:53] if len(data) >= 53 else b""
@@ -1458,6 +1463,7 @@ class RoutingUseCases(
                 forwarded=_forwarded,
                 synthetic=plugin_origin is not None,
             )
+        return _forwarded
 
     def _pvt_call_received(
         self,
@@ -1473,6 +1479,7 @@ class RoutingUseCases(
         data: bytes,
         *,
         rx_row: dict[str, Any] | None = None,
+        data_sent_to: Collection[str] = (),
     ) -> None:
         """Legacy pvt_call_received: route private (unit) calls via SUB_MAP lookup."""
         pkt_time = time.time()
@@ -1547,6 +1554,9 @@ class RoutingUseCases(
                         )
                     )
         for _target in slot_st.get("PVT_TARGETS", ()):
+            # Duplicate blocks break SMS (#153): a concurrent system gets one copy, hotspots keep legacy's two.
+            if _target in self._concurrent_systems and _target in data_sent_to:
+                continue
             target_proto = protocols.get(_target)
             if not target_proto:
                 continue

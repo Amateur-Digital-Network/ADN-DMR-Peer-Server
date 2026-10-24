@@ -38,6 +38,7 @@ from tests.harness.deterministic import (
     minimal_config,
     patch_routing_wall_time,
 )
+from tests.routing.unit_data_helpers import idle_hbp_slot
 
 import adn_server.application.routing.hbp_forward as hbp_forward
 from adn_server.application.server_voice import DEFAULT_SERVER_VOICE_ID
@@ -380,6 +381,28 @@ def test_private_calls_with_rows_are_not_collided() -> None:
     assert _seqs(sc, "MASTER-D", call_2) == [0, 1, 2, 3]
 
 
+def test_voice_burst_d_of_a_row_call_is_not_taken_for_unit_data(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Burst D carries dtype 3, as a unit CSBK does: whether its stream is known is asked of the call's row."""
+    sc = _scenario({}, ("MASTER-A", "MASTER-C", "MASTER-D"))
+    sc.config["_SUB_MAP"] = {bytes_3(_X): ("MASTER-C", 2, 1000.0), bytes_3(_Y): ("MASTER-D", 2, 1000.0)}
+    taken: list[bytes] = []
+    monkeypatch.setattr(sc.routing, "_unit_data_received", lambda *args, **_k: taken.append(args[8]))
+    call_1, call_2 = _row_spec(0, _X, "unit"), _row_spec(1, _Y, "unit")
+
+    def frames(spec: PacketSpec) -> list[PacketSpec]:
+        bursts = [DeterministicScenario.unit_voice_burst_spec(spec, seq=s, dtype_vseq=s - 1) for s in range(1, 6)]
+        return [DeterministicScenario.unit_voice_head_spec(spec), *bursts]
+
+    rows: dict[bytes, dict[str, Any]] = {}
+    with patch_routing_wall_time(sc.clock):
+        for spec in _interleave(frames(call_1), frames(call_2)):
+            assert _row_send(sc, rows, spec)
+
+    assert taken == []
+    assert _seqs(sc, "MASTER-C", call_1) == [0, 1, 2, 3, 4, 5]
+    assert _seqs(sc, "MASTER-D", call_2) == [0, 1, 2, 3, 4, 5]
+
+
 @pytest.mark.behavior
 def test_off_by_default_nothing_changes() -> None:
     """With no concurrent system and no row, a MASTER shared by two hotspots still keeps a
@@ -394,3 +417,25 @@ def test_off_by_default_nothing_changes() -> None:
             assert _hotspot_send(sc, "MASTER-A", spec)
 
     assert _seqs(sc, "MASTER-B", call) == []
+
+
+@pytest.mark.behavior
+@pytest.mark.parametrize("target_slot", ["idle", "busy"])
+def test_unit_data_to_a_radio_on_a_concurrent_target_goes_out_once(target_slot: str) -> None:
+    """Unit data to a 7-digit radio goes by SUB_MAP and by the private-call path, so a hotspot may get a frame
+    twice (legacy); a concurrent target gets each frame once, whichever path sends it."""
+    sc = _scenario({}, ("MASTER-A", "MASTER-B"))
+    sc.routing.set_concurrent_systems(frozenset({"MASTER-B"}))
+    sc.config["_SUB_MAP"] = {bytes_3(_X): ("MASTER-B", 2, 1000.0)}
+    if target_slot == "idle":
+        sc.protocols["MASTER-B"].STATUS[2] = idle_hbp_slot()
+    head = DeterministicScenario.unit_data_header_spec(
+        PacketSpec(call_type="unit", dst_id=_X, stream_id=0x52525252, slot=2),
+    )
+    blocks = [dataclasses.replace(head, seq=n, dtype_vseq=7, payload=bytes([n]) * 33) for n in (1, 2)]
+
+    for spec in (head, *blocks):
+        sc.clock.advance(0.06)
+        sc.inject_unit("MASTER-A", spec)
+
+    assert _seqs(sc, "MASTER-B", head) == [0, 1, 2]

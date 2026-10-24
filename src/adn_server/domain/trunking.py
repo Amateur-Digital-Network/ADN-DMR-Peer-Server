@@ -36,10 +36,13 @@ DTCO = b"DTCO"
 DTCG = b"DTCG"
 DTCPING = b"DTCPING"
 DTCACK = b"DTCACK"
+DTCNAK = b"DTCNAK"
 DTCPONG = b"DTCPONG"
 DMRT = b"DMRT"
 
 LOGIN_LEN = {DTCL: 8, DTCK: 40, DTCC: 302, DTCPING: 11, DTCCL: 9}
+# DMRGateway prints each frequency with %09u: on 23 cm both take ten digits.
+DTCC_23CM_LEN = LOGIN_LEN[DTCC] + 2
 SITE_DMRD_LEN = 71
 
 _HBP_DMRD_LEN = 55
