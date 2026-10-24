@@ -142,6 +142,9 @@ Real-stack files (`test_site_*`) use `support/trunk_site_stack.py`: real `TrunkS
 | `test_site_echo.py` | Per-site parrot playback |
 | `test_site_private.py` | Private calls and unit data to registered radios |
 | `test_site_hotspots_unchanged.py` | Hotspot writes byte-identical with a trunk system present |
+| `test_trunk_wire_experimental.py` | EXPERIMENTAL DMRT 0x05–0x0A parse at exact lengths, network bit, 0x49 |
+| `test_trunk_transactions.py` | EXPERIMENTAL UDT, status, call setup: source validation, bridges, answers |
+| `test_site_dmrt_experimental.py` | EXPERIMENTAL UDT and its accept between real sites |
 
 Related, outside `trunking/`: `routing/test_per_stream_rows.py` (per-stream receive rows and concurrent targets), `infrastructure/test_trunk_reload.py` (`TRUNKING` flip on reload), `infrastructure/test_trunk_registration_store.py` (JSON store, writes in a worker thread), `infrastructure/test_trunk_bootstrap.py` (Tier III built only for a `TRUNKING` system, lazy imports, reload wiring, loops, shutdown write).
 

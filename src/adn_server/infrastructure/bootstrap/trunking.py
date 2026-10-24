@@ -29,11 +29,13 @@ from typing import Any
 from adn_server.application.ports import AclRouter, SubscriptionStore
 from adn_server.application.reporting_use_cases import ReportingUseCases
 from adn_server.application.routing_use_cases import RoutingUseCases
+from adn_server.application.subscription.router import SubscriptionRouter
 from adn_server.application.trunking.legs import SiteLegs
 from adn_server.application.trunking.ports import TrunkRegistrationStore
 from adn_server.application.trunking.registry import SiteRegistry
 from adn_server.application.trunking.signalling import DmrtSignalling
 from adn_server.application.trunking.sites import TrunkSites
+from adn_server.application.trunking.transactions import DmrtTransactions
 from adn_server.infrastructure.twisted_adapters.udp_hbp_trunk import ProtocolSiteLink
 
 
@@ -55,5 +57,7 @@ def build_trunk_sites(
         routing.apply_static_tg_to_bridge,
         lambda: reporting.send_routing_table(routing.routing_table_for_report(), incremental=True),
     )
-    signalling = DmrtSignalling(config, registry, legs, ProtocolSiteLink(protocols), acl)
+    link = ProtocolSiteLink(protocols)
+    transactions = DmrtTransactions(config, registry, link, acl, SubscriptionRouter(store))
+    signalling = DmrtSignalling(config, registry, legs, link, acl, transactions=transactions)
     return TrunkSites(config, registry, legs, signalling, registrations, path)

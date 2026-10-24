@@ -52,6 +52,8 @@ _FROM_NETWORK = 0x40
 # The 0x41 confirmation answers every address with one bit of a single byte.
 _MAX_REGISTRATION_IDS = 8
 _MAX_SUBSCRIPTION_TGS = 64
+_MAX_UDT_LEN = 46
+_GROUP = 0x80
 
 
 class DmrtOp(IntEnum):
@@ -59,6 +61,12 @@ class DmrtOp(IntEnum):
     DEREGISTRATION = 0x02
     GROUP_SUBSCRIPTION = 0x03
     GROUP_UNSUBSCRIPTION = 0x04
+    UDT = 0x05
+    UDT_ACCEPT = 0x06
+    CALL_SETUP = 0x07
+    CALL_ACCEPT = 0x08
+    CALL_REJECT = 0x09
+    STATUS = 0x0A
 
 
 @dataclass(frozen=True)
@@ -73,7 +81,40 @@ class DmrtSubscription:
     tgs: tuple[int, ...]
 
 
-DmrtMessage = DmrtRegistration | DmrtSubscription
+@dataclass(frozen=True)
+class DmrtUdt:
+    uuid: bytes
+    group: bool
+    src: int
+    dst: int
+
+
+@dataclass(frozen=True)
+class DmrtCallSetup:
+    uuid: bytes
+    src: int
+    dst: int
+
+
+@dataclass(frozen=True)
+class DmrtReply:
+    """0x06, 0x08 or 0x09: the answer to the UDT or call setup ``uuid``."""
+
+    op: DmrtOp
+    uuid: bytes
+    src: int
+    dst: int
+
+
+@dataclass(frozen=True)
+class DmrtStatus:
+    uuid: bytes
+    group: bool
+    src: int
+    dst: int
+
+
+DmrtMessage = DmrtRegistration | DmrtSubscription | DmrtUdt | DmrtCallSetup | DmrtReply | DmrtStatus
 
 
 def split_site_dmrd(data: bytes) -> tuple[bytes, bytes] | None:
@@ -125,6 +166,20 @@ def parse_dmrt(payload: bytes) -> DmrtMessage | None:
         if not 1 <= count <= _MAX_SUBSCRIPTION_TGS or len(payload) != 6 + 3 * count:
             return None
         return DmrtSubscription(DmrtOp(op), _addresses(payload, 6, count))
+    if op == DmrtOp.UDT:
+        if len(payload) < 29 or payload[22] > _MAX_UDT_LEN or len(payload) != 29 + payload[22]:
+            return None
+        return DmrtUdt(payload[5:21], bool(payload[21] & _GROUP), *_addresses(payload, 23, 2))
+    if op in (DmrtOp.UDT_ACCEPT, DmrtOp.CALL_ACCEPT, DmrtOp.CALL_REJECT):
+        if len(payload) != 27:
+            return None
+        return DmrtReply(DmrtOp(op), payload[5:21], *_addresses(payload, 21, 2))
+    if op in (DmrtOp.CALL_SETUP, DmrtOp.STATUS):
+        if len(payload) != 28:
+            return None
+        if op == DmrtOp.CALL_SETUP:
+            return DmrtCallSetup(payload[5:21], *_addresses(payload, 22, 2))
+        return DmrtStatus(payload[5:21], bool(payload[21] & _GROUP), *_addresses(payload, 22, 2))
     return None
 
 
@@ -154,3 +209,11 @@ def deregistration(ms_ids: Sequence[int], ts: int) -> bytes:
 def subscription_confirmation(op: DmrtOp, tgs: Sequence[int]) -> bytes:
     """0x43 or 0x44 for ``op``; a refused talkgroup goes back as 0."""
     return DMRT + bytes((op | _FROM_NETWORK, len(tgs))) + _address_bytes(tgs)
+
+
+def to_network(payload: bytes) -> bytes:
+    return payload[:4] + bytes((payload[4] | _FROM_NETWORK,)) + payload[5:]
+
+
+def call_reject(uuid: bytes, src: int, dst: int) -> bytes:
+    return DMRT + bytes((DmrtOp.CALL_REJECT | _FROM_NETWORK,)) + uuid + _address_bytes((src, dst))

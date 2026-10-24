@@ -123,6 +123,26 @@ def dmrt_subscription(op: int, tgs: Sequence[int]) -> bytes:
     return b"DMRT" + bytes((op, len(tgs))) + _addresses(tgs)
 
 
+def dmrt_udt(uuid: bytes, src: int, dst: int, text: bytes, *, group: bool = False) -> bytes:
+    """0x05 as createUDTTransferMessage: UUID, type (bit 7 group, bit 6 private, format 4), size, src, dst, text."""
+    return b"DMRT\x05" + uuid + bytes(((0x80 if group else 0x40) | 4, len(text))) + _addresses((src, dst)) + text
+
+
+def dmrt_call_setup(uuid: bytes, src: int, dst: int, options: int = 0) -> bytes:
+    """0x07 as createPrivateCallSetupMessage: UUID, service options, src, dst (28 bytes)."""
+    return b"DMRT\x07" + uuid + bytes((options,)) + _addresses((src, dst))
+
+
+def dmrt_reply(op: int, uuid: bytes, src: int, dst: int) -> bytes:
+    """0x06, 0x08 or 0x09: the UUID they answer, src, dst (27 bytes)."""
+    return b"DMRT" + bytes((op,)) + uuid + _addresses((src, dst))
+
+
+def dmrt_status(uuid: bytes, src: int, dst: int, status: int, *, group: bool = False) -> bytes:
+    """0x0A as createStatusTransferMessage: UUID, bit 7 group + 7-bit status, src, dst (28 bytes)."""
+    return b"DMRT\x0a" + uuid + bytes(((0x80 if group else 0) | status,)) + _addresses((src, dst))
+
+
 def read_registration_confirmation(msg: bytes) -> tuple[int, list[tuple[int, bool]]]:
     """0x41: its time and (id, accepted) per address; dmrtc reads bit i of [13] for address i."""
     count = msg[14]

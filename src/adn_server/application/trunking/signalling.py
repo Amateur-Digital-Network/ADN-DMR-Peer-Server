@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...domain import bytes_3, int_id
 from ...domain.trunking import (
@@ -45,13 +45,17 @@ from .ports import SiteLink
 from .recent import RecentKeys
 from .registry import MAX_TGS_PER_SITE, Site, SiteRegistry
 
+if TYPE_CHECKING:
+    # Only named here: transactions imports this module for the ACL checks.
+    from .transactions import DmrtTransactions
+
 logger = logging.getLogger(__name__)
 
 _IGNORED_LOG_S = 60.0
 
 
 class DmrtSignalling:
-    """What the server answers to a site's DMRT (0x01-0x04)."""
+    """What the server answers to a site's DMRT (0x01-0x04); 0x05-0x0A go to ``transactions`` when given."""
 
     def __init__(
         self,
@@ -60,12 +64,15 @@ class DmrtSignalling:
         legs: SiteLegs,
         link: SiteLink,
         acl: AclRouter,
+        *,
+        transactions: DmrtTransactions | None = None,
     ) -> None:
         self._config = config
         self._registry = registry
         self._legs = legs
         self._link = link
         self._acl = acl
+        self._transactions = transactions
         self._ignored = RecentKeys(_IGNORED_LOG_S)
 
     def received(self, site: Site, payload: bytes, now: float) -> None:
@@ -82,6 +89,10 @@ class DmrtSignalling:
                 self._subscribe(site, msg.tgs, now)
             else:
                 self._unsubscribe(site, msg.tgs, now)
+        elif self._transactions is not None:
+            self._transactions.received(site, msg, payload, now)
+        else:
+            self._ignore(site, payload, now)
 
     def _register(self, site: Site, ms_ids: Sequence[int], now: float) -> None:
         scopes = acl_scopes(self._config, site.system)

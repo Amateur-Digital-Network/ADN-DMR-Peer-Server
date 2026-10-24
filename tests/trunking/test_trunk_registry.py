@@ -26,12 +26,16 @@ from __future__ import annotations
 from adn_server.application.trunking.registry import (
     CALL_UUID_KEEP_S,
     ECHO_HOLD_S,
+    MAX_PENDING,
+    MAX_PENDING_PER_SITE,
     MAX_REGISTRATIONS_PER_SITE,
+    PENDING_TTL_S,
     REGISTRATION_TTL_S,
     Registration,
     Site,
     SiteRegistry,
 )
+from adn_server.domain.trunking import DmrtOp
 
 A = Site("TRUNK", b"\x0c\xc1\x7a\x01")
 B = Site("TRUNK", b"\x0c\xc1\x7a\x02")
@@ -237,3 +241,41 @@ def test_restore_keeps_the_newest_under_the_cap() -> None:
     registry.restore(saved, frozenset({"TRUNK"}), T0 + 6000)
     assert {r.ms_id for r in registry.at_site(A)} == set(range(2, MAX_REGISTRATIONS_PER_SITE + 2))
     assert registry.at_site(B) == [Registration(MS, B, T0 + 5000)]
+
+
+def _uuid(n: int) -> bytes:
+    return n.to_bytes(16, "big")
+
+
+def test_a_site_holds_at_most_its_share_of_open_transactions() -> None:
+    """Past its cap a site opens nothing more, while another site still can and its own open ones may be sent again."""
+    registry = SiteRegistry()
+    assert all(registry.note_pending(_uuid(n), DmrtOp.UDT, A, frozenset({B}), T0) for n in range(MAX_PENDING_PER_SITE))
+
+    assert registry.note_pending(_uuid(MAX_PENDING_PER_SITE), DmrtOp.UDT, A, frozenset({B}), T0) is False
+    assert registry.note_pending(_uuid(0), DmrtOp.UDT, A, frozenset({C}), T0 + 1) is True
+    assert registry.pending(_uuid(0), DmrtOp.UDT, T0 + 1).targets == frozenset({C})
+    assert registry.note_pending(_uuid(0), DmrtOp.CALL_SETUP, B, frozenset({A}), T0) is True
+
+
+def test_the_server_holds_at_most_max_pending_open_transactions() -> None:
+    registry = SiteRegistry()
+    sites = [Site("TRUNK", n.to_bytes(4, "big")) for n in range(MAX_PENDING // MAX_PENDING_PER_SITE + 1)]
+    for i, site in enumerate(sites[:-1]):
+        for n in range(MAX_PENDING_PER_SITE):
+            assert registry.note_pending(_uuid(i * MAX_PENDING_PER_SITE + n), DmrtOp.UDT, site, frozenset({A}), T0)
+
+    assert registry.note_pending(_uuid(0), DmrtOp.CALL_SETUP, sites[-1], frozenset({A}), T0) is False
+
+
+def test_expired_transactions_free_their_place() -> None:
+    registry = SiteRegistry()
+    for n in range(MAX_PENDING_PER_SITE):
+        registry.note_pending(_uuid(n), DmrtOp.UDT, A, frozenset({B}), T0)
+    later = T0 + PENDING_TTL_S + 1
+
+    assert all(registry.note_pending(_uuid(1000 + n), DmrtOp.UDT, A, frozenset({B}), later)
+               for n in range(MAX_PENDING_PER_SITE))
+    assert registry.pending(_uuid(0), DmrtOp.UDT, T0) is None
+    registry.trim(later + PENDING_TTL_S + 1)
+    assert registry.note_pending(_uuid(0), DmrtOp.UDT, B, frozenset({A}), later + PENDING_TTL_S + 1) is True

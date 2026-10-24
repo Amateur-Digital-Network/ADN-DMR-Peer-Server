@@ -19,12 +19,15 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 ###############################################################################
 
-"""What Tier III sites told the server: registered radios, subscribed talkgroups, call UUIDs and parrot keyers."""
+"""What Tier III sites told the server: radios, talkgroups, call UUIDs, parrot keyers and open DMRT transactions."""
 
 from __future__ import annotations
 
+from collections import OrderedDict
 from collections.abc import Collection, Iterable
 from typing import NamedTuple
+
+from ...domain.trunking import DmrtOp
 
 MAX_REGISTRATIONS_PER_SITE = 1024
 # dmrtc does not resend registrations after a reconnect; 24 h is when the SUB_MAP trim drops their pin too.
@@ -34,6 +37,10 @@ MAX_TGS_PER_SITE = 512
 CALL_UUID_KEEP_S = 300.0
 # The parrot replays an over of up to 180 s, starting 2 s after it ends.
 ECHO_HOLD_S = 185.0
+PENDING_TTL_S = 60.0
+# Far above what a site's radios open in a minute; one flooding site cannot take every slot.
+MAX_PENDING_PER_SITE = 128
+MAX_PENDING = 1024
 # A refresh is worth a write once an hour, as SubMapSaver does for SUB_MAP times.
 _REVISION_BUCKET_S = 3600
 
@@ -49,6 +56,12 @@ class Registration(NamedTuple):
     t: float
 
 
+class Pending(NamedTuple):
+    origin: Site
+    targets: frozenset[Site]
+    t: float
+
+
 class SiteRegistry:
     def __init__(self) -> None:
         self._regs: dict[int, Registration] = {}
@@ -57,6 +70,8 @@ class SiteRegistry:
         self._holders: dict[tuple[str, int], dict[bytes, None]] = {}
         self._uuids: dict[tuple[bytes, bytes], tuple[bytes, float]] = {}
         self._echo: dict[tuple[str, int, int], tuple[bytes, float]] = {}
+        self._pending: OrderedDict[tuple[bytes, DmrtOp], Pending] = OrderedDict()
+        self._pending_per_site: dict[Site, int] = {}
         self._revision = 0
 
     @property
@@ -90,6 +105,10 @@ class SiteRegistry:
         current = self._regs.get(ms_id)
         if current is not None and current.site == site:
             self._refresh(current, now)
+
+    def location(self, ms_id: int, now: float) -> Site | None:
+        current = self._regs.get(ms_id)
+        return current.site if current is not None and now - current.t <= REGISTRATION_TTL_S else None
 
     def at_site(self, site: Site) -> list[Registration]:
         return [self._regs[ms_id] for ms_id in self._by_site.get(site, ())]
@@ -179,11 +198,29 @@ class SiteRegistry:
         noted = self._echo.get((system, tg, rf_src))
         return noted[0] if noted is not None and now - noted[1] <= ECHO_HOLD_S else None
 
+    def note_pending(self, uuid: bytes, kind: DmrtOp, origin: Site, targets: frozenset[Site], now: float) -> bool:
+        """False while the server, or ``origin``, holds as many open transactions as allowed."""
+        self._expire_pending(now)
+        key = (uuid, kind)
+        if key in self._pending:
+            self._unlink_pending(key)
+        if len(self._pending) >= MAX_PENDING or self._pending_per_site.get(origin, 0) >= MAX_PENDING_PER_SITE:
+            return False
+        self._pending[key] = Pending(origin, targets, now)
+        self._pending_per_site[origin] = self._pending_per_site.get(origin, 0) + 1
+        return True
+
+    def pending(self, uuid: bytes, kind: DmrtOp, now: float) -> Pending | None:
+        """Where the UDT or call setup ``uuid`` came from and went, while an answer to it is expected."""
+        entry = self._pending.get((uuid, kind))
+        return entry if entry is not None and now - entry.t <= PENDING_TTL_S else None
+
     def trim(self, now: float) -> None:
         for key in [k for k, (_, t) in self._uuids.items() if now - t > CALL_UUID_KEEP_S]:
             del self._uuids[key]
         for key in [k for k, (_, t) in self._echo.items() if now - t > ECHO_HOLD_S]:
             del self._echo[key]
+        self._expire_pending(now)
 
     def _link(self, registration: Registration) -> None:
         self._regs[registration.ms_id] = registration
@@ -200,6 +237,21 @@ class SiteRegistry:
         self._regs[current.ms_id] = current._replace(t=now)
         if int(current.t // _REVISION_BUCKET_S) != int(now // _REVISION_BUCKET_S):
             self._revision += 1
+
+    def _expire_pending(self, now: float) -> None:
+        while self._pending:
+            key, entry = next(iter(self._pending.items()))
+            if now - entry.t <= PENDING_TTL_S:
+                return
+            self._unlink_pending(key)
+
+    def _unlink_pending(self, key: tuple[bytes, DmrtOp]) -> None:
+        origin = self._pending.pop(key).origin
+        left = self._pending_per_site[origin] - 1
+        if left:
+            self._pending_per_site[origin] = left
+        else:
+            del self._pending_per_site[origin]
 
     def _release(self, site: Site, tg: int) -> bool:
         holders = self._holders[(site.system, tg)]
