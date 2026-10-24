@@ -381,7 +381,7 @@ def _validate_system(name: str, sys_cfg: dict[str, Any], errors: list[str]) -> N
     mode = sys_cfg.get("MODE")
     if mode is not None and not _is_empty(mode) and not isinstance(mode, str):
         errors.append(f"{prefix}.MODE: expected string, got {type(mode).__name__} ({mode!r}).")
-    for key in ("ENABLED", "REPEAT", "USE_ACL", "SINGLE_MODE", "VOICE_IDENT", "ALLOW_UNREG_ID", "PROXY_CONTROL", "EXPORT_AMBE", "LOOSE", "RELAX_CHECKS", "ENHANCED_OBP", "BOTH_SLOTS", "SUB_MAP_LEARN", "TG4000_VOICE"):
+    for key in ("ENABLED", "REPEAT", "USE_ACL", "SINGLE_MODE", "VOICE_IDENT", "ALLOW_UNREG_ID", "PROXY_CONTROL", "EXPORT_AMBE", "LOOSE", "RELAX_CHECKS", "ENHANCED_OBP", "BOTH_SLOTS", "SUB_MAP_LEARN", "TG4000_VOICE", "TRUNKING"):
         if key in sys_cfg:
             _expect_bool(f"{prefix}.{key}", sys_cfg[key], errors)
     # OpenBridge always learns SUB_MAP: whoever is behind the link must stay reachable.
@@ -424,6 +424,40 @@ def _validate_system(name: str, sys_cfg: dict[str, Any], errors: list[str]) -> N
             _expect_number(f"{prefix}.{key}", sys_cfg[key], errors)
 
 
+def _validate_trunking(systems: dict[str, Any], proxy_cfg: Any, errors: list[str]) -> None:
+    """With these rules every STATIC leg of a TRUNKING system is a site's subscription."""
+    target = proxy_cfg.get("TARGET_SYSTEM") if isinstance(proxy_cfg, dict) else None
+    for name, sys_cfg in systems.items():
+        if not isinstance(sys_cfg, dict) or sys_cfg.get("TRUNKING") is not True:
+            continue
+        prefix = f"SYSTEMS.{name}"
+        if sys_cfg.get("MODE") != "MASTER":
+            errors.append(f"{prefix}.TRUNKING: only on MODE MASTER.")
+        if name == target:
+            errors.append(
+                f"{prefix}.TRUNKING: not supported on PROXY.TARGET_SYSTEM; a Tier III system needs its own "
+                "MASTER with its own PORT and PASSPHRASE or USERS_PASS."
+            )
+        generator = sys_cfg.get("GENERATOR")
+        if isinstance(generator, int) and generator > 1:
+            errors.append(f"{prefix}.GENERATOR: must be 0 or 1 with TRUNKING.")
+        if sys_cfg.get("SINGLE_MODE") is True:
+            errors.append(
+                f"{prefix}.SINGLE_MODE: not supported with TRUNKING (each site holds many talkgroups at once)."
+            )
+        for key in ("TS1_STATIC", "TS2_STATIC"):
+            if sys_cfg.get(key):
+                errors.append(f"{prefix}.{key}: not supported with TRUNKING (sites subscribe their own talkgroups).")
+        if sys_cfg.get("DEFAULT_REFLECTOR"):
+            errors.append(f"{prefix}.DEFAULT_REFLECTOR: not supported with TRUNKING.")
+        if "OPTIONS" in sys_cfg:
+            errors.append(f"{prefix}.OPTIONS: not supported with TRUNKING.")
+        if sys_cfg.get("SUB_MAP_LEARN") is False:
+            errors.append(
+                f"{prefix}.SUB_MAP_LEARN: must stay true with TRUNKING (registrations are kept in SUB_MAP)."
+            )
+
+
 def validate_config(config: dict[str, Any], *, config_path: str | None = None) -> None:
     """Validate config structure and scalar types. Raises ConfigError with all issues found."""
     errors: list[str] = []
@@ -443,6 +477,7 @@ def validate_config(config: dict[str, Any], *, config_path: str | None = None) -
                 errors.append(f"SYSTEMS.{name}: expected mapping, got {type(sys_cfg).__name__}.")
                 continue
             _validate_system(name, sys_cfg, errors)
+        _validate_trunking(systems, config.get("PROXY"), errors)
 
     proxy_cfg = config.get("PROXY")
     proxy_port = _validate_proxy(proxy_cfg if isinstance(proxy_cfg, dict) else None, systems if isinstance(systems, dict) else {}, errors)
