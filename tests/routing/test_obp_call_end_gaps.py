@@ -18,8 +18,8 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 ###############################################################################
 
-"""OBP *CALL END*: Loss counts every packet a sequence jump skipped, and Max gap shows the
-longest silence (frames held back upstream and released in a burst keep their sequence)."""
+"""OBP *CALL END*: Loss is the share of the expected packets that a sequence jump skipped
+(never over 100 %), and Max gap shows the longest silence (frames held back upstream and released in a burst keep their sequence)."""
 
 from __future__ import annotations
 
@@ -79,7 +79,7 @@ def test_every_skipped_packet_counts_as_loss(caplog: pytest.LogCaptureFixture) -
     schedule = [(0.06, s) for s in range(1, 11)] + [(0.66, s) for s in (21,)] + [(0.06, s) for s in range(22, 31)]
     line = _call_end(caplog, schedule)
     received = 20 + 1  # "packets" counts the frames after the header: bursts + terminator
-    assert _field(line, "Loss") == pytest.approx(100 * 10 / received, abs=0.01)
+    assert _field(line, "Loss") == pytest.approx(100 * 10 / (received + 10), abs=0.01)
 
 
 def test_max_gap_shows_a_silence_without_missing_sequence(caplog: pytest.LogCaptureFixture) -> None:
@@ -125,8 +125,9 @@ def test_a_late_packet_after_the_wrap_does_not_drop_the_rest_of_the_call(caplog:
     line = _call_end(caplog, [(0.06, s) for s in _WRAP_LATE], sent)
     assert sent[-17:] == list(range(4, 21)), "the frames after the late packet and the terminator are forwarded"
     assert 254 not in sent
-    # 254 skipped once (253 -> 255) and once late: 2 lost; "packets" = the bursts + the terminator
-    assert _field(line, "Loss") == pytest.approx(100 * 2 / (len(_WRAP_LATE) + 1), abs=0.01)
+    # 254 skipped once (253 -> 255): 1 lost; its late copy is dropped, not lost a second time
+    received = len(_WRAP_LATE) + 1  # the bursts + the terminator
+    assert _field(line, "Loss") == pytest.approx(100 * 1 / received, abs=0.01)
 
 
 # Seq 1..10, a 9 s pause, then 160..199 on the same stream: a jump of 150, which without the
@@ -139,6 +140,14 @@ def test_a_stream_resuming_after_a_long_pause_is_forwarded(caplog: pytest.LogCap
     line = _call_end(caplog, _PAUSE, sent)
     assert sent[-41:] == list(range(160, 201)), "all 40 frames after the pause and the terminator"
     assert _field(line, "Max gap") == pytest.approx(9.0, abs=0.01)
+    # 149 skipped by the jump, 51 received: 74.5 %, it used to be 149 / 51 = 292 %
+    assert _field(line, "Loss") == pytest.approx(100 * 149 / (51 + 149), abs=0.01)
+
+
+def test_repeated_frames_are_not_loss(caplog: pytest.LogCaptureFixture) -> None:
+    schedule = [(0.06, s) for s in range(1, 11)] + [(0.01, 10), (0.01, 10)] + [(0.06, s) for s in range(11, 21)]
+    line = _call_end(caplog, schedule)
+    assert _field(line, "Loss") == 0.0
 
 
 def test_a_terminator_with_its_sequence_reset_ends_the_call(caplog: pytest.LogCaptureFixture) -> None:
