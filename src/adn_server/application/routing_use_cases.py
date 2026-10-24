@@ -323,6 +323,10 @@ class RoutingUseCases(
         systems_cfg = self._config.get("SYSTEMS", {})
         source_is_obp = systems_cfg.get(system_name, {}).get("MODE") == "OPENBRIDGE"
         pkt_time = ingress_pkt_time if ingress_pkt_time is not None else time.time()
+        protocols = self._get_protocols() if self._get_protocols else {}
+        src_proto = protocols.get(system_name)
+        # An HBP source keeps its call in its slot row; an OpenBridge source keeps one row per stream.
+        src_rx = getattr(src_proto, "STATUS", {}).get(slot, {}) if src_proto and not source_is_obp else None
         if (
             call_type == "group"
             and frame_type == HBPF_DATA_SYNC
@@ -334,6 +338,7 @@ class RoutingUseCases(
         if not source_is_obp and call_type in ("group", "vcsbk"):
             if not self._hbp_group_voice_ingress_controls(
                 system_name, peer_id, rf_src, dst_id, seq, slot, stream_id, data, pkt_time,
+                protocols, src_proto, src_rx,
                 loop_guard_check=plugin_origin is None and not synthetic_announcement,
                 terminator=frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM,
             ):
@@ -399,17 +404,12 @@ class RoutingUseCases(
             if not _obp_grp:
                 _is_new_rx_stream = True
                 _suppress_uplink_rx = False
-                if not source_is_obp:
-                    protocols = self._get_protocols() if self._get_protocols else {}
-                    src_proto = protocols.get(system_name) if protocols else None
-                    if src_proto and getattr(src_proto, "STATUS", None):
-                        slot_st = src_proto.STATUS.get(slot, {})
-                        if isinstance(slot_st, dict):
-                            _is_new_rx_stream = (
-                                stream_id != slot_st.get("RX_STREAM_ID")
-                                and stream_id not in slot_st.get("RX_STREAMS", ())
-                            )
-                            _suppress_uplink_rx = bool(slot_st.get("_suppress_uplink"))
+                if src_rx is not None:
+                    _is_new_rx_stream = (
+                        stream_id != src_rx.get("RX_STREAM_ID")
+                        and stream_id not in src_rx.get("RX_STREAMS", ())
+                    )
+                    _suppress_uplink_rx = bool(src_rx.get("_suppress_uplink"))
                 if _is_new_rx_stream and not _suppress_uplink_rx:
                     _rx_report_peer = peer_id
                     if not source_is_obp and not synthetic_announcement:
@@ -445,21 +445,16 @@ class RoutingUseCases(
         elif frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM:
             if not _obp_grp:
                 duration = 0.0
-                _suppress_uplink_vterm = False
-                protocols = self._get_protocols() if self._get_protocols else {}
-                src_proto = protocols.get(system_name) if protocols else None
                 if src_proto and getattr(src_proto, "STATUS", None):
                     st = src_proto.STATUS
                     ent = st.get(stream_id)
                     start = ent.get("START") if isinstance(ent, dict) else None
-                    if start is None and slot in st:
-                        tracked = st.get(slot, {}).get("RX_STREAMS", {}).get(stream_id)
-                        start = tracked[3] if tracked else st.get(slot, {}).get("RX_START")
+                    if start is None and src_rx is not None:
+                        tracked = src_rx.get("RX_STREAMS", {}).get(stream_id)
+                        start = tracked[3] if tracked else src_rx.get("RX_START")
                     if start is not None:
                         duration = pkt_time - start
-                    slot_st_vterm = st.get(slot, {})
-                    if isinstance(slot_st_vterm, dict):
-                        _suppress_uplink_vterm = bool(slot_st_vterm.get("_suppress_uplink"))
+                _suppress_uplink_vterm = src_rx is not None and bool(src_rx.get("_suppress_uplink"))
                 if _suppress_uplink_vterm:
                     self._clear_silent_activation_log(system_name, peer_id, dst_id)
                 if not _suppress_uplink_vterm:
@@ -520,8 +515,6 @@ class RoutingUseCases(
         pkt_time = time.time()
         dmrpkt = data[20:53] if len(data) >= 53 else b""
         _bits = data[15] if len(data) > 15 else 0
-        protocols = self._get_protocols() if self._get_protocols else {}
-        src_proto = protocols.get(system_name) if protocols else None
         # Legacy `bridge.py` `routerOBP.dmrd_received` forwards `_hops,_ber,_rssi,_source_server,_source_rptr`
         # exactly as received from `hblink` (`bridge.py` ~486). Values are set in `hblink`:
         # - DMRD v1 OBP: SERVER_ID, zeros rptr, empty hops (`hblink.py` ~338–345)
@@ -572,8 +565,8 @@ class RoutingUseCases(
             if source_is_obp:
                 ent = st.get(stream_id)
                 source_lc = ent.get("LC") if isinstance(ent, dict) else None
-            else:
-                source_lc = st.get(slot, {}).get("RX_LC")
+            elif src_rx is not None:
+                source_lc = src_rx.get("RX_LC")
         if not source_lc or len(source_lc) < 9:
             source_lc = b"\x00\x00\x20" + dst_id_b + rf_src
         # Legacy bridge_master routerOBP: _sysIgnore accumulates across each to_target(BRIDGES[_bridge])
@@ -598,11 +591,7 @@ class RoutingUseCases(
         # ``_suppress_uplink`` on the source slot status. The TG was activated dynamically
         # (so downlink of the active QSO reaches this peer), but this stream's audio must
         # not be forwarded upstream to avoid disrupting the in-progress conversation.
-        _suppress_uplink = False
-        if not source_is_obp and src_proto and getattr(src_proto, "STATUS", None):
-            _src_slot_st = src_proto.STATUS.get(slot, {})
-            if isinstance(_src_slot_st, dict) and _src_slot_st.get("_suppress_uplink"):
-                _suppress_uplink = True
+        _suppress_uplink = src_rx is not None and bool(src_rx.get("_suppress_uplink"))
         _leg_iter = _plan.entries
 
         for _relay_table_key, entry in _leg_iter:
@@ -765,7 +754,7 @@ class RoutingUseCases(
                     if source_is_obp:
                         _src_stream_st = getattr(src_proto, "STATUS", {}).get(stream_id, {}) if src_proto else {}
                     else:
-                        _src_stream_st = getattr(src_proto, "STATUS", {}).get(slot, {}) if src_proto else {}
+                        _src_stream_st = src_rx if src_rx is not None else {}
                     # Slot contention: active QSO blocks any other stream; post-VTERM uses GROUP_HANGTIME.
                     _group_hangtime = float(_target_system.get("GROUP_HANGTIME", 0) or 0)
                     _tgt_peers = getattr(tgt_proto, "_peers", None) if tgt_proto else None
@@ -878,8 +867,7 @@ class RoutingUseCases(
                     elif source_is_obp:
                         _is_new_stream = (_ts_st.get("TX_STREAM_ID") != stream_id)
                     else:
-                        src_status = getattr(src_proto, "STATUS", None) if src_proto else None
-                        _is_new_stream = (src_status.get(slot, {}).get("RX_STREAM_ID") if src_status else b"") != stream_id
+                        _is_new_stream = (src_rx.get("RX_STREAM_ID") if src_rx else b"") != stream_id
                     if _is_new_stream:
                         dst_lc = source_lc[0:3] + entry_tgid_b + rf_src
                         if _obp_deferred_bridge and _bridge_tx_leg is not None:
