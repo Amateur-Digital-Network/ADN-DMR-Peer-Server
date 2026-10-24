@@ -30,8 +30,10 @@ from .hbp_protocol import (
     HBPF_VOICE,
     HBPF_VOICE_SYNC,
     PROTO_VER,
+    SLOT_TYPE_VOICE,
     STREAM_TO,
     VER,
+    slot_frame_type,
 )
 from .result import Fail, Result, Success, is_fail
 from .subscription import (
@@ -86,4 +88,6 @@ __all__ = [
     "VER",
     "PROTO_VER",
     "STREAM_TO",
+    "SLOT_TYPE_VOICE",
+    "slot_frame_type",
 ]

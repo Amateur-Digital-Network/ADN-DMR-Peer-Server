@@ -83,7 +83,7 @@ from ...application.routing.peer_downlink_index import (
 )
 from ...application.routing.sub_map_learning import system_learns_sub_map
 from ...application.server_voice import all_server_voice_ids
-from ...domain import bytes_3, bytes_4, int_id
+from ...domain import bytes_3, bytes_4, int_id, slot_frame_type
 from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
 from ...domain.hbp_protocol import normalize_fixed_width_ascii, normalize_fixed_width_bytes
@@ -1718,7 +1718,7 @@ class HBPProtocol(DatagramProtocol):
                             self.STATUS[_slot]["RX_PEER"] = _peer_id
                             self.STATUS[_slot]["RX_SEQ"] = _seq
                             self.STATUS[_slot]["RX_RFS"] = _rf_src
-                            self.STATUS[_slot]["RX_TYPE"] = _dtype_vseq
+                            self.STATUS[_slot]["RX_TYPE"] = slot_frame_type(_frame_type, _dtype_vseq)
                             self.STATUS[_slot]["RX_TGID"] = _dst_id
                             self.STATUS[_slot]["RX_TIME"] = pkt_time
                             if _call_type in ("group", "vcsbk"):
@@ -2164,7 +2164,7 @@ class HBPProtocol(DatagramProtocol):
                         self.STATUS[_slot]["RX_PEER"] = _peer_id
                         self.STATUS[_slot]["RX_SEQ"] = _seq
                         self.STATUS[_slot]["RX_RFS"] = _rf_src
-                        self.STATUS[_slot]["RX_TYPE"] = _dtype_vseq
+                        self.STATUS[_slot]["RX_TYPE"] = slot_frame_type(_frame_type, _dtype_vseq)
                         self.STATUS[_slot]["RX_TGID"] = _dst_id
                         self.STATUS[_slot]["RX_TIME"] = pkt_time
                     # Always track RX_STREAM_ID so subsequent frames of a suppressed

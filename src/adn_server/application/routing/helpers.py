@@ -679,14 +679,17 @@ def obp_sync_flat_bridge_tx_times(
     leg: dict[str, Any],
     stream_id: bytes,
     pkt_time: float,
-    dtype_vseq: int,
+    tx_type: int,
 ) -> None:
-    """Refresh per-stream leg activity; mirror times to flat row only for the owner stream."""
+    """Refresh per-stream leg activity; mirror times to flat row only for the owner stream.
+
+    ``tx_type`` is the frame's ``slot_frame_type``, not its raw dtype/vseq.
+    """
     leg["TX_TIME"] = pkt_time
-    leg["TX_TYPE"] = dtype_vseq
+    leg["TX_TYPE"] = tx_type
     if slot_st.get("TX_STREAM_ID") == stream_id:
         slot_st["TX_TIME"] = pkt_time
-        slot_st["TX_TYPE"] = dtype_vseq
+        slot_st["TX_TYPE"] = tx_type
 
 
 def obp_pick_active_bridge_tx_leg(
