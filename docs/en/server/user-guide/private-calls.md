@@ -8,6 +8,7 @@
 
 - Populated when stations register traffic; persisted via configured **`SUB_MAP`** pickle path under **`ALIASES`**.
 - Used to resolve **destination radio ID** to a **target system** and **slot** for private forwarding.
+- Tier III registrations are kept in `SUB_MAP` while valid (see [DMR Tier III trunking](tier3-trunking.md#registrations)).
 - Unit data (SMS, ACKs) whose destination was last heard on the same hotspot it came from is not sent back to that hotspot: both radios hear each other on RF, and the echo would transmit over their own exchange.
 - Unit data to an individual ID last heard on a non-OPENBRIDGE system less than 900 s ago is not fanned out to the OpenBridges; the `SUB_MAP` lookup delivers it locally. Subscribers learned over an OpenBridge, or older entries, keep the fan-out.
 

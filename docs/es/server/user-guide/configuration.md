@@ -124,6 +124,7 @@ Aparecen principalmente en **MASTER** (y a menudo en **PEER**). OpenBridge usa u
 | **DEFAULT_REFLECTOR** | Número de **reflector** por defecto para bridges de marcado `#` (0 = ninguno). |
 | **OVERRIDE_IDENT_TG** | TG opcional para ident por voz en lugar de all-call. |
 | **GENERATOR** | Si es **> 1**, este MASTER se expande en **`NAME-0`**, **`NAME-1`**, … con puertos consecutivos (ver `expand_generator` en código). El **`adn-proxy`** independiente legado usaba el mismo rango; el proxy **integrado** usa **`PROXY.TARGET_SYSTEM`** solo inyección (sin puertos UDP por hotspot en el servidor). |
+| **TRUNKING** | Por defecto `false`. Con `true`, este MASTER pasa a ser un sistema **DMR Tier III**: solo acepta emplazamientos con DMRGateway `TrunkingEnabled=1` (dmrtc), que se conectan con los comandos DTC*, se suscriben a sus propios talkgroups y registran sus radios. Necesita su propio `PORT` y no puede ser `PROXY.TARGET_SYSTEM`; con él se rechazan `SINGLE_MODE`, `TS1_STATIC` / `TS2_STATIC`, `DEFAULT_REFLECTOR`, `OPTIONS`, `GENERATOR` > 1 y `SUB_MAP_LEARN: false`. Activarlo o quitarlo en una recarga recrea el sistema, y sus peers vuelven a conectarse. Ver [Trunking DMR Tier III](tier3-trunking.md). |
 
 **MASTER** escucha conexiones PEER (salvo que sea el destino **solo inyección** del proxy — ver [Proxy hotspot](hotspot-proxy.md)); cada peer autenticado se guarda en **`PEERS`** en tiempo de ejecución.
 
@@ -280,6 +281,7 @@ Descargas y ficheros locales para **IDs de peer**, **IDs de suscriptor**, **etiq
 | **PEER_FILE** / **SUBSCRIBER_FILE** / **TGID_FILE** | Nombres de ficheros locales. |
 | **\*_URL** | Orígenes remotos para descargas. |
 | **SUB_MAP_FILE** | Ruta pickle para **SUB_MAP** (enrutado de llamadas privadas), `sub_map.pkl` si está vacío. Ver [Llamadas privadas](private-calls.md#sub_map-persistence). |
+| **TRUNK_REG_FILE** | Fichero JSON de los **registros Tier III** (`trunk_registrations.json` si está vacío); solo se usa si algún sistema tiene `TRUNKING: true`. Se lee una vez, cuando arranca el primer sistema TRUNKING, y se escribe en un hilo aparte cada 300 s si cambió o falló la escritura anterior, con `SIGHUP` y al apagar. Ver [Trunking DMR Tier III](tier3-trunking.md#registrations). |
 | **POLL_INTERVAL_SEC** | Cada cuánto se revisa si hay que descargar las listas (por defecto **900**). |
 | **CHECKSUM_URL** / **CHECKSUM_FILE** | Checksums publicados, que se descargan en cada revisión; una lista solo se descarga cuando su checksum ya no coincide con el fichero en disco (un checksum que no coincide se reintenta una vez por hora). |
 | **SERVER_ID_URL** / **SERVER_ID_FILE** | Lista de IDs de servidor (la usa `VALIDATE_SERVER_IDS`). |
@@ -323,3 +325,4 @@ Usa el intérprete del proyecto (ver reglas del workspace), p. ej. `python3.11` 
 - [Echo](echo.md) — ejemplo PEER (proceso echo).
 - [Proxy hotspot](hotspot-proxy.md) — **`PROXY`** / **`SELF_SERVICE`** integrados.
 - [Proxy OBP](obp-proxy.md) — fan-in OpenBridge **`OBP_PROXY`** integrado.
+- [Trunking DMR Tier III](tier3-trunking.md) — MASTER **`TRUNKING`** para emplazamientos dmrtc / DMRGateway.

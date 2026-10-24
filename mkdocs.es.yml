@@ -66,12 +66,14 @@ nav:
           - Proxy hotspot (integrado): server/user-guide/hotspot-proxy.md
           - Proxy OBP (fan-in OpenBridge): server/user-guide/obp-proxy.md
           - Echo (reproducción): server/user-guide/echo.md
+          - Trunking DMR Tier III: server/user-guide/tier3-trunking.md
           - Créditos y licencia: server/user-guide/attribution.md
       - Protocolos:
           - HBP (DMRD): server/protocols/hbp.md
           - OpenBridge (DMRE): server/protocols/openbridge.md
           - Trama DMRE v5: server/protocols/dmre-v5.md
           - Protocolo de informes v2 (JSON): server/protocols/report-v2.md
+          - DMR Tier III (trunking v0.6): server/protocols/tier3.md
       - Desarrollo:
           - Arquitectura: server/development/architecture.md
           - Rendimiento (2.x): server/development/performance.md

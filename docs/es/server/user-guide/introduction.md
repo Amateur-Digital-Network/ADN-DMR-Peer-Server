@@ -6,6 +6,7 @@ Este servicio es un **peer y bridge DMR**. Implementa:
 
 - **HBP** por UDP hacia sistemas **MASTER** y **PEER** (tramas DMRD, autenticación, pings).
 - **OpenBridge** por UDP hacia otras redes — **DMRE v5** (versión embebida 5, BLAKE2b, saltos) es el modo **recomendado** entre servidores en ADN; **DMRD** v1 sigue disponible para compatibilidad (ver [OpenBridge](../protocols/openbridge.md#dmre-and-openbridge-v5)).
+- **Trunking DMR Tier III** en un MASTER con `TRUNKING: true`: los emplazamientos dmrtc detrás de DMRGateway `TrunkingEnabled=1` (protocolo Homebrew DMR trunking v0.6) se suscriben a sus talkgroups, registran sus radios y llevan muchas llamadas a la vez (ver [Trunking DMR Tier III](tier3-trunking.md)).
 
 La configuración es **YAML** (`adn-server.yaml`), fusionada en tiempo de ejecución con ajustes de voz opcionales (`adn-voice.yaml`). La plantilla incluida es `adn-server.example.yaml`.
 
