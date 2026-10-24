@@ -1497,20 +1497,20 @@ class RoutingUseCases(
                 return
             _notify_pvt_start = True
             slot_st["RX_START"] = pkt_time
-            self._pvt_same_system_dst_peer_id = None
+            slot_st["PVT_SAME_SYSTEM_PEER"] = None
             if dst_id in sub_map:
                 _dst_entry = sub_map[dst_id]
                 if _dst_entry[0] != system_name:
-                    self._pvt_targets = [_dst_entry[0]]
+                    slot_st["PVT_TARGETS"] = [_dst_entry[0]]
                     # Exact hotspot the destination was last heard on, if SUB_MAP has it
                     # (4th element) -- lets delivery target that one peer on the target
                     # system instead of send_to_system's broadcast-to-every-peer default.
-                    self._pvt_target_peer_ids = {
+                    slot_st["PVT_TARGET_PEERS"] = {
                         _dst_entry[0]: (_dst_entry[3] if len(_dst_entry) > 3 else None)
                     }
                 else:
-                    self._pvt_targets = []
-                    self._pvt_target_peer_ids = {}
+                    slot_st["PVT_TARGETS"] = []
+                    slot_st["PVT_TARGET_PEERS"] = {}
                     logger.debug("PRIVATE call to a subscriber on the same system, send nothing")
                     # Delivery is already handled by the MASTER's own local REPEAT
                     # (_pvt_repeat_targets in udp_hbp.py) -- this branch only exists so the
@@ -1518,13 +1518,13 @@ class RoutingUseCases(
                     if len(_dst_entry) > 3 and _dst_entry[3] is not None:
                         _dest_peers = getattr(source_proto, "_peers", {}) if source_proto else {}
                         if _dst_entry[3] in _dest_peers:
-                            self._pvt_same_system_dst_peer_id = _dst_entry[3]
+                            slot_st["PVT_SAME_SYSTEM_PEER"] = _dst_entry[3]
             else:
-                self._pvt_targets = []
-                self._pvt_target_peer_ids = {}
+                slot_st["PVT_TARGETS"] = []
+                slot_st["PVT_TARGET_PEERS"] = {}
             logger.info(
                 "(%s) *PRIVATE CALL START* STREAM ID: %s SUB: %s PEER: %s DST: %s, TS: %s, FORWARD: %s",
-                system_name, int_id(stream_id), int_id(rf_src), int_id(peer_id), int_id(dst_id), slot, self._pvt_targets,
+                system_name, int_id(stream_id), int_id(rf_src), int_id(peer_id), int_id(dst_id), slot, slot_st.get("PVT_TARGETS", ()),
             )
             # Unit data (ARS/LRRP/SMS) has no VTERM; PRIVATE VOICE START without END leaves
             # monitor timeslot chips stuck. UNIT DATA events cover lastheard instead.
@@ -1534,14 +1534,14 @@ class RoutingUseCases(
                         system_name, int_id(stream_id), int_id(peer_id), int_id(rf_src), slot, int_id(dst_id)
                     )
                 )
-                if self._pvt_same_system_dst_peer_id is not None:
+                if slot_st.get("PVT_SAME_SYSTEM_PEER") is not None:
                     self._send_routing_event(
                         "PRIVATE VOICE,START,TX,{},{},{},{},{},{},{}".format(
                             system_name, int_id(stream_id), int_id(peer_id), int_id(rf_src), slot, int_id(dst_id),
-                            int_id(self._pvt_same_system_dst_peer_id),
+                            int_id(slot_st.get("PVT_SAME_SYSTEM_PEER")),
                         )
                     )
-        for _target in getattr(self, "_pvt_targets", []):
+        for _target in slot_st.get("PVT_TARGETS", ()):
             target_proto = protocols.get(_target)
             if not target_proto:
                 continue
@@ -1549,7 +1549,7 @@ class RoutingUseCases(
             _target_system = systems_cfg.get(_target, {})
             _target_peer_id = None
             if _target_system.get("MODE") != "OPENBRIDGE":
-                _target_peer_id = getattr(self, "_pvt_target_peer_ids", {}).get(_target)
+                _target_peer_id = slot_st.get("PVT_TARGET_PEERS", {}).get(_target)
             if _target_system.get("MODE") == "OPENBRIDGE":
                 if _target_system.get("ENHANCED_OBP") and self._obp_session(_target).keepalive_stale(pkt_time):
                     continue
@@ -1668,10 +1668,10 @@ class RoutingUseCases(
                 obp_ber=data[53:54] if len(data) > 53 else b"\x00",
                 obp_rssi=data[54:55] if len(data) > 54 else b"\x00",
                 obp_source_rptr=b"\x00\x00\x00\x00",
-                forwarded=list(getattr(self, "_pvt_targets", [])),
+                forwarded=list(slot_st.get("PVT_TARGETS", ())),
             )
         if frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM and slot_st.get("RX_TYPE") != HBPF_SLT_VTERM:
-            self._pvt_targets = []
+            slot_st["PVT_TARGETS"] = []
             call_duration = pkt_time - slot_st.get("RX_START", pkt_time)
             logger.info(
                 "(%s) *PRIVATE CALL END*   STREAM ID: %s SUB: %s PEER: %s DST: %s, TS %s, Duration: %.2f",
@@ -1688,7 +1688,7 @@ class RoutingUseCases(
                     call_duration,
                 )
             )
-            _same_system_dst_peer_id = getattr(self, "_pvt_same_system_dst_peer_id", None)
+            _same_system_dst_peer_id = slot_st.get("PVT_SAME_SYSTEM_PEER")
             if _same_system_dst_peer_id is not None:
                 self._send_routing_event(
                     "PRIVATE VOICE,END,TX,{},{},{},{},{},{},{:.2f},{}".format(
@@ -1702,9 +1702,9 @@ class RoutingUseCases(
                         int_id(_same_system_dst_peer_id),
                     )
                 )
-            self._pvt_same_system_dst_peer_id = None
+            slot_st["PVT_SAME_SYSTEM_PEER"] = None
         if self._voice_plugin_bridge is not None and not _unit_data:
-            _pvt_fwd = list(getattr(self, "_pvt_targets", []))
+            _pvt_fwd = list(slot_st.get("PVT_TARGETS", ()))
             if _notify_pvt_start:
                 self._voice_plugin_bridge.notify_private_after_forward(
                     system_name=system_name,
