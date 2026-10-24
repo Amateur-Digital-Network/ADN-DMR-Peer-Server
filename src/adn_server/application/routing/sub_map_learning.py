@@ -65,6 +65,12 @@ def learn_sub_map(
     return True
 
 
+def sub_map_heard_at(config: dict[str, Any], rf_src: bytes) -> float | None:
+    sub_map = config.get("_SUB_MAP")
+    entry = sub_map.get(rf_src) if sub_map else None
+    return None if entry is None else entry[2]
+
+
 def sub_map_peer(config: dict[str, Any], rf_src: bytes, system_name: str) -> bytes | None:
     """The peer of ``system_name`` where ``rf_src`` was last heard; None when it was heard elsewhere or never."""
     sub_map = config.get("_SUB_MAP")
