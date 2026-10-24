@@ -638,3 +638,28 @@ def test_pvt_call_unit_data_not_sent_to_peer_receiving_voice() -> None:
 
     assert not proto.sent_to_peer
     assert_not_forwarded(scenario, "SYSTEM")
+
+
+@pytest.mark.behavior
+def test_unit_data_to_a_hotspot_is_a_full_55_byte_dmrd_frame() -> None:
+    """MMDVMHost/DMRGateway drop DMRD frames that are not 55 bytes: the BER/RSSI octets after
+    the burst must survive the rebuild, or the data never reaches the radio."""
+    dst_sub = 712345
+    src_peer = bytes_4(730039101)
+    dst_peer = bytes_4(730039102)
+    config = minimal_config(("MASTER-A", "MASTER-B"))
+    config["SYSTEMS"]["MASTER-A"]["REPEAT"] = False
+    config["_SUB_MAP"] = {bytes_3(dst_sub): ("MASTER-A", 2, 1000.0, dst_peer)}
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["MASTER-A"].STATUS[2] = idle_hbp_slot()
+    scenario.protocols["MASTER-A"]._peers[src_peer] = {}
+    scenario.protocols["MASTER-A"]._peers[dst_peer] = {}
+    base = PacketSpec(
+        call_type="unit", peer_id=730039101, dst_id=dst_sub, stream_id=0x52525258, slot=2,
+    )
+
+    scenario.inject_unit("MASTER-A", DeterministicScenario.unit_data_header_spec(base))
+
+    ((peer, pkt),) = scenario.protocols["MASTER-A"].sent_to_peer
+    assert peer == dst_peer
+    assert len(pkt) == 55

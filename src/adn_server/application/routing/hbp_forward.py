@@ -394,7 +394,9 @@ class HbpForwardMixin:
         but only on a single-peer MASTER: on a shared one (MAX_PEERS > 1) that broadcast
         keys every hotspot on the server and cuts whatever voice they are receiving.
         Returns whether the packet was sent."""
-        _tmp_data = b"".join([data[:15], tmp_bits.to_bytes(1, "big"), data[16:20], dmrpkt])
+        # MMDVMHost/DMRGateway drop DMRD frames shorter than 55 bytes.
+        _tail = data[53:55] if len(data) >= 55 else b"\x00\x00"
+        _tmp_data = b"".join([data[:15], tmp_bits.to_bytes(1, "big"), data[16:20], dmrpkt[:33], _tail])
         protocols = self._get_protocols() if self._get_protocols else {}
         proto = protocols.get(d_system)
         try:
