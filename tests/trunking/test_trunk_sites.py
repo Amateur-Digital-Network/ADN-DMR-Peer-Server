@@ -65,14 +65,23 @@ class _Link(SiteLink):
 
 
 class _Store(TrunkRegistrationStore):
+    """Records the writes; the file it reads keeps what it held, as while a write is on its way."""
+
     def __init__(self) -> None:
         self.saved: list[tuple[str, list[Registration]]] = []
+        self.on_disk: list[Registration] = []
+        self.loads = 0
+        self.failed = False
 
     def load(self, path: str) -> list[Registration]:
-        return []
+        self.loads += 1
+        return list(self.on_disk)
 
     def save(self, path: str, registrations: Iterable[Registration]) -> None:
         self.saved.append((path, sorted(registrations)))
+
+    def last_write_failed(self) -> bool:
+        return self.failed
 
 
 class _Stack:
@@ -254,6 +263,21 @@ def test_system_removed_drops_its_sites_and_pins() -> None:
     assert not site_tg_held(s.store, 214, "TRUNK") and site_tg_held(s.store, 214, "TRUNK-2")
 
 
+def test_the_file_is_read_once_and_later_systems_restore_what_was_last_saved() -> None:
+    """A system created after a save gets what that save holds, although the file may not show it yet."""
+    s = _Stack()
+    s.saved.on_disk = [Registration(MS, A, NOW), Registration(MS2, C, NOW)]
+    s.sites.system_added("TRUNK", NOW)
+    s.sites.system_added("TRUNK-2", NOW)
+    s.sites.system_removed("TRUNK-2", NOW)
+    s.sites.save()
+
+    s.sites.system_added("TRUNK-2", NOW + 1)
+
+    assert s.saved.loads == 1
+    assert s.registry.registrations() == [Registration(MS, A, NOW)]
+
+
 def test_persist_if_changed_writes_only_on_a_revision_change() -> None:
     """Registrations restored at startup are not written back; a change is written once; save() always writes."""
     registry = SiteRegistry()
@@ -268,3 +292,16 @@ def test_persist_if_changed_writes_only_on_a_revision_change() -> None:
 
     expected = [Registration(MS, B, NOW), Registration(MS3, A, NOW)]
     assert s.saved.saved == [(PATH, expected), (PATH, expected)]
+
+
+def test_a_write_the_store_could_not_finish_is_made_again_without_a_change() -> None:
+    """dmrtc does not register again after a reconnect: a failed write must not wait for the next change."""
+    s = _Stack()
+    s.register(A, MS)
+    assert s.sites.persist_if_changed() is True
+    s.saved.failed = True
+
+    assert s.sites.persist_if_changed() is True
+    s.saved.failed = False
+    assert s.sites.persist_if_changed() is False
+    assert len(s.saved.saved) == 2

@@ -19,16 +19,17 @@
 #   Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
 ###############################################################################
 
-"""Tier III registrations on disk: JSON, atomic writes, and a bad file never stops the server."""
+"""Tier III registrations on disk: JSON, atomic writes off the reactor, and a bad file never stops the server."""
 
 from __future__ import annotations
 
 import json
 import logging
 from pathlib import Path
-from typing import IO
+from typing import IO, Any
 
 import pytest
+from twisted.internet.defer import Deferred, maybeDeferred
 
 from adn_server.application.trunking.registry import Registration, Site, SiteRegistry
 from adn_server.infrastructure.persistence import trunk_registration_store as store_mod
@@ -40,10 +41,30 @@ T0 = 1_761_300_000.0
 SAVED = [Registration(2149999, B, T0 - 999.5), Registration(2141234, A, T0)]
 
 
+def _store() -> JsonTrunkRegistrationStore:
+    """A store whose \"thread\" runs each write at once."""
+    return JsonTrunkRegistrationStore(maybeDeferred)
+
+
+class _Worker:
+    """A thread that runs what it was handed only when the test says so."""
+
+    def __init__(self) -> None:
+        self.jobs: list[tuple[Any, tuple[Any, ...], Deferred]] = []
+
+    def __call__(self, f: Any, *args: Any) -> Deferred:
+        self.jobs.append((f, args, Deferred()))
+        return self.jobs[-1][2]
+
+    def run_next(self) -> None:
+        f, args, d = self.jobs.pop(0)
+        d.callback(f(*args))
+
+
 def test_saved_file_is_the_documented_json(tmp_path: Path) -> None:
     """A list sorted by radio id of [ms_id, system, peer_id as an integer, unix time]."""
     path = tmp_path / "trunk_registrations.json"
-    JsonTrunkRegistrationStore().save(str(path), SAVED)
+    _store().save(str(path), SAVED)
     assert json.loads(path.read_text(encoding="utf-8")) == [
         [2141234, "TRUNK", 214000101, T0],
         [2149999, "TRUNK", 214000102, T0 - 999.5],
@@ -52,7 +73,7 @@ def test_saved_file_is_the_documented_json(tmp_path: Path) -> None:
 
 def test_round_trip(tmp_path: Path) -> None:
     """What is saved loads back unchanged, and a missing file is no registrations."""
-    store = JsonTrunkRegistrationStore()
+    store = _store()
     path = str(tmp_path / "data" / "trunk_registrations.json")
     assert store.load(path) == []
     store.save(path, SAVED)
@@ -65,26 +86,28 @@ def test_restart_restores(tmp_path: Path) -> None:
     before = SiteRegistry()
     before.register(2141234, A, T0)
     before.register(2149999, B, T0 + 1)
-    JsonTrunkRegistrationStore().save(path, before.registrations())
+    _store().save(path, before.registrations())
     after = SiteRegistry()
-    after.restore(JsonTrunkRegistrationStore().load(path), frozenset({"TRUNK"}), T0 + 60)
+    after.restore(_store().load(path), frozenset({"TRUNK"}), T0 + 60)
     assert sorted(after.registrations()) == sorted(before.registrations())
 
 
 def test_an_atomic_replace_leaves_no_temp_file(tmp_path: Path) -> None:
     """Each save renames its temp file over the old one."""
     path = tmp_path / "trunk_registrations.json"
-    store = JsonTrunkRegistrationStore()
+    store = _store()
     store.save(str(path), SAVED)
     store.save(str(path), SAVED[:1])
     assert [p.name for p in tmp_path.iterdir()] == [path.name]
     assert store.load(str(path)) == SAVED[:1]
 
 
-def test_a_crash_mid_write_keeps_the_old_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """A write that dies half way leaves the previous registrations readable and no temp file behind."""
+def test_a_crash_mid_write_keeps_the_old_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A write that dies half way leaves the previous registrations readable and no temp file behind, and says so."""
     path = tmp_path / "trunk_registrations.json"
-    store = JsonTrunkRegistrationStore()
+    store = _store()
     store.save(str(path), SAVED)
 
     def _dies(rows: object, f: IO[str]) -> None:
@@ -92,11 +115,67 @@ def test_a_crash_mid_write_keeps_the_old_file(tmp_path: Path, monkeypatch: pytes
         raise OSError("disk full")
 
     monkeypatch.setattr(store_mod.json, "dump", _dies)
-    with pytest.raises(OSError):
+    with caplog.at_level(logging.WARNING, logger=store_mod.__name__):
         store.save(str(path), SAVED[:1])
     monkeypatch.undo()
     assert sorted(store.load(str(path))) == sorted(SAVED)
     assert [p.name for p in tmp_path.iterdir()] == [path.name]
+    assert "Cannot write Tier III registrations to file: disk full" in caplog.text
+
+
+def test_writes_run_in_the_worker_one_at_a_time_in_order(tmp_path: Path) -> None:
+    """Nothing is written on the calling thread; a second write waits for the first, so the newest list stays."""
+    path = tmp_path / "trunk_registrations.json"
+    worker = _Worker()
+    store = JsonTrunkRegistrationStore(worker)
+    registrations = list(SAVED)
+    store.save(str(path), registrations)
+    store.save(str(path), SAVED[:1])
+    registrations.clear()
+
+    assert not path.exists() and len(worker.jobs) == 1
+    worker.run_next()
+    assert sorted(store.load(str(path))) == sorted(SAVED) and len(worker.jobs) == 1
+    worker.run_next()
+    assert store.load(str(path)) == SAVED[:1]
+
+
+def test_written_fires_once_the_writes_asked_for_are_done(tmp_path: Path) -> None:
+    path = str(tmp_path / "trunk_registrations.json")
+    worker = _Worker()
+    store = JsonTrunkRegistrationStore(worker)
+    store.save(path, SAVED)
+    store.save(path, SAVED[:1])
+    written = store.written()
+
+    worker.run_next()
+    assert not written.called
+    worker.run_next()
+    assert written.called and store.load(path) == SAVED[:1]
+
+
+def test_a_failed_write_is_logged_and_the_next_one_still_runs(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    path = tmp_path / "trunk_registrations.json"
+    path.mkdir()
+    store = _store()
+    with caplog.at_level(logging.WARNING, logger=store_mod.__name__):
+        store.save(str(path), SAVED)
+    path.rmdir()
+    store.save(str(path), SAVED[:1])
+
+    assert "Cannot write Tier III registrations to file" in caplog.text
+    assert store.written().called and store.load(str(path)) == SAVED[:1]
+
+
+def test_the_store_tells_whether_its_last_write_failed(tmp_path: Path) -> None:
+    path = tmp_path / "trunk_registrations.json"
+    path.mkdir()
+    store = _store()
+    store.save(str(path), SAVED)
+    assert store.last_write_failed() is True
+    path.rmdir()
+    store.save(str(path), SAVED)
+    assert store.last_write_failed() is False
 
 
 @pytest.mark.parametrize("content", ["[[2141234, \"TRUNK\"", "{\"2141234\": 1}", "\xff\xfe", "null"])
@@ -107,7 +186,7 @@ def test_a_corrupt_file_gives_no_registrations_and_a_warning(
     path = tmp_path / "trunk_registrations.json"
     path.write_bytes(content.encode("latin-1"))
     with caplog.at_level(logging.WARNING, logger=store_mod.__name__):
-        assert JsonTrunkRegistrationStore().load(str(path)) == []
+        assert _store().load(str(path)) == []
     assert "starting without Tier III registrations" in caplog.text
 
 
@@ -129,5 +208,5 @@ def test_bad_entries_are_skipped(tmp_path: Path, caplog: pytest.LogCaptureFixtur
     ]
     path.write_text(json.dumps([good, *bad]), encoding="utf-8")
     with caplog.at_level(logging.DEBUG, logger=store_mod.__name__):
-        assert JsonTrunkRegistrationStore().load(str(path)) == [Registration(2141234, A, T0)]
+        assert _store().load(str(path)) == [Registration(2141234, A, T0)]
     assert f"{len(bad)} malformed registrations skipped" in caplog.text

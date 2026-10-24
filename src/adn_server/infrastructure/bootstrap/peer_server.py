@@ -26,7 +26,7 @@ import logging
 import os
 import signal
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from twisted.internet import reactor, threads
 from twisted.python.threadable import isInIOThread
@@ -65,6 +65,7 @@ from adn_server.application.runtime_context import (
 )
 from adn_server.application.subscription.echo_seed import seed_echo_routing_table
 from adn_server.application.subscription.store_sync import replace_store_from_routing_table
+from adn_server.application.trunking.config import system_is_trunking, trunk_systems
 from adn_server.domain import bytes_4
 from adn_server.domain.dmr.bptc import encode_emblc
 from adn_server.domain.mesh_session import mesh_sessions
@@ -113,6 +114,10 @@ from adn_server.infrastructure.twisted_adapters.udp_hbp import HBPProtocolFactor
 from adn_server.infrastructure.udp_rcvbuf import apply_udp_rcvbuf, udp_rcvbuf_bytes
 from adn_server.infrastructure.voice import DefaultVoiceProvider, StubVoiceProvider
 from adn_server.infrastructure.voice.recording import RecordingHandler
+
+if TYPE_CHECKING:
+    from adn_server.application.trunking.sites import TrunkSites
+    from adn_server.infrastructure.persistence.trunk_registration_store import JsonTrunkRegistrationStore
 
 
 class ReportSenderAdapter(ReportSender):
@@ -293,6 +298,9 @@ def run_peer_server(
     sub_map = sub_map_store.load(sub_map_path)
     config["_SUB_MAP"] = sub_map
     sub_map_saver = SubMapSaver(sub_map_store, sub_map_path, sub_map)
+    trunk_reg_path = os.path.join(
+        project_root, data_path, aliases_cfg.get("TRUNK_REG_FILE") or "trunk_registrations.json",
+    )
 
     # Generator: expand MASTER systems with GENERATOR > 1 into SYSTEM-0, SYSTEM-1, ... (legacy)
     _expand_generator(config, logger)
@@ -671,11 +679,81 @@ def run_peer_server(
         n = reopen_file_handlers()
         logger.info("(LOGGER) Reopened %s file log handler(s) after SIGUSR2", n)
 
+    trunk_sites: TrunkSites | None = None
+    trunk_registrations: JsonTrunkRegistrationStore | None = None
+    trunk_loops: list[Any] = []
+
+    def _trunk_tick() -> None:
+        trunk_sites.tick(time.time())
+
+    def _trunk_persist() -> None:
+        _trunk_save(only_if_changed=True)
+
+    def _trunk_save(only_if_changed: bool = False) -> Any:
+        if not only_if_changed:
+            trunk_sites.save()
+        elif not trunk_sites.persist_if_changed():
+            return None
+        logger.info("(TRUNK) Writing Tier III registrations to disk")
+        # As a shutdown trigger it hands this to the reactor, which stops once the write is done.
+        return trunk_registrations.written()
+
+    def _trunk_sites() -> TrunkSites:
+        nonlocal trunk_sites, trunk_registrations
+        # Loaded with the first TRUNKING system: a server without one keeps no Tier III code in memory.
+        from adn_server.application.trunking.sites import TICK_S
+        from adn_server.infrastructure.bootstrap.trunking import build_trunk_sites
+        from adn_server.infrastructure.persistence.trunk_registration_store import JsonTrunkRegistrationStore
+
+        if trunk_sites is None:
+            trunk_registrations = JsonTrunkRegistrationStore(threads.deferToThread)
+            trunk_sites = build_trunk_sites(
+                config, protocols, subscription_store, acl_router, routing_use_cases, reporting_use_cases,
+                trunk_reg_path, trunk_registrations,
+            )
+            reactor.addSystemEventTrigger("before", "shutdown", _trunk_save)
+        if not trunk_loops:
+            trunk_loops.extend((
+                start_loop(_trunk_tick, TICK_S, logger),
+                start_loop(_trunk_persist, 300, logger, now=False),
+            ))
+        return trunk_sites
+
+    def _follow_trunk_systems(result: Any, reloaded: dict[str, Any]) -> Any:
+        # Also after a failed reload: the protocols it created stay, built from this config.
+        trunking = trunk_systems(reloaded.get("SYSTEMS", {}))
+        routing_use_cases.set_concurrent_systems(trunking)
+        if not trunking and trunk_loops:
+            _trunk_persist()
+            for loop in trunk_loops:
+                loop.stop()
+            trunk_loops.clear()
+        return result
+
     def _create_hbp_protocol(system_name: str, system_config: dict[str, Any] | None = None) -> Any:
         # Reload passes the config it is building: a system added there is not in the live one yet.
+        cfg = config if system_config is None else system_config
+        if system_is_trunking(cfg.get("SYSTEMS", {}).get(system_name)):
+            from adn_server.infrastructure.twisted_adapters.udp_hbp_trunk import TrunkSiteProtocol
+
+            sites = _trunk_sites()
+            # Per system: a reload creates it before its config goes live.
+            sites.system_added(system_name, time.time())
+            return TrunkSiteProtocol(
+                system_name,
+                cfg,
+                report_sender,
+                sites=sites,
+                router=acl_router,
+                dmrd_received=routing_use_cases.dmrd_received,
+                get_user_password_callback=user_passwords_loader.get_user_password,
+                on_talker_alias_stream_end=routing_use_cases.clear_talker_alias_stream,
+                routing_table_for_report=routing_table_for_report,
+                get_subscription_store=lambda: subscription_store,
+            )
         return HBPProtocolFactory(
             system_name,
-            config if system_config is None else system_config,
+            cfg,
             report_sender,
             router=acl_router,
             dmrd_received=routing_use_cases.dmrd_received,
@@ -776,8 +854,16 @@ def run_peer_server(
         data_plugin_bridge.update_config(config)
         plugin_manager.rescan(config)
 
+    def _on_system_removed(system_name: str, protocol: Any) -> None:
+        routing_use_cases.flush_monitor_events_for_system(system_name, protocol)
+        if trunk_sites is not None:
+            trunk_sites.system_removed(system_name, time.time())
+
     def _do_config_reload() -> None:
         nonlocal report_mqtt, proxy_state, obp_proxy_state
+        # No TRUNKING system running: nothing was registered since the last write, so a system added reads that.
+        if trunk_loops:
+            _trunk_save()
         mqtt_before = mqtt_settings_from_config(config)
         new_config = prepare_reload_config(runtime_holder)
 
@@ -797,10 +883,10 @@ def run_peer_server(
             listen_udp=lambda n, b, p: _listen_system(n, b, p),
             stop_listener=_stop_udp_port,
             on_systems_changed=None,
-            on_system_removed=routing_use_cases.flush_monitor_events_for_system,
+            on_system_removed=_on_system_removed,
             should_bind_udp=_should_bind_udp,
             log=logger,
-        ).addCallbacks(_on_reload_done, _on_reload_failed)
+        ).addBoth(_follow_trunk_systems, new_config).addCallbacks(_on_reload_done, _on_reload_failed)
 
     def sighup_reload_config(_sig, _frame):
         """Reload adn-server.yaml (SYSTEMS, GLOBAL); keeps active streams on unchanged listeners."""
@@ -912,6 +998,7 @@ def run_peer_server(
             protocol,
         )
 
+    routing_use_cases.set_concurrent_systems(trunk_systems(config.get("SYSTEMS", {})))
     _wire_monitor_downlink_ctx(report_factory, protocols)
 
     def _purge_peer_dynamic_tgs(peer_id: bytes, system_name: str) -> bool:

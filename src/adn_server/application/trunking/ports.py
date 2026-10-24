@@ -43,3 +43,6 @@ class TrunkRegistrationStore(ABC):
 
     @abstractmethod
     def save(self, path: str, registrations: Iterable[Registration]) -> None: ...
+
+    @abstractmethod
+    def last_write_failed(self) -> bool: ...

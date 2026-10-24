@@ -53,6 +53,7 @@ from tests.support.dmrtc_wire import (
     site_dmrd,
 )
 from tests.support.hbp_repeat_stack import RecordingTransport
+from twisted.internet.defer import maybeDeferred
 
 from adn_server.application.reporting_use_cases import ReportingUseCases
 from adn_server.application.routing_use_cases import RoutingUseCases
@@ -66,6 +67,7 @@ from adn_server.infrastructure.acl_router import InMemoryAclRouter
 from adn_server.infrastructure.bootstrap.trunking import build_trunk_sites
 from adn_server.infrastructure.config_normalizer import ensure_system_runtime_config
 from adn_server.infrastructure.hbp_constants import RPTACK, RPTC, RPTK, RPTL, RPTO
+from adn_server.infrastructure.persistence.trunk_registration_store import JsonTrunkRegistrationStore
 from adn_server.infrastructure.subscription_store import InMemorySubscriptionStore
 from adn_server.infrastructure.talker_alias_emblc import default_ta_emblc_encoder
 from adn_server.infrastructure.twisted_adapters.udp_hbp import HBPProtocol, _calc_hash
@@ -190,9 +192,11 @@ class TrunkSiteStack:
             self.sites = None
             if trunk:
                 self.sites = build_trunk_sites(
-                    config, self.protocols, self.store, self.acl, self.routing, self.reporting, path, self.clock.time(),
+                    config, self.protocols, self.store, self.acl, self.routing, self.reporting, path,
+                    JsonTrunkRegistrationStore(maybeDeferred),
                 )
             for name in trunk:
+                self.sites.system_added(name, self.clock.time())
                 self._add(name, TrunkSiteProtocol(
                     name, config, None, sites=self.sites, router=self.acl,
                     dmrd_received=self.routing.dmrd_received,

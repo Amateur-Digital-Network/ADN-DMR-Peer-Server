@@ -23,6 +23,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Collection
 from typing import Any
 
@@ -31,8 +32,10 @@ from ...domain.trunking import derive_call_uuid, is_echo_tg
 from ..routing.sub_map_learning import forget_sub_map, learn_sub_map, sub_map_heard_at, sub_map_peer
 from .legs import SiteLegs
 from .ports import TrunkRegistrationStore
-from .registry import Site, SiteRegistry
+from .registry import Registration, Site, SiteRegistry
 from .signalling import DmrtSignalling
+
+logger = logging.getLogger(__name__)
 
 TICK_S = 10.0
 
@@ -54,8 +57,16 @@ class TrunkSites:
         self._store = store
         self._path = path
         self._saved = registry.revision
+        self._file: list[Registration] | None = None
 
     def dmrt_received(self, system: str, peer_id: bytes, payload: bytes, now: float) -> None:
+        # A reload that fails after binding a new TRUNKING system leaves it listening; its config never went live.
+        if system not in self._config["SYSTEMS"]:
+            logger.debug(
+                "(%s) DMRT from Tier III site %s ignored: the system is not in the running configuration",
+                system, int_id(peer_id),
+            )
+            return
         self._signalling.received(Site(system, peer_id), payload, now)
 
     def site_logged_in(self, system: str, peer_id: bytes) -> None:
@@ -70,6 +81,12 @@ class TrunkSites:
     def site_left(self, system: str, peer_id: bytes, now: float) -> None:
         """Release the talkgroups only this site held; its radios stay registered for when it comes back."""
         self._legs.release(system, self._registry.drop_site(Site(system, peer_id)), now)
+
+    def system_added(self, system: str, now: float) -> None:
+        if self._file is None:
+            # Once, and on the reactor: no site may log in before its radios are back. Later a write may be on its way.
+            self._file = self._store.load(self._path)
+        self._registry.restore(self._file, frozenset((system,)), now)
 
     def system_removed(self, system: str, now: float) -> None:
         released, dropped = self._registry.drop_system(system)
@@ -140,12 +157,14 @@ class TrunkSites:
         self._legs.ensure(self._registry.held(), now)
 
     def persist_if_changed(self) -> bool:
-        if self._registry.revision == self._saved:
+        # A write fails in the store's thread, after save() returned: make it again rather than wait for a change.
+        if self._registry.revision == self._saved and not self._store.last_write_failed():
             return False
         self.save()
         return True
 
     def save(self) -> None:
         revision = self._registry.revision
-        self._store.save(self._path, self._registry.registrations())
+        self._file = self._registry.registrations()
+        self._store.save(self._path, self._file)
         self._saved = revision

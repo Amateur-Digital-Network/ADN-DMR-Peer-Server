@@ -29,12 +29,11 @@ from typing import Any
 from adn_server.application.ports import AclRouter, SubscriptionStore
 from adn_server.application.reporting_use_cases import ReportingUseCases
 from adn_server.application.routing_use_cases import RoutingUseCases
-from adn_server.application.trunking.config import trunk_systems
 from adn_server.application.trunking.legs import SiteLegs
+from adn_server.application.trunking.ports import TrunkRegistrationStore
 from adn_server.application.trunking.registry import SiteRegistry
 from adn_server.application.trunking.signalling import DmrtSignalling
 from adn_server.application.trunking.sites import TrunkSites
-from adn_server.infrastructure.persistence.trunk_registration_store import JsonTrunkRegistrationStore
 from adn_server.infrastructure.twisted_adapters.udp_hbp_trunk import ProtocolSiteLink
 
 
@@ -46,12 +45,10 @@ def build_trunk_sites(
     routing: RoutingUseCases,
     reporting: ReportingUseCases,
     path: str,
-    now: float,
+    registrations: TrunkRegistrationStore,
 ) -> TrunkSites:
     """The Tier III services, built when the first TRUNKING system is created."""
     registry = SiteRegistry()
-    registrations = JsonTrunkRegistrationStore()
-    registry.restore(registrations.load(path), trunk_systems(config.get("SYSTEMS", {})), now)
     legs = SiteLegs(
         store,
         config,
