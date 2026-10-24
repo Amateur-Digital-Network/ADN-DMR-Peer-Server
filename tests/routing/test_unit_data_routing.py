@@ -512,10 +512,12 @@ def test_unit_data_not_sent_back_to_the_source_peer() -> None:
 
 @pytest.mark.behavior
 def test_unit_data_to_another_peer_of_the_same_system_is_delivered() -> None:
+    """Without REPEAT on the MASTER, routing is what delivers to its other hotspot."""
     dst_sub = 712345
     src_peer = bytes_4(730039101)
     dst_peer = bytes_4(730039102)
     config = minimal_config(("MASTER-A", "MASTER-B"))
+    config["SYSTEMS"]["MASTER-A"]["REPEAT"] = False
     config["_SUB_MAP"] = {bytes_3(dst_sub): ("MASTER-A", 2, 1000.0, dst_peer)}
     scenario = DeterministicScenario(config=config)
     scenario.protocols["MASTER-A"].STATUS[2] = idle_hbp_slot()
@@ -528,6 +530,29 @@ def test_unit_data_to_another_peer_of_the_same_system_is_delivered() -> None:
     scenario.inject_unit("MASTER-A", DeterministicScenario.unit_data_header_spec(base))
 
     assert [peer for peer, _pkt in scenario.protocols["MASTER-A"].sent_to_peer] == [dst_peer]
+
+
+@pytest.mark.behavior
+def test_unit_data_to_another_peer_of_the_same_repeat_master_is_not_sent_twice() -> None:
+    """With REPEAT on, the MASTER's local repeat already delivers to that hotspot: routing must not
+    send the frame a second time (duplicated blocks break unconfirmed SMS on the radio)."""
+    dst_sub = 712345
+    src_peer = bytes_4(730039101)
+    dst_peer = bytes_4(730039102)
+    config = minimal_config(("MASTER-A", "MASTER-B"))
+    config["SYSTEMS"]["MASTER-A"]["REPEAT"] = True
+    config["_SUB_MAP"] = {bytes_3(dst_sub): ("MASTER-A", 2, 1000.0, dst_peer)}
+    scenario = DeterministicScenario(config=config)
+    scenario.protocols["MASTER-A"].STATUS[2] = idle_hbp_slot()
+    scenario.protocols["MASTER-A"]._peers[src_peer] = {}
+    scenario.protocols["MASTER-A"]._peers[dst_peer] = {}
+    base = PacketSpec(
+        call_type="unit", peer_id=730039101, dst_id=dst_sub, stream_id=0x52525257, slot=2,
+    )
+
+    scenario.inject_unit("MASTER-A", DeterministicScenario.unit_data_header_spec(base))
+
+    assert not scenario.protocols["MASTER-A"].sent_to_peer
 
 
 @pytest.mark.behavior
