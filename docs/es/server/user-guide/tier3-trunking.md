@@ -156,6 +156,28 @@ En los ajustes de dmrtc:
 - **Loro (9990)**: cada emplazamiento oye solo la reproducción de sus propios usuarios, aunque dos emplazamientos lo usen a la vez.
 - El talker alias embebido en las tramas de voz llega a los emplazamientos, igual que a los hotspots.
 
+## EXPERIMENTAL: datos cortos, estado y establecimiento de llamada privada {#experimental-dmrt}
+
+El protocolo define también mensajes DMRT para datos cortos (UDT, `0x05`, y su aceptación, `0x06`), establecimiento, aceptación y rechazo de llamada privada (`0x07`–`0x09`) y estado (`0x0A`). El servidor los encamina **solo entre emplazamientos Tier III**, y son **EXPERIMENTALES**: todavía no tienen uso real.
+
+- **dmrtc hoy** (commit `8b51a34`) envía `0x05` cuando una radio manda un mensaje corto a un grupo o a una radio que no está en el emplazamiento, y construye `0x07`–`0x0A` pero nunca los envía. Su controlador (`processDMRNetworkMessage` en `controller.cpp`) exige el bit de red y después compara el opcode con `0x05` y `0x06`, así que ignora los `0x45` y `0x46` que reenvía el servidor: los mensajes cortos entre emplazamientos todavía no llegan a RF.
+- **El origen tiene que ser real.** La radio de origen debe estar registrada en el emplazamiento que envía, y `SUB_ACL` (de `GLOBAL` y del sistema, cada una si su `USE_ACL` está activo) debe permitirla. Todo lo demás se descarta y se registra, una vez por minuto por emplazamiento, opcode y radio.
+- **Los mensajes de grupo siguen los bridges**, como la voz: los demás emplazamientos del sistema del remitente suscritos al talkgroup (si `REPEAT` está activo), y los emplazamientos suscritos de otro sistema TRUNKING solo si el bridge del talkgroup tiene piernas activas para los dos sistemas en ese mismo talkgroup.
+- **Los mensajes privados** van al emplazamiento donde está registrada la radio destino, si está conectado.
+- **Respuestas.** Una aceptación o un rechazo vuelve al remitente solo si llega, en menos de 60 s, de un emplazamiento al que se envió el mensaje. En ese plazo ningún otro emplazamiento puede reutilizar el UUID del mensaje. Un establecimiento de llamada que ningún otro emplazamiento conectado puede atender se responde con un rechazo (`0x49`).
+- No hay conversión entre los datos cortos de DMRT y las tramas de datos DMR (SMS) que envían los hotspots.
+
+Líneas que verás:
+
+```text
+(TRUNK) EXPERIMENTAL DMRT 0x05 from site 214901, SUB 2141234 to 2145678: forwarded to ['TRUNK/214902']
+(TRUNK) EXPERIMENTAL DMRT 0x06 from site 214902 returned to TRUNK/214901
+(TRUNK) EXPERIMENTAL DMRT 0x05 from site 214901: SUB 2149999 not registered there or denied by SUB_ACL, dropped
+(TRUNK) EXPERIMENTAL DMRT call setup from site 214901, SUB 2141234 to 2149999: not at another site, rejected
+```
+
+Formato en el cable: [Protocolo Tier III](../protocols/tier3.md#dmrt).
+
 ## Limitaciones {#limitations}
 
 - **Las llamadas simultáneas de un emplazamiento vistas desde otros sistemas.** La regla de oro, el control de bucle y el loop guard de los otros sistemas leen la última llamada por bit de slot, como en un MASTER compartido por varios hotspots. Un hotspot que pulse un talkgroup que usa una de varias llamadas simultáneas de un emplazamiento puede no quedar bloqueado.
@@ -167,6 +189,7 @@ En los ajustes de dmrtc:
 - **Longitudes estrictas.** La trama de voz de un emplazamiento debe medir exactamente 71 bytes y `DTCC` exactamente 302 (304 en 23 cm, donde las dos frecuencias ocupan diez dígitos). Los formatos siguen a DMRGateway (commit `ee79d38`) y dmrtc (commit `8b51a34`); un cliente que envíe otras longitudes no se entiende.
 - **Los datos unitarios hacia un ID sin entrada en `SUB_MAP`** pueden coincidir con el ID de un emplazamiento por sus primeras 6 o 7 cifras y enviarse a ese emplazamiento, como pasa con un hotspot (comportamiento existente).
 - **Las sondas de estado del servidor** (`RPTL` con ID 4294967295) se rechazan en un sistema TRUNKING. Apúntalas a otro MASTER.
+- **Los datos cortos, el estado y el establecimiento de llamada privada** entre emplazamientos son EXPERIMENTALES (ver [más arriba](#experimental-dmrt)).
 
 ## Logs que verás {#logs}
 
@@ -198,6 +221,7 @@ Los mensajes DMRT mal formados o no tratados, `DTCG` y las tramas de longitud in
 | `refused [...]` tras `subscribed` | Un talkgroup de la lista de [Limitaciones](#limitations): reservado, denegado por la ACL de un slot, o por encima de 512. |
 | Las llamadas privadas a una radio de un emplazamiento no llegan | *Send network registrations* está desactivado y la radio no ha transmitido, o su registro caducó. Busca `registered [...]` con su ID. |
 | Los emplazamientos de un mismo sistema no se oyen | `REPEAT: false` en el sistema TRUNKING. |
+| Los mensajes cortos entre emplazamientos nunca aparecen en las radios | dmrtc todavía no atiende `0x45` (ver [EXPERIMENTAL](#experimental-dmrt)). El log del servidor muestra si reenvió el mensaje. |
 
 ## Ver también
 

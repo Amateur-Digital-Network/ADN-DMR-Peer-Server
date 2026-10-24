@@ -6,7 +6,7 @@ El servidor habla el **protocolo Homebrew DMR trunking v0.6**, tal como lo imple
 
 1. todos los comandos de login y keepalive cambian de nombre (`DTC*`);
 2. las tramas `DMRD` llevan un **UUID de llamada** de 16 bytes (71 bytes);
-3. un mensaje nuevo, **`DMRT`**, lleva la señalización: registros de radios y suscripciones a talkgroups.
+3. un mensaje nuevo, **`DMRT`**, lleva la señalización: registros de radios y suscripciones a talkgroups y, de forma EXPERIMENTAL, datos cortos, estado y establecimiento de llamada privada.
 
 Configuración y comportamiento para operadores: [Trunking DMR Tier III](../user-guide/tier3-trunking.md). Los formatos de bytes siguen a DMRGateway `DMRNetwork.cpp` (commit `ee79d38`) y dmrtc `networksignalling.cpp` / `controller.cpp` (commit `8b51a34`).
 
@@ -82,10 +82,22 @@ Un emplazamiento nunca recibe de vuelta sus propias tramas, y los datos unitario
 | `0x42` | Baja desde la red | 14 + 3n | como `0x01` | Enviado como respuesta a `0x02`, y al emplazamiento anterior cuando una radio cambia de emplazamiento. |
 | `0x03` | Suscripción a grupo | 6 + 3n (n = 1..64) | [5] n, [6…] TG | Admitido. Cada TG se acepta salvo que esté reservado, que la ACL de TG de alguno de los slots lo deniegue o que el emplazamiento tenga ya 512. Respuesta: `0x43` con cada TG, `0` para cada uno rechazado. |
 | `0x04` | Baja de grupo | 6 + 3n | como `0x03` | Admitido. Respuesta: `0x44` repitiendo todos los TG. |
-| `0x05`–`0x0A` | UDT, aceptación de UDT, establecimiento / aceptación / rechazo de llamada privada, estado | | | Se ignoran. |
+| `0x05` | Transferencia UDT | 29 + tamaño (tamaño ≤ 46) | [5–20] UUID, [21] tipo (0x80 grupo, 0x40 privado, nibble bajo formato), [22] tamaño, [23–25] origen, [26–28] destino, [29…] carga | EXPERIMENTAL. Se reenvía como `0x45`. |
+| `0x06` | Aceptación de UDT | 27 | [5–20] UUID, [21–23] origen, [24–26] destino | EXPERIMENTAL. Se reenvía como `0x46` al emplazamiento que envió el UDT. |
+| `0x07` | Establecimiento de llamada privada | 28 | [5–20] UUID, [21] opciones de servicio, [22–24] origen, [25–27] destino | EXPERIMENTAL. Se reenvía como `0x47`, o se responde con `0x49` si ningún otro emplazamiento conectado tiene la radio llamada. |
+| `0x08` / `0x09` | Aceptación / rechazo de llamada privada | 27 | como `0x06` | EXPERIMENTAL. Se reenvía como `0x48` / `0x49` al emplazamiento de quien llama. |
+| `0x0A` | Transferencia de estado | 28 | [5–20] UUID, [21] 0x80 grupo + estado de 7 bits, [22–24] origen, [25–27] destino | EXPERIMENTAL. Se reenvía como `0x4A`, encaminado como un UDT; no se sigue ninguna respuesta. |
 | `0x40` activo, `0x80` y superiores | Desde la red; locales del emplazamiento | | | Se ignoran. |
 
 La longitud debe ser exactamente la que construye dmrtc. Un mensaje mal formado o ignorado se registra en `DEBUG` una vez por minuto por emplazamiento y opcode.
+
+**Mensajes EXPERIMENTALES** (`0x05`–`0x0A`), solo entre emplazamientos Tier III:
+
+- `0x05`, `0x07` y `0x0A` solo se aceptan si la radio de origen está registrada en el emplazamiento que envía y `SUB_ACL` la permite; si no, se descartan y se registran en `INFO`, una vez por minuto por emplazamiento, opcode y radio.
+- Un mensaje de grupo (bit `0x80` del byte 21) va a los demás emplazamientos del sistema del remitente suscritos al TG si `REPEAT` está activo, y a los emplazamientos suscritos de cada sistema TRUNKING al que llegan las piernas activas del bridge del TG desde el sistema del remitente con el mismo TG (`SubscriptionRouter`, como la voz). Uno privado va al emplazamiento de la radio destino si está conectado.
+- Un mensaje reenviado son los bytes del emplazamiento con `0x40` añadido al opcode. Nunca vuelve al remitente.
+- El UUID de un `0x05` o un `0x07` se guarda 60 s con su origen y sus destinos; un `0x06`, `0x08` o `0x09` se reenvía al origen solo si lo envía uno de esos destinos en ese plazo. Mientras se guarda, un `0x05` o `0x07` con el mismo UUID desde otro emplazamiento se ignora (se registra en `DEBUG`), así que un destino no puede quedarse con las respuestas. Se guardan como mucho 128 por emplazamiento y 1024 en total; pasado ese límite, el `0x05` de un emplazamiento se descarta y su `0x07` se responde con `0x49`, y se registra en `INFO` una vez por minuto por emplazamiento y opcode.
+- dmrtc (commit `8b51a34`) envía `0x05` y construye `0x07`–`0x0A` sin enviarlos. Compara un opcode de red con `0x05` y `0x06` tras comprobar el bit `0x40`, así que ignora `0x45` y `0x46`.
 
 ## Estado
 
@@ -94,6 +106,7 @@ La longitud debe ser exactamente la que construye dmrtc. Un mensaje mal formado 
 | Registro (un emplazamiento por radio, en todos los sistemas TRUNKING) | 24 h, que vuelven a empezar con un registro nuevo o con el tráfico de la radio en su emplazamiento; hasta la baja, el cambio de emplazamiento o que se quite el sistema. Se guarda en `ALIASES.TRUNK_REG_FILE`. |
 | Talkgroups por emplazamiento | Hasta la baja del grupo o que el emplazamiento se vaya |
 | UUID de llamada | 300 s |
+| UUID de UDT y de establecimiento de llamada EXPERIMENTALES | 60 s; como mucho 128 por emplazamiento y 1024 en total |
 | Quién pulsó el loro, por sistema, TG y usuario | 185 s tras la última pasada del usuario |
 | Estado de recepción por stream de un emplazamiento | 60 s tras su última trama |
 

@@ -156,6 +156,28 @@ In the dmrtc settings:
 - **Parrot (9990)**: each site hears only the playback of its own callers, even when two sites use it at once.
 - Talker alias embedded in the voice frames reaches sites, as it reaches hotspots.
 
+## EXPERIMENTAL: short data, status and private-call setup {#experimental-dmrt}
+
+The protocol also defines DMRT messages for short data (UDT, `0x05`, and its accept, `0x06`), private-call setup, accept and reject (`0x07`–`0x09`) and status (`0x0A`). The server routes them **between Tier III sites only**, and they are **EXPERIMENTAL**: they have no field use yet.
+
+- **dmrtc today** (commit `8b51a34`) sends `0x05` when a radio sends a short message to a group or to a radio that is not at the site, and builds but never sends `0x07`–`0x0A`. Its controller (`processDMRNetworkMessage` in `controller.cpp`) requires the network bit and then compares the opcode with `0x05` and `0x06`, so it ignores the `0x45` and `0x46` the server forwards: short messages between sites do not reach RF yet.
+- **The source must be real.** The source radio must be registered at the sending site, and `SUB_ACL` (`GLOBAL` and the system, each when its `USE_ACL` is on) must permit it. Anything else is dropped and logged, once a minute per site, opcode and radio.
+- **Group messages follow the bridges**, as voice does: the other sites of the sender's system that subscribed the talkgroup (when `REPEAT` is on), and the subscribed sites of another TRUNKING system only when the talkgroup's bridge has active legs for both systems on that same talkgroup.
+- **Private messages** go to the site where the destination radio is registered, if it is connected.
+- **Answers.** An accept or reject goes back to the sender only when it comes, within 60 s, from a site the message was sent to. In that time no other site can reuse the message's UUID. A call setup that no other connected site can take is answered with a reject (`0x49`).
+- There is no conversion between DMRT short data and the DMR data frames (SMS) hotspots send.
+
+Lines to expect:
+
+```text
+(TRUNK) EXPERIMENTAL DMRT 0x05 from site 214901, SUB 2141234 to 2145678: forwarded to ['TRUNK/214902']
+(TRUNK) EXPERIMENTAL DMRT 0x06 from site 214902 returned to TRUNK/214901
+(TRUNK) EXPERIMENTAL DMRT 0x05 from site 214901: SUB 2149999 not registered there or denied by SUB_ACL, dropped
+(TRUNK) EXPERIMENTAL DMRT call setup from site 214901, SUB 2141234 to 2149999: not at another site, rejected
+```
+
+Wire format: [Tier III protocol](../protocols/tier3.md#dmrt).
+
 ## Limitations {#limitations}
 
 - **Concurrent site calls as other systems see them.** The golden rule, loop control and the loop guard of other systems read the latest call per slot bit, as for a MASTER shared by several hotspots. A hotspot keying a talkgroup that one of several concurrent site calls uses may not be held off.
@@ -167,6 +189,7 @@ In the dmrtc settings:
 - **Strict lengths.** A site's voice frame must be exactly 71 bytes and `DTCC` exactly 302 (304 on 23 cm, where both frequencies take ten digits). The byte layouts follow DMRGateway (commit `ee79d38`) and dmrtc (commit `8b51a34`); a client that sends other lengths is not understood.
 - **Unit data to an ID with no `SUB_MAP` entry** can match a site's ID by its first 6 or 7 digits and be sent to that site, as it is to a hotspot (existing behaviour).
 - **Server status probes** (`RPTL` with ID 4294967295) are refused on a TRUNKING system. Point them at another MASTER.
+- **Short data, status and private-call setup** between sites are EXPERIMENTAL (see [above](#experimental-dmrt)).
 
 ## Logs to expect {#logs}
 
@@ -198,6 +221,7 @@ Malformed or unhandled DMRT messages, `DTCG`, and frames of the wrong length are
 | `refused [...]` after `subscribed` | A talkgroup from the list in [Limitations](#limitations): reserved, denied by one slot's ACL, or over 512. |
 | Private calls to a radio at a site are not delivered | *Send network registrations* is off and the radio has not transmitted, or its registration expired. Look for `registered [...]` with its ID. |
 | Sites of the same system do not hear each other | `REPEAT: false` on the TRUNKING system. |
+| Short messages between sites never show on the radios | dmrtc does not act on `0x45` yet (see [EXPERIMENTAL](#experimental-dmrt)). The server log shows whether it forwarded the message. |
 
 ## See also
 

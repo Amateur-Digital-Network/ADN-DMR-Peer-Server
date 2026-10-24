@@ -6,7 +6,7 @@ The server speaks the **Homebrew DMR trunking protocol v0.6**, as implemented by
 
 1. every login and keepalive command is renamed (`DTC*`);
 2. `DMRD` frames carry a 16-byte **call UUID** (71 bytes);
-3. a new **`DMRT`** message carries signalling: radio registrations and talkgroup subscriptions.
+3. a new **`DMRT`** message carries signalling: radio registrations and talkgroup subscriptions, and (EXPERIMENTAL) short data, status and private-call setup.
 
 Setup and behaviour for operators: [DMR Tier III trunking](../user-guide/tier3-trunking.md). The byte layouts below follow DMRGateway `DMRNetwork.cpp` (commit `ee79d38`) and dmrtc `networksignalling.cpp` / `controller.cpp` (commit `8b51a34`).
 
@@ -82,10 +82,22 @@ A site never gets its own frames back, and unit data reaches a site once even wh
 | `0x42` | De-registration from the network | 14 + 3n | as `0x01` | Sent as the answer to `0x02`, and to the old site when a radio roams. |
 | `0x03` | Group subscription | 6 + 3n (n = 1..64) | [5] n, [6…] TGs | Supported. Each TG is accepted unless it is reserved, a TG ACL of either slot denies it, or the site holds 512. Answer: `0x43` with each TG, `0` for each refused one. |
 | `0x04` | Group un-subscription | 6 + 3n | as `0x03` | Supported. Answer: `0x44` echoing every TG. |
-| `0x05`–`0x0A` | UDT, UDT accept, private call setup / accept / reject, status | | | Ignored. |
+| `0x05` | UDT transfer | 29 + size (size ≤ 46) | [5–20] UUID, [21] type (0x80 group, 0x40 private, low nibble format), [22] size, [23–25] source, [26–28] destination, [29…] payload | EXPERIMENTAL. Forwarded as `0x45`. |
+| `0x06` | UDT accept | 27 | [5–20] UUID, [21–23] source, [24–26] destination | EXPERIMENTAL. Forwarded as `0x46` to the site that sent the UDT. |
+| `0x07` | Private call setup | 28 | [5–20] UUID, [21] service options, [22–24] source, [25–27] destination | EXPERIMENTAL. Forwarded as `0x47`, or answered with `0x49` when no other connected site holds the called radio. |
+| `0x08` / `0x09` | Private call accept / reject | 27 | as `0x06` | EXPERIMENTAL. Forwarded as `0x48` / `0x49` to the caller's site. |
+| `0x0A` | Status transfer | 28 | [5–20] UUID, [21] 0x80 group + 7-bit status, [22–24] source, [25–27] destination | EXPERIMENTAL. Forwarded as `0x4A`, routed like a UDT; no answer is tracked. |
 | `0x40` set, `0x80` and above | From the network; local to the site | | | Ignored. |
 
 The length must be exactly what dmrtc builds. A malformed or ignored message is logged at `DEBUG` once a minute per site and opcode.
+
+**EXPERIMENTAL messages** (`0x05`–`0x0A`) travel only between Tier III sites:
+
+- `0x05`, `0x07` and `0x0A` are accepted only when the source radio is registered at the sending site and `SUB_ACL` permits it; otherwise they are dropped and logged at `INFO`, once a minute per site, opcode and radio.
+- A group message (bit `0x80` of byte 21) goes to the other sites of the sender's system subscribed to the TG when `REPEAT` is on, and to the subscribed sites of each TRUNKING system that the TG's active bridge legs reach from the sender's system on the same TG (`SubscriptionRouter`, as for voice). A private one goes to the destination radio's site when it is connected.
+- A forwarded message is the site's bytes with `0x40` added to the opcode. It never goes back to the sender.
+- The UUID of a `0x05` or `0x07` is kept 60 s with its origin and targets; a `0x06`, `0x08` or `0x09` is forwarded to the origin only when one of those targets sends it in that time. While it is kept, a `0x05` or `0x07` with the same UUID from another site is ignored (logged at `DEBUG`), so a target cannot take over the answers. At most 128 are kept per site and 1024 in all; past that a site's `0x05` is dropped and its `0x07` is answered with `0x49`, logged at `INFO` once a minute per site and opcode.
+- dmrtc (commit `8b51a34`) sends `0x05` and builds `0x07`–`0x0A` without sending them. It compares a network opcode with `0x05` and `0x06` after checking the `0x40` bit, so it ignores `0x45` and `0x46`.
 
 ## State
 
@@ -94,6 +106,7 @@ The length must be exactly what dmrtc builds. A malformed or ignored message is 
 | Registration (one site per radio, across all TRUNKING systems) | 24 h, restarted by a new registration or by the radio's traffic at its site; until de-registration, roaming, or the system's removal. Saved to `ALIASES.TRUNK_REG_FILE`. |
 | Talkgroups per site | Until un-subscription or the site leaves |
 | Call UUIDs | 300 s |
+| EXPERIMENTAL UDT and call setup UUIDs | 60 s; at most 128 per site and 1024 in all |
 | Parrot keyer per system, TG and caller | 185 s after the caller's last over |
 | Receive state per site stream | 60 s after its last frame |
 
