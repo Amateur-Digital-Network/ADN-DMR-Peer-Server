@@ -363,7 +363,8 @@ class RoutingTimerMixin:
                     for sid, leg in list(tx_streams.items()):
                         if not isinstance(leg, dict):
                             continue
-                        if leg.get("TX_TYPE") != HBPF_SLT_VTERM and leg.get("TX_TIME", 0) < now - 5:
+                        # A terminator pops its leg; TX_TYPE cannot tell, voice burst C has its vseq.
+                        if leg.get("TX_TIME", 0) < now - 5:
                             logger.debug(
                                 "(%s) *TIME OUT*  TX STREAM ID: %s SUB: %s TGID %s, TS %s, Duration: %.2f",
                                 system_name, int_id(sid), int_id(leg.get("TX_RFS", b"")),
