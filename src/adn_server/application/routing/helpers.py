@@ -71,6 +71,17 @@ SIMPLEX_VOICE_SLOT = 2
 SEQ_RESYNC_SILENCE_S = 1.0
 
 
+def loss_percent(st: dict[str, Any]) -> float:
+    """Frames a sequence jump skipped, as a share of the frames the stream should have had.
+
+    Repeated, late and out-of-order frames are counted apart (``dropped``): they arrived, and
+    a late one was already counted as missing by the jump it fell into.
+    """
+    lost = st.get("loss", 0)
+    expected = st.get("packets", 0) - st.get("dropped", 0) + lost
+    return (lost / expected) * 100 if expected > 0 else 0.0
+
+
 def seq_advance(last_seq: Any, seq: int, silence: float = 0.0, *, terminator: bool = False) -> int:
     """Steps from ``last_seq`` to ``seq`` on the 8-bit HBP/OBP sequence, which wraps 255 -> 0.
 

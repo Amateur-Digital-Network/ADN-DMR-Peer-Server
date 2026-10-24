@@ -60,6 +60,7 @@ from .routing.helpers import (
     inject_only_defer_obp_hbp_slot_contention,
     is_private_subscriber_dst,
     is_unit_data_ingress,
+    loss_percent,
     master_slot_holds_server_broadcast,
     obp_clear_deferred_bridge_tx_leg,
     obp_deferred_bridge_tx_leg,
@@ -1029,7 +1030,7 @@ class RoutingUseCases(
                 _end_t = time.time()
                 call_duration = _end_t - ost.get("START", _end_t)
                 packet_rate = (ost.get("packets", 0) / call_duration) if call_duration else 0.0
-                loss_pct = ((ost.get("loss", 0) / ost["packets"]) * 100) if ost.get("packets") else 0.0
+                loss_pct = loss_percent(ost)
                 logger.info(
                     "(%s) *CALL END*   STREAM ID: %s SUB: %s PEER: %s TGID %s, TS %s, Duration: %.2f, Packet rate: %.2f/s, Loss: %.2f%%, Max gap: %.2fs",
                     system_name,
