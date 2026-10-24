@@ -363,7 +363,7 @@ class RoutingTimerMixin:
                     for sid, leg in list(tx_streams.items()):
                         if not isinstance(leg, dict):
                             continue
-                        # A terminator pops its leg; TX_TYPE cannot tell, voice burst C has its vseq.
+                        # A terminator pops its leg, so a leg still here lost its terminator.
                         if leg.get("TX_TIME", 0) < now - 5:
                             logger.debug(
                                 "(%s) *TIME OUT*  TX STREAM ID: %s SUB: %s TGID %s, TS %s, Duration: %.2f",

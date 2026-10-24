@@ -39,6 +39,16 @@ HBPF_DATA_SYNC = 0x2
 HBPF_SLT_VHEAD = 0x1
 HBPF_SLT_VTERM = 0x2
 
+# RX_TYPE/TX_TYPE of a voice burst: kept clear of the data types, because voice
+# burst C carries vseq 2, the same number as HBPF_SLT_VTERM.
+SLOT_TYPE_VOICE = 0x10
+
+
+def slot_frame_type(frame_type: int, dtype_vseq: int) -> int:
+    """RX_TYPE/TX_TYPE to record for a frame: only a terminator reads as HBPF_SLT_VTERM."""
+    return dtype_vseq if frame_type == HBPF_DATA_SYNC else SLOT_TYPE_VOICE | dtype_vseq
+
+
 # Protocol version
 VER = 5
 PROTO_VER = 5

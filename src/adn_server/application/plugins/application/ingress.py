@@ -27,7 +27,7 @@ import math
 import time
 from typing import Any, Callable
 
-from ....domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, int_id
+from ....domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, int_id, slot_frame_type
 from ....domain.dmr import decode
 from ....domain.dmr.const import LC_OPT
 from ....domain.hbp_protocol import STREAM_TO
@@ -235,7 +235,7 @@ def _record_rx(slot: dict[str, Any], header: Any, pkt: bytes, peer_id: bytes, no
     slot["RX_PEER"] = peer_id
     slot["RX_SEQ"] = header.seq
     slot["RX_RFS"] = header.rf_src
-    slot["RX_TYPE"] = header.dtype_vseq
+    slot["RX_TYPE"] = slot_frame_type(header.frame_type, header.dtype_vseq)
     slot["RX_TGID"] = header.dst_id
     slot["RX_TIME"] = now
     slot["RX_STREAM_ID"] = header.stream_id

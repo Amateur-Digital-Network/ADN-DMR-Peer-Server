@@ -47,6 +47,7 @@ from ..domain import (
     bytes_3,
     bytes_4,
     int_id,
+    slot_frame_type,
 )
 from ..domain.dmr import bptc
 from ..domain.mesh_session import ObpBridgeSession, obp_session
@@ -940,11 +941,11 @@ class RoutingUseCases(
                         )
                     if _obp_deferred_bridge and _bridge_tx_leg is not None:
                         obp_sync_flat_bridge_tx_times(
-                            _ts_st, _bridge_tx_leg, stream_id, pkt_time, dtype_vseq,
+                            _ts_st, _bridge_tx_leg, stream_id, pkt_time, slot_frame_type(frame_type, dtype_vseq),
                         )
                     else:
                         _ts_st["TX_TIME"] = pkt_time
-                        _ts_st["TX_TYPE"] = dtype_vseq
+                        _ts_st["TX_TYPE"] = slot_frame_type(frame_type, dtype_vseq)
                     # Slot bit rewrite (legacy bridge.py 457-460 / 770-773)
                     _src_entry_ts = slot
                     if _src_entry_ts != entry_ts:
@@ -1639,7 +1640,7 @@ class RoutingUseCases(
                                 )
                             )
                 ts_st["TX_TIME"] = pkt_time
-                ts_st["TX_TYPE"] = dtype_vseq
+                ts_st["TX_TYPE"] = slot_frame_type(frame_type, dtype_vseq)
                 send_data = data
             try:
                 if _target_peer_id is not None and target_proto is not None and _target_peer_id in getattr(target_proto, "_peers", {}):
@@ -1763,7 +1764,7 @@ class RoutingUseCases(
                 slot_st["RX_PEER"] = peer_id
                 slot_st["RX_SEQ"] = seq
                 slot_st["RX_RFS"] = rf_src
-                slot_st["RX_TYPE"] = dtype_vseq
+                slot_st["RX_TYPE"] = slot_frame_type(frame_type, dtype_vseq)
                 slot_st["RX_TGID"] = dst_id
                 slot_st["RX_TIME"] = pkt_time
                 slot_st["RX_STREAM_ID"] = stream_id
