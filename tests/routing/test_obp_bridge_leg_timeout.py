@@ -1,5 +1,6 @@
 # ADN DMR Peer Server - tests routing OBP bridge TX leg timeout
 #
+# Copyright (C) 2026  Rodrigo Pérez, CE5RPY <ce5rpy@qmd.cl>
 # Copyright (C) 2026  Joaquin Madrid Belando, EA5GVK <ea5gvk@gmail.com>
 #
 ###############################################################################
