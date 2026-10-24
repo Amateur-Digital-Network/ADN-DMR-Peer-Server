@@ -30,6 +30,7 @@ from typing import Any, Callable
 from twisted.internet import defer
 
 from adn_server.application.proxy.deployment import normalize_obp_proxy_targets, normalize_proxy_target
+from adn_server.application.trunking.config import system_is_trunking
 
 from ..domain.errors import ConfigError
 from .config_loader import YamlConfigLoader
@@ -240,6 +241,12 @@ def reload_server_config(
     new_enabled = set(enabled_systems(new_systems))
     collapse_renames = _generator_collapse_renames(old_systems, new_systems, old_enabled)
     mapped_old_enabled = {_effective_old_key(name, collapse_renames) for name in old_enabled}
+    # Sites log in with DTC*, hotspots with RPT*: a system's peers cannot stay across a flip.
+    flipped = {
+        name for name in new_enabled & mapped_old_enabled
+        if system_is_trunking(old_systems[_old_instance_for_new(name, collapse_renames)])
+        != system_is_trunking(new_systems[name])
+    }
 
     added: list[str] = []
     removed: list[str] = []
@@ -260,7 +267,8 @@ def reload_server_config(
             transports[new_key] = transports.pop(old_key)
 
     for old_name in sorted(old_enabled):
-        if _effective_old_key(old_name, collapse_renames) in new_enabled:
+        new_name = _effective_old_key(old_name, collapse_renames)
+        if new_name in new_enabled and new_name not in flipped:
             continue
         port = transports.pop(old_name, None)
         proto = protocols.pop(old_name, None)
@@ -276,8 +284,13 @@ def reload_server_config(
         removed.append(old_name)
         log.info("(CONFIG-RELOAD) removed system %s", old_name)
 
-    for name in sorted(new_enabled - mapped_old_enabled):
+    for name in sorted((new_enabled - mapped_old_enabled) | flipped):
         sys_cfg = copy.deepcopy(new_systems[name])
+        if name in flipped:
+            log.info("(CONFIG-RELOAD) %s TRUNKING changed: protocol recreated, peers dropped", name)
+            if sys_cfg.get("MODE") == "MASTER":
+                # BRIDGERESET clears the legs of the system's previous role.
+                sys_cfg["_reset"] = True
         config.setdefault("SYSTEMS", {})[name] = sys_cfg
         proto = create_protocol(name, config)
         protocols[name] = proto
@@ -288,7 +301,7 @@ def reload_server_config(
             log.info("(CONFIG-RELOAD) added inject-only system %s", name)
         added.append(name)
 
-    for name in sorted(new_enabled & mapped_old_enabled):
+    for name in sorted((new_enabled & mapped_old_enabled) - flipped):
         old_key = _old_instance_for_new(name, collapse_renames)
         old_cfg = old_systems[old_key]
         new_cfg = new_systems[name]
