@@ -66,6 +66,61 @@ def csum5(_data):
     return csum
 
 
+
+# Packet data CRCs (ETSI TS 102 361-1 B.3), checked against MOTOTRBO, Hytera and BrandMeister captures.
+_MASK_DATA_HEADER = 0xCCCC
+_MASK_CSBK = 0xA5A5
+
+
+def _crc_ccitt(data):
+    crc = 0
+    for byte in data:
+        crc ^= byte << 8
+        for _ in range(8):
+            crc = ((crc << 1) ^ 0x1021) & 0xFFFF if crc & 0x8000 else (crc << 1) & 0xFFFF
+    return crc
+
+
+def crc16_data_header(ten_bytes):
+    return _crc_ccitt(ten_bytes) ^ 0xFFFF ^ _MASK_DATA_HEADER
+
+
+def crc16_csbk(ten_bytes):
+    return _crc_ccitt(ten_bytes) ^ 0xFFFF ^ _MASK_CSBK
+
+
+def crc32_data(user_and_pad):
+    """Packet CRC-32 as the 4 octets that end the last block (byte-swapped pairs in, little-endian out)."""
+    data = bytearray(user_and_pad)
+    tail = b""
+    if len(data) % 2:
+        tail, data = bytes(data[-1:]), data[:-1]
+    data[0::2], data[1::2] = data[1::2], data[0::2]
+    reg = 0
+    for byte in bytes(data) + tail:
+        for i in range(7, -1, -1):
+            msb = (reg >> 31) & 1
+            reg = (reg << 1) & 0xFFFFFFFF
+            if msb ^ ((byte >> i) & 1):
+                reg ^= 0x04C11DB7
+    return reg.to_bytes(4, "little")
+
+
+def crc9_block(data, dbsn, crc32=None):
+    """CRC-9 of a confirmed data block: over its data, the CRC-32 octets (last block) and the 7-bit DBSN."""
+    bits = []
+    for byte in bytes(data) + (crc32 or b""):
+        bits.extend((byte >> i) & 1 for i in range(7, -1, -1))
+    bits.extend((dbsn >> i) & 1 for i in range(6, -1, -1))
+    reg = 0
+    for bit in bits:
+        feedback = ((reg >> 8) & 1) ^ bit
+        reg = (reg << 1) & 0x1FF
+        if feedback:
+            reg ^= 0x059
+    return reg
+
+
 if __name__ == '__main__':
 
     message = b'\x00\x10\x20\x00\x0c\x30\x2f\x9b\xe5'

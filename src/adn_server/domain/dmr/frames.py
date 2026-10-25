@@ -42,6 +42,11 @@ NULL_EMB_LC.frombytes(b"\x00\x00\x00\x00")
 TAIL = b"\x00\x00"
 
 
+def dmrd_frame(seq: int, rf_src: bytes, dst_id: bytes, peer: bytes, bits: int, stream_id: bytes, payload: bytes) -> bytes:
+    """One HBP DMRD frame: header fields, byte 15 (slot, call type, frame type), 33-byte payload."""
+    return b"DMRD" + bytes([seq & 0xFF]) + rf_src + dst_id + peer + bytes([bits]) + stream_id + payload + TAIL
+
+
 def superframe_embedding(lc: bytes) -> list[bitarray]:
     """Sync or EMB field of bursts A-F, with ``lc`` embedded in B-E."""
     emb_lc = encode_emblc(lc)
@@ -69,12 +74,12 @@ class DmrdStream:
         self.stream_id = stream_id
         self.lc = (LC_OPT_U if private else LC_OPT) + dst_id + rf_src
         self.embedding = superframe_embedding(self.lc)
-        self._sdp = rf_src + dst_id + peer
+        self._ids = (rf_src, dst_id, peer)
         self._slot_byte = ((slot << 7) & 0xFF) | (0x40 if private else 0)
         self._seq = 0
 
     def _pkt(self, bits: int, payload: bitarray) -> bytes:
-        pkt = b"DMRD" + bytes([self._seq]) + self._sdp + bytes([self._slot_byte | bits]) + self.stream_id + payload.tobytes() + TAIL
+        pkt = dmrd_frame(self._seq, *self._ids, self._slot_byte | bits, self.stream_id, payload.tobytes())
         self._seq = (self._seq + 1) % 0x100
         return pkt
 
