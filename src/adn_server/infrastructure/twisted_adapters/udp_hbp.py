@@ -35,7 +35,7 @@ from hashlib import sha256
 from random import randint
 from typing import Any, Callable
 
-from twisted.internet import reactor, task
+from twisted.internet import reactor
 from twisted.internet.protocol import DatagramProtocol
 
 from ...application.proxy.deployment import is_proxy_inject_only
@@ -157,6 +157,7 @@ from ..mesh.obp_v1 import (
     verify_bcve,
 )
 from ..mesh.registry import MeshCodecRegistry
+from .looping import start_loop
 from ..options_redaction import redact_pass_in_options
 
 logger = logging.getLogger(__name__)
@@ -348,26 +349,22 @@ class HBPProtocol(DatagramProtocol):
             # inbound BCKA/DMR on *this* leg.
             self._session.note_keepalive(time.time())
             if self._config.get("ENHANCED_OBP"):
-                self._bcka_loop = task.LoopingCall(self._obp_send_bcka)
-                _bcka_d = self._bcka_loop.start(10)
-                _bcka_d.addErrback(self._looping_err_handle)
-                self._bcve_loop = task.LoopingCall(self._obp_send_bcve)
-                _bcve_d = self._bcve_loop.start(60)
-                _bcve_d.addErrback(self._looping_err_handle)
+                self._bcka_loop = start_loop(self._obp_send_bcka, 10, logger, name=f"{self._system} BCKA")
+                self._bcve_loop = start_loop(self._obp_send_bcve, 60, logger, name=f"{self._system} BCVE")
             if self._session.dns_anchored:
-                self._dns_loop = task.LoopingCall(self._obp_resolve_target)
-                _dns_d = self._dns_loop.start(OBP_DNS_REFRESH_S, now=False)
-                _dns_d.addErrback(self._looping_err_handle)
+                self._dns_loop = start_loop(
+                    self._obp_resolve_target, OBP_DNS_REFRESH_S, logger, now=False, name=f"{self._system} DNS",
+                )
         elif self._config.get("MODE") == "MASTER":
             ping_time = self._CONFIG.get("GLOBAL", {}).get("PING_TIME", 10)
-            self._maintenance_loop = task.LoopingCall(self._master_maintenance_loop)
-            _maint_d = self._maintenance_loop.start(ping_time)
-            _maint_d.addErrback(self._looping_err_handle)
+            self._maintenance_loop = start_loop(
+                self._master_maintenance_loop, ping_time, logger, name=f"{self._system} maintenance",
+            )
         elif self._config.get("MODE") == "PEER":
             ping_time = self._CONFIG.get("GLOBAL", {}).get("PING_TIME", 10)
-            self._maintenance_loop = task.LoopingCall(self._peer_maintenance_loop)
-            _maint_d = self._maintenance_loop.start(ping_time)
-            _maint_d.addErrback(self._looping_err_handle)
+            self._maintenance_loop = start_loop(
+                self._peer_maintenance_loop, ping_time, logger, name=f"{self._system} maintenance",
+            )
 
     def apply_system_config(self, config: dict[str, Any]) -> None:
         """Hot-reload: refresh system dict from live CONFIG (keeps STATUS / streams)."""
@@ -2277,10 +2274,6 @@ class HBPProtocol(DatagramProtocol):
 
         else:
             logger.error("(%s) Received an invalid command in packet: %s", self._system, _data.hex() if hasattr(_data, "hex") else _data)
-
-    def _looping_err_handle(self, failure) -> None:
-        """Legacy loopingErrHandle: log-only (hblink.py ~202/~720)."""
-        logger.error("(%s) Unhandled error in timed loop.\n %s", self._system, failure)
 
     def _obp_send_bcka(self) -> None:
         """Legacy send_bcka: BCKA + HMAC-SHA1 to the peer (hostnames resolved at startup)."""

@@ -42,17 +42,7 @@ class _RecordingSubMapStore:
         self.saved_paths.append(path)
 
 
-class _LoopingCall:
-    started: dict[str, object] = {}
-
-    def __init__(self, f, *_a, **_k):
-        self.started[f.__name__] = f
-
-    def start(self, *_a, **_k):
-        return self
-
-    def addErrback(self, *_a, **_k):
-        return self
+_started_loops: dict[str, object] = {}
 
 
 class _Quiet:
@@ -75,7 +65,7 @@ def _boot(monkeypatch: pytest.MonkeyPatch) -> tuple[dict, dict]:
     import adn_server.main as main_mod
 
     _RecordingSubMapStore.saved_paths = []
-    _LoopingCall.started = {}
+    _started_loops.clear()
     triggers: dict = {}
 
     monkeypatch.setattr(main_mod, "run_echo", lambda *_a, **_k: None)
@@ -83,7 +73,7 @@ def _boot(monkeypatch: pytest.MonkeyPatch) -> tuple[dict, dict]:
     monkeypatch.setattr(
         reactor, "addSystemEventTrigger", lambda _phase, _event, f, *_a, **_k: triggers.setdefault(f.__name__, f)
     )
-    monkeypatch.setattr(peer_mod.task, "LoopingCall", _LoopingCall)
+    monkeypatch.setattr(peer_mod, "start_loop", lambda f, *_a, **_k: _started_loops.setdefault(f.__name__, f))
     monkeypatch.setattr(peer_mod.signal, "signal", lambda *_a, **_k: None)
     monkeypatch.setattr(peer_mod, "PickleSubMapStore", _RecordingSubMapStore)
     monkeypatch.setattr(peer_mod, "ReportServerFactory", lambda *_a, **_k: _Quiet())
@@ -134,5 +124,5 @@ def test_empty_sub_map_file_saves_on_shutdown(monkeypatch: pytest.MonkeyPatch) -
 def test_empty_sub_map_file_saves_changed_routes(monkeypatch: pytest.MonkeyPatch) -> None:
     config, _ = _boot(monkeypatch)
     config["_SUB_MAP"][3120001] = ("SYSTEM", 1, time.time())
-    _LoopingCall.started["sub_map_trimmer_loop"]()
+    _started_loops["sub_map_trimmer_loop"]()
     assert [os.path.basename(p) for p in _RecordingSubMapStore.saved_paths] == ["sub_map.pkl"]
