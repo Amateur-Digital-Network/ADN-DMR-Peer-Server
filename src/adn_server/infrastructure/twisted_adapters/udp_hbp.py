@@ -38,6 +38,7 @@ from typing import Any, Callable
 from twisted.internet import reactor
 from twisted.internet.protocol import DatagramProtocol
 
+from ...application.hbp_peer_login import PeerLogin
 from ...application.proxy.deployment import is_proxy_inject_only
 from ...application.routing.downlink import (
     DownlinkContext,
@@ -127,15 +128,11 @@ from ..hbp_constants import (
     HBPF_DATA_SYNC,
     HBPF_SLT_VHEAD,
     HBPF_SLT_VTERM,
-    MSTC,
     MSTCL,
-    MSTN,
     MSTNAK,
-    MSTP,
     MSTPONG,
     PRBL,
     PRIN,
-    RPTA,
     RPTACK,
     RPTC,
     RPTCL,
@@ -143,7 +140,6 @@ from ..hbp_constants import (
     RPTL,
     RPTO,
     RPTP,
-    RPTPING,
     VER,
 )
 from ..mesh.dmre_v5 import parse_dmre_trailer
@@ -329,6 +325,7 @@ class HBPProtocol(DatagramProtocol):
             self._dmra_downlink: dict[bytes, dict[str, Any]] = {}
         if self._config.get("MODE") == "PEER":
             self._stats = self._config.get("STATS", {})
+            self._peer_login = self._new_peer_login()
         else:
             self._stats = {}
 
@@ -371,6 +368,8 @@ class HBPProtocol(DatagramProtocol):
         self._CONFIG = config
         sys_cfg = config.get("SYSTEMS", {}).get(self._system, {})
         self._config = sys_cfg
+        if sys_cfg.get("MODE") == "PEER":
+            self._peer_login = self._new_peer_login()  # it holds the system dict
         self._learns_sub_map = system_learns_sub_map(sys_cfg)
         self._obp_policy_cache = None
         self._peer_mesh_config_cache = None
@@ -2026,31 +2025,22 @@ class HBPProtocol(DatagramProtocol):
     def _peer_update_sockaddr_errback(self, failure) -> None:
         logger.info("(%s) hostname resolution error: %s", self._system, failure)
 
+    def _new_peer_login(self) -> PeerLogin:
+        return PeerLogin(self._system, self._config, self._stats, self.send_master, logger)
+
+    def _peer_refresh_dns(self) -> None:
+        if self._stats.get("DNS_TIME", 0) < (time.time() - 600):
+            self._stats["DNS_TIME"] = time.time()
+            _master_ip = self._config.get("_MASTER_IP", "")
+            if _master_ip:
+                d = reactor.resolve(_master_ip)
+                d.addCallback(self._peer_update_sockaddr)
+                d.addErrback(self._peer_update_sockaddr_errback)
+
     def _peer_maintenance_loop(self) -> None:
         """Legacy peer_maintenance_loop (hblink.py lines 757-780)."""
         _global = self._CONFIG.get("GLOBAL", {})
-        max_missed = _global.get("MAX_MISSED", 3)
-        if self._stats.get("PING_OUTSTANDING"):
-            self._stats["NUM_OUTSTANDING"] = self._stats.get("NUM_OUTSTANDING", 0) + 1
-        if self._stats.get("CONNECTION") != "YES" or self._stats.get("NUM_OUTSTANDING", 0) >= max_missed:
-            self._stats["PINGS_SENT"] = 0
-            self._stats["PINGS_ACKD"] = 0
-            self._stats["NUM_OUTSTANDING"] = 0
-            self._stats["PING_OUTSTANDING"] = False
-            self._stats["CONNECTION"] = "RPTL_SENT"
-            if self._stats.get("DNS_TIME", 0) < (time.time() - 600):
-                self._stats["DNS_TIME"] = time.time()
-                _master_ip = self._config.get("_MASTER_IP", "")
-                if _master_ip:
-                    d = reactor.resolve(_master_ip)
-                    d.addCallback(self._peer_update_sockaddr)
-                    d.addErrback(self._peer_update_sockaddr_errback)
-            self.send_master(b"".join([RPTL, self._config["RADIO_ID"]]))
-            logger.info("(%s) Sending login request to master %s:%s", self._system, self._config.get("MASTER_IP"), self._config.get("MASTER_PORT"))
-        if self._stats.get("CONNECTION") == "YES":
-            self.send_master(b"".join([RPTPING, self._config["RADIO_ID"]]))
-            self._stats["PINGS_SENT"] = self._stats.get("PINGS_SENT", 0) + 1
-            self._stats["PING_OUTSTANDING"] = True
+        self._peer_login.tick(_global.get("MAX_MISSED", 3), self._peer_refresh_dns)
 
     def _peer_datagram_received(self, _data: bytes, _sockaddr: tuple[str, int]) -> None:
         """Direct port of hblink.py peer_datagramReceived (lines 1149-1313)."""
@@ -2192,87 +2182,7 @@ class HBPProtocol(DatagramProtocol):
                         entry["last"] = now
                 logger.debug("(%s) Talker Alias from master (downlink)", self._system)
 
-        elif _command == MSTN:
-            _peer_id = _data[6:10]
-            if self._config.get("LOOSE") or _peer_id == self._config.get("RADIO_ID"):
-                logger.warning("(%s) MSTNAK Received. Resetting connection to the Master.", self._system)
-                self._stats["CONNECTION"] = "NO"
-                self._stats["CONNECTED"] = time.time()
-
-        elif _command == RPTA:
-            if self._stats.get("CONNECTION") == "RPTL_SENT":
-                _login_int32 = _data[6:10]
-                logger.info("(%s) Repeater Login ACK Received with 32bit ID: %s", self._system, int_id(_login_int32))
-                _pass_hash = bhex(sha256(b"".join([_login_int32, self._config.get("PASSPHRASE", b"")])).hexdigest())
-                self.send_master(b"".join([RPTK, self._config["RADIO_ID"], _pass_hash]))
-                self._stats["CONNECTION"] = "AUTHENTICATED"
-            elif self._stats.get("CONNECTION") == "AUTHENTICATED":
-                _peer_id = _data[6:10]
-                if self._config.get("LOOSE") or _peer_id == self._config.get("RADIO_ID"):
-                    logger.info("(%s) Repeater Authentication Accepted", self._system)
-                    _config_packet = b"".join([
-                        self._config["RADIO_ID"],
-                        self._config.get("CALLSIGN", b""),
-                        self._config.get("RX_FREQ", b""),
-                        self._config.get("TX_FREQ", b""),
-                        self._config.get("TX_POWER", b""),
-                        self._config.get("COLORCODE", b""),
-                        self._config.get("LATITUDE", b""),
-                        self._config.get("LONGITUDE", b""),
-                        self._config.get("HEIGHT", b""),
-                        self._config.get("LOCATION", b""),
-                        self._config.get("DESCRIPTION", b""),
-                        self._config.get("SLOTS", b""),
-                        self._config.get("URL", b""),
-                        self._config.get("SOFTWARE_ID", b""),
-                        self._config.get("PACKAGE_ID", b""),
-                    ])
-                    self.send_master(b"".join([RPTC, _config_packet]))
-                    self._stats["CONNECTION"] = "CONFIG-SENT"
-                    logger.info("(%s) Repeater Configuration Sent", self._system)
-                else:
-                    self._stats["CONNECTION"] = "NO"
-                    logger.error("(%s) Master ACK Contained wrong ID - Connection Reset", self._system)
-            elif self._stats.get("CONNECTION") == "CONFIG-SENT":
-                _peer_id = _data[6:10]
-                if self._config.get("LOOSE") or _peer_id == self._config.get("RADIO_ID"):
-                    logger.info("(%s) Repeater Configuration Accepted", self._system)
-                    if self._config.get("OPTIONS"):
-                        self.send_master(b"".join([RPTO, self._config["RADIO_ID"], self._config["OPTIONS"]]))
-                        self._stats["CONNECTION"] = "OPTIONS-SENT"
-                        logger.info("(%s) Sent options: (%s)", self._system, self._config["OPTIONS"])
-                    else:
-                        self._stats["CONNECTION"] = "YES"
-                        self._stats["CONNECTED"] = time.time()
-                        logger.info("(%s) Connection to Master Completed", self._system)
-                else:
-                    self._stats["CONNECTION"] = "NO"
-                    logger.error("(%s) Master ACK Contained wrong ID - Connection Reset", self._system)
-            elif self._stats.get("CONNECTION") == "OPTIONS-SENT":
-                _peer_id = _data[6:10]
-                if self._config.get("LOOSE") or _peer_id == self._config.get("RADIO_ID"):
-                    logger.info("(%s) Repeater Options Accepted", self._system)
-                    self._stats["CONNECTION"] = "YES"
-                    self._stats["CONNECTED"] = time.time()
-                    logger.info("(%s) Connection to Master Completed with options", self._system)
-                else:
-                    self._stats["CONNECTION"] = "NO"
-                    logger.error("(%s) Master ACK Contained wrong ID - Connection Reset", self._system)
-
-        elif _command == MSTP:
-            _peer_id = _data[7:11]
-            if self._config.get("LOOSE") or _peer_id == self._config.get("RADIO_ID"):
-                self._stats["PING_OUTSTANDING"] = False
-                self._stats["NUM_OUTSTANDING"] = 0
-                self._stats["PINGS_ACKD"] = self._stats.get("PINGS_ACKD", 0) + 1
-
-        elif _command == MSTC:
-            _peer_id = _data[5:9]
-            if self._config.get("LOOSE") or _peer_id == self._config.get("RADIO_ID"):
-                self._stats["CONNECTION"] = "NO"
-                logger.info("(%s) MSTCL Recieved", self._system)
-
-        else:
+        elif not self._peer_login.datagram(_command, _data):
             logger.error("(%s) Received an invalid command in packet: %s", self._system, _data.hex() if hasattr(_data, "hex") else _data)
 
     def _obp_send_bcka(self) -> None:
