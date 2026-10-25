@@ -23,12 +23,12 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, Callable
 
 from twisted.internet import task
 
 from adn_server.application.ports import ReportSender
 from adn_server.application.report.queue import BoundedReportQueue
+from adn_server.infrastructure.twisted_adapters.looping import start_loop
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +40,6 @@ def start_report_queue_worker(
     sender: ReportSender,
     *,
     interval_sec: float = DEFAULT_DRAIN_INTERVAL_SEC,
-    on_errback: Callable[[Any], None] | None = None,
 ) -> task.LoopingCall:
     """Start periodic drain of ``queue`` into ``sender`` (synchronous TCP send on reactor)."""
 
@@ -50,10 +49,7 @@ def start_report_queue_worker(
         except Exception as e:
             logger.warning("(REPORT) queue drain failed: %s", e)
 
-    loop = task.LoopingCall(_drain)
-    deferred = loop.start(interval_sec, now=False)
-    if on_errback is not None:
-        deferred.addErrback(on_errback)
+    loop = start_loop(_drain, interval_sec, logger, now=False)
     logger.info(
         "(REPORT) queue worker started interval=%.3fs max_events=%s drain_per_tick=%s",
         interval_sec,
