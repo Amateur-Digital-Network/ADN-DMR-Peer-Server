@@ -46,3 +46,15 @@ def test_an_other_lc_can_ride_in_a_superframe():
     b0, b1 = _halves(9)
     burst_b = stream.burst(1, b0, b1, superframe_embedding(alias))
     assert burst_b != stream.burst(1, b0, b1)
+
+
+def test_embedded_lc_round_trip_through_bursts_b_to_e():
+    from adn_server.domain.dmr.embedded_lc import collect_embedded_lc
+
+    stream = DmrdStream(SRC, DST, PEER, 1, SID)
+    alias = bytes([4, 0, 0x48]) + b"EA3XYZ"
+    embedding = superframe_embedding(alias)
+    b0, b1 = _halves(3)
+    acc = {}
+    got = [collect_embedded_lc(acc, n, stream.burst(n, b0, b1, embedding)[20:53]) for n in range(6)]
+    assert got[:4] == [None, None, None, None] and got[4] == alias and got[5] is None and acc == {}
