@@ -1299,6 +1299,14 @@ def _peer_key_from_int(peer_key: Any) -> bytes:
     return bytes_4(int_id(peer_key))
 
 
+def _peer_id_matches(pk_int: int, val: int, val_str: str) -> bool:
+    """A hotspot ID ``pk_int`` belongs to radio/peer ``val``: equal, ``val`` + 2-digit suffix, or ``val`` prefix."""
+    if pk_int == val or pk_int // 100 == val:
+        return True
+    pk_str = str(pk_int)
+    return len(val_str) >= 5 and len(pk_str) >= 7 and pk_str.startswith(val_str)
+
+
 def _fuzzy_peer_matches(
     val: int,
     peers: dict[Any, Any],
@@ -1310,12 +1318,7 @@ def _fuzzy_peer_matches(
             pk_b = _peer_key_from_int(pk)
         except (TypeError, ValueError):
             continue
-        pk_int = int_id(pk_b)
-        pk_str = str(pk_int)
-        if pk_int == val or pk_int // 100 == val:
-            matches.append(pk_b)
-            continue
-        if len(val_str) >= 5 and len(pk_str) >= 7 and pk_str.startswith(val_str):
+        if _peer_id_matches(int_id(pk_b), val, val_str):
             matches.append(pk_b)
     return matches
 
@@ -2237,6 +2240,14 @@ def peer_should_receive_group_voice(
 
 
 def peer_matches_rf_source(peer_id: bytes, rf_src: bytes, peers: dict[Any, Any]) -> bool:
-    """True when a hotspot radio id matches the voice RF source (parrot / echo downlink)."""
+    """True when a hotspot radio id matches the voice RF source (parrot / echo downlink).
+
+    Runs for every hotspot on every downlink frame: the answer only depends on this
+    peer's own ID, so it is checked directly instead of matching every peer of the
+    MASTER and looking for this one in the list (O(peers) per hotspot, O(peers²) per frame).
+    """
     peer_b = _peer_key_from_int(peer_id)
-    return peer_b in _fuzzy_peer_matches(int_id(rf_src), peers)
+    val = int_id(rf_src)
+    if peer_b not in peers:  # keys stored as int/str: keep the scan, it normalises them
+        return peer_b in _fuzzy_peer_matches(val, peers)
+    return _peer_id_matches(int_id(peer_b), val, str(val))
