@@ -39,6 +39,7 @@ from ..domain.hbp_protocol import (
     MSTP,
     RPTA,
     RPTC,
+    RPTCL,
     RPTK,
     RPTL,
     RPTO,
@@ -100,6 +101,15 @@ class PeerLogin:
         """RPTK: the answer to the MASTER's salt."""
         self._send(b"".join([RPTK, self._config["RADIO_ID"], digest]))
         self._stats["CONNECTION"] = "AUTHENTICATED"
+
+    def send_options(self) -> None:
+        if self._stats.get("CONNECTION") == "YES" and self._config.get("OPTIONS"):
+            self._send(b"".join([RPTO, self._config["RADIO_ID"], self._config["OPTIONS"]]))
+
+    def close(self) -> None:
+        if self._stats.get("CONNECTION") == "YES":
+            self._send(b"".join([RPTCL, self._config["RADIO_ID"]]))
+        self._stats["CONNECTION"] = "NO"
 
     def datagram(self, command: bytes, data: bytes) -> bool:
         """Handle a MASTER control packet; False if the command is not a login/keepalive one."""

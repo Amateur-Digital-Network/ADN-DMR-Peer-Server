@@ -84,6 +84,17 @@ def test_deferred_key_waits_for_the_caller():
     assert sent[-1] == b"RPTK" + PEER + b"\x01" * 32 and stats["CONNECTION"] == "AUTHENTICATED"
 
 
+def test_options_again_and_close_only_when_connected():
+    login, stats, sent = _login()
+    login.send_options()
+    login.close()
+    assert sent == []
+    stats["CONNECTION"] = "YES"
+    login.send_options()
+    login.close()
+    assert sent == [b"RPTO" + PEER + b"TS2=9990", b"RPTCL" + PEER] and stats["CONNECTION"] == "NO"
+
+
 def test_unrelated_commands_are_left_to_the_caller():
     login, _, _ = _login()
     assert login.datagram(b"DMRD", b"DMRD") is False
@@ -112,3 +123,9 @@ def test_hbp_peer_mode_logs_in_through_peer_login():
     assert sent[1] == b"RPTK" + PEER + a2b_hex(sha256(SALT + b"passw0rd").hexdigest())
     assert sent[2].startswith(b"RPTC" + PEER)
     assert hbp._stats["CONNECTION"] == "YES"
+
+    # A hot reload hands the PEER a new system dict: the login uses it.
+    reloaded = {**config["SYSTEMS"]["PEER-1"], "PASSPHRASE": b"n3w", "OPTIONS": b"TS2=91"}
+    hbp.apply_system_config({**config, "SYSTEMS": {"PEER-1": reloaded}})
+    hbp._peer_login.send_options()
+    assert hbp.transport.for_addr(master)[-1] == b"RPTO" + PEER + b"TS2=91"
