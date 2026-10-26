@@ -1,0 +1,32 @@
+# ADN ODTP gateway (phone apps and IP terminals) – systemd unit (terminals → MASTER on adn-server)
+#
+# Copy:
+#   sudo cp /opt/adn-server/examples/systemd/adn-odtp.service /etc/systemd/system/
+# Edit User / paths if needed, then:
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now adn-odtp
+#
+# adn-odtp.yaml: start from adn-odtp.example.yaml; MASTER_IP/PORT = the MASTER the terminals log in to.
+# Logrotate: SIGUSR2 reopens log files (not SIGHUP). postrotate example:
+#   kill -USR2 $(systemctl show adn-odtp -p MainPID --value)
+# Or: systemctl reload adn-odtp  (ExecReload below sends USR2)
+
+[Unit]
+Description=ADN ODTP gateway (phone apps and IP terminals)
+After=network-online.target adn-server.service
+Wants=network-online.target
+
+[Service]
+User=adn
+Type=simple
+Restart=always
+RestartSec=3
+SyslogIdentifier=adn-odtp
+WorkingDirectory=/opt/adn-server
+ExecStart=/opt/.pyenv/versions/3.11.8/bin/python3 /opt/adn-server/adn-server.py --echo -c /opt/adn-server/adn-odtp.yaml
+ExecReload=/bin/kill -USR2 $MAINPID
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
