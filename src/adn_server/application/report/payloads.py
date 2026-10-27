@@ -72,7 +72,7 @@ def _peer_connected(peer: dict[str, Any]) -> bool:
     return peer.get("CONNECTION") == "YES"
 
 
-def _parse_options_kv(options: Any) -> dict[str, str]:
+def parse_options_kv(options: Any) -> dict[str, str]:
     """Parse RPTO OPTIONS string into upper-case keys (legacy normalisation)."""
     if options is None:
         return {}
@@ -161,7 +161,7 @@ def _static_slot_csv_valid(raw: str) -> bool:
 
 def peer_options_pass_only(options: Any) -> bool:
     """True when OPTIONS is exclusively ``PASS=password`` (self-service RPTO)."""
-    parsed = _parse_options_kv(options)
+    parsed = parse_options_kv(options)
     return list(parsed.keys()) == ["PASS"] and bool(parsed["PASS"].strip())
 
 
@@ -170,7 +170,7 @@ def peer_options_static_valid(options: Any) -> bool:
 
     ``PASS=`` must be sent alone (self-service); combined PASS+OPTIONS is rejected here.
     """
-    parsed = _parse_options_kv(options)
+    parsed = parse_options_kv(options)
     if not parsed:
         return True
     if "PASS" in parsed:
@@ -190,7 +190,7 @@ def parse_peer_options_fields(options: Any) -> dict[str, Any]:
     """Parse OPTIONS into static lists plus optional ``SINGLE`` / ``TIMER`` when present."""
     if not peer_options_static_valid(options):
         return {}
-    parsed = _parse_options_kv(options)
+    parsed = parse_options_kv(options)
     if not parsed:
         return {}
     out: dict[str, Any] = {}
@@ -249,7 +249,7 @@ def parse_peer_options_static(options: Any) -> tuple[list[str], list[str]]:
     """Parse hotspot RPTO OPTIONS (``TS1=…;TS2=…;``) into static TG id lists."""
     if not peer_options_static_valid(options):
         return [], []
-    parsed = _parse_options_kv(options)
+    parsed = parse_options_kv(options)
     if not parsed:
         return [], []
     for old, new in (("TS1", "TS1_STATIC"), ("TS2", "TS2_STATIC")):
