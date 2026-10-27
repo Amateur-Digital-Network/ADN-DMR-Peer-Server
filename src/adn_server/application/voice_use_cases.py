@@ -266,26 +266,44 @@ class VoiceUseCases:
         else:
             frames = list(self.pkt_gen(self._server_source_id(), bytes_3(4000), bytes_4(9), ts, _say))
         if frames:
-            self._call_from_reactor(self._start_peer_prompt, protocol, system, peer_id, int(slot), frames)
+            self._call_from_reactor(
+                self._start_peer_prompt, protocol, system, peer_id, int(slot), frames,
+                _TG4000_REPLY_DELAY, "TG 4000 voice reply",
+            )
         return len(frames)
 
-    def _start_peer_prompt(self, protocol: Any, system: str, peer_id: bytes, slot: int, frames: list[bytes]) -> None:
-        """Reactor: schedule the reply's first frame ``_TG4000_REPLY_DELAY`` from now."""
+    def play_to_peer(self, system: str, peer_id: bytes, slot: int, frames: list[bytes], what: str) -> bool:
+        """Play prompt frames to one hotspot of ``system`` only, paced on the reactor like ``tg4000_voice``.
+
+        Called from a worker thread; False when the system cannot address one hotspot.
+        """
+        if not self._get_protocols or not self._call_from_reactor or not self._call_later:
+            return False
+        protocol = self._get_protocols().get(system)
+        if protocol is None or not hasattr(protocol, "send_prompt_to_peer"):
+            return False
+        self._call_from_reactor(self._start_peer_prompt, protocol, system, peer_id, int(slot), frames, 0.0, what)
+        return True
+
+    def _start_peer_prompt(
+        self, protocol: Any, system: str, peer_id: bytes, slot: int, frames: list[bytes], delay: float, what: str,
+    ) -> None:
+        """Reactor: schedule the prompt's first frame ``delay`` seconds from now."""
         run = _PromptRun()
-        start = time.time() + _TG4000_REPLY_DELAY
-        self._call_later(_TG4000_REPLY_DELAY, self._peer_prompt_step, protocol, system, peer_id, slot, frames, 0, start, run)
+        start = time.time() + delay
+        self._call_later(delay, self._peer_prompt_step, protocol, system, peer_id, slot, frames, 0, start, run, what)
 
     def _peer_prompt_step(
         self, protocol: Any, system: str, peer_id: bytes, slot: int,
-        frames: list[bytes], index: int, start: float, run: _PromptRun,
+        frames: list[bytes], index: int, start: float, run: _PromptRun, what: str,
     ) -> None:
-        """Reactor: one frame of the reply, then the next one on time; stops at the first refusal."""
+        """Reactor: one frame of the prompt, then the next one on time; stops at the first refusal."""
         if index < len(frames) and protocol.send_prompt_to_peer(peer_id, frames[index]):
             run.sent += 1
             due = start + (index + 1) * _FRAME_INTERVAL
             self._call_later(
                 max(0.0, due - time.time()), self._peer_prompt_step,
-                protocol, system, peer_id, slot, frames, index + 1, start, run,
+                protocol, system, peer_id, slot, frames, index + 1, start, run, what,
             )
             return
-        logger.info("(%s) TG 4000 voice reply to peer %s on TS %s: %d frames", system, int_id(peer_id), slot, run.sent)
+        logger.info("(%s) %s to peer %s on TS %s: %d frames", system, what, int_id(peer_id), slot, run.sent)

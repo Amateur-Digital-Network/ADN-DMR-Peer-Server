@@ -45,7 +45,7 @@ See [Special numbers — server voice source ID](special-numbers.md#server-voice
 |---------|-------------|
 | **Scheduled announcements** | AMBE phrases from `Audio/<lang>/ondemand/` on a schedule (hourly / interval). |
 | **TTS announcements** | Text → gTTS → MP3 → ffmpeg → WAV → vocoder → AMBE (see pipeline below). |
-| **Voice ident** | Periodic identification (optional); uses `VOICE_IDENT` in main server config and `OVERRIDE_IDENT_TG` / all-call. |
+| **Voice ident** | Hourly identification (optional); `VOICE_IDENT` in the main server config, `OVERRIDE_IDENT_TG` / all-call. On a shared MASTER, per hotspot that asks with `VOICE=1` in its OPTIONS (see [Configuration](configuration.md)). |
 | **Recording** | When enabled, records AMBE to disk for traffic on **`RECORDING_TG`** / **`RECORDING_TIMESLOT`** (see template `adn-voice.example.yaml`). |
 | **On-demand (9991–9999)** | See [Special numbers](special-numbers.md). |
 
@@ -66,7 +66,7 @@ The plugin plays **one announcement per TG at a time**; others for the same TG w
 
 The plugin sends each frame through `send_dmrd`, which the core injects as a **synthetic hotspot PTT** on `PROXY.TARGET_SYSTEM` (the same MASTER used by the integrated proxy). Routing fans out to bridged hotspots and OPENBRIDGE legs; local peers on that MASTER still receive frames via `send_system`. Routed voice may still take the slot's TX leg (each hotspot keeps the stream it hears first); only a radio or another plugin stream on the RX leg stops the announcement. A frame routing refuses is still played to the MASTER's hotspots, with one WARNING per stream.
 
-Server prompts from the core (voice ident, on-demand 999x, the disconnected prompt) hold **TS2** while they play; a radio or another stream on the slot stops them. An announcement from another server arriving over OpenBridge is ordinary mesh voice and does not get this hold.
+Server prompts from the core (voice ident, on-demand 999x, the disconnected prompt) hold **TS2** while they play; a radio or another stream on the slot stops them. On a shared MASTER the voice ident goes to one hotspot at a time, like the TG 4000 reply, and holds only that hotspot's slot. An announcement from another server arriving over OpenBridge is ordinary mesh voice and does not get this hold.
 
 ## Broadcast queue
 

@@ -119,7 +119,7 @@ These appear mainly on **MASTER** (and often on **PEER**). OpenBridge uses a dif
 | **MAX_PEERS** | Maximum connected hotspots. On the **proxy target** MASTER, caps concurrent fan-in sessions. |
 | **EXPORT_AMBE** | Feature flag for AMBE export (if enabled in build). |
 | **SINGLE_MODE** | Affects OPTIONS / generator expansion (single-user style). |
-| **VOICE_IDENT** | Enables periodic **voice ident** when conditions are met (see `IdentUseCases`). |
+| **VOICE_IDENT** | Enables the hourly **voice ident** (TS2, after 30 s without traffic). On a MASTER with one hotspot it identifies the system. On a MASTER several hotspots share (proxy target, or `MAX_PEERS` > 1) it only allows it: each hotspot whose OPTIONS say `VOICE=1` (or `IDENT=1`) gets its own ident, with its callsign, `LANG` and `VOICETG`/`IDENTTG`, sent to that hotspot only; a hotspot's OPTIONS never change this value for the others. |
 | **TS1_STATIC** / **TS2_STATIC** | Comma-separated static TGs added to **every** connected hotspot of this MASTER, on top of its own OPTIONS (TGs 0–5, 9 and 9990–9999 are ignored). A `SIGHUP` updates connected hotspots and the MASTER's bridge legs; the monitor shows each hotspot's resulting list, these first. |
 | **DEFAULT_REFLECTOR** | Default **reflector** number for `#` dial bridges (0 = none). |
 | **OVERRIDE_IDENT_TG** | Optional TG for voice ident instead of all-call. |
