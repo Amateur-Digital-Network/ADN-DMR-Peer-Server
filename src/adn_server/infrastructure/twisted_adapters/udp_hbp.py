@@ -1440,6 +1440,40 @@ class HBPProtocol(DatagramProtocol):
                 return True
         return False
 
+    def admit_dmrd(
+        self,
+        data: bytes,
+        peer_id: bytes,
+        rf_src: bytes,
+        dst_id: bytes,
+        int_dst: int,
+        now: float,
+    ) -> tuple[int, str, int, int, bytes] | None:
+        """Decode a DMRD and learn where ``rf_src`` is; None when its stream ID is null or the ACL drops it."""
+        bits = data[15]
+        slot = 2 if bits & 0x80 else 1
+        if bits & 0x40:
+            call_type = "unit"
+        elif (bits & 0x23) == 0x23:
+            call_type = "vcsbk"
+        else:
+            call_type = "group"
+        stream_id = data[16:20]
+        if not any(stream_id):
+            logger.warning("(%s) CALL DROPPED AS STREAM ID IS NULL FROM SUBSCRIBER %s", self._system, int_id(rf_src))
+            return None
+        if self._acl_rejects_dmrd(
+            rf_src, dst_id, slot, stream_id, call_type == "unit" and is_on_demand_service_dst(int_dst),
+        ):
+            return None
+        # SUB_MAP (legacy routerHBP.dmrd_received); the peer, 4th, lets a private call reach that
+        # one peer instead of all of them.
+        if self._learns_sub_map:
+            sub_map = self._CONFIG.get("_SUB_MAP")
+            if sub_map is not None:
+                sub_map[rf_src] = (self._system, slot, now, peer_id)
+        return slot, call_type, (bits & 0x30) >> 4, bits & 0xF, stream_id
+
     def _master_datagram_received(self, _data: bytes, _sockaddr: tuple[str, int]) -> None:
         """Direct port of hblink.py master_datagramReceived (lines 888-1146)."""
         _command = _data[:4]
@@ -1466,36 +1500,17 @@ class HBPProtocol(DatagramProtocol):
                 _seq = _data[4]
                 _rf_src = _data[5:8]
                 _dst_id = _data[8:11]
-                _bits = _data[15]
-                _slot = 2 if (_bits & 0x80) else 1
-                if _bits & 0x40:
-                    _call_type = "unit"
-                elif (_bits & 0x23) == 0x23:
-                    _call_type = "vcsbk"
-                else:
-                    _call_type = "group"
-                _frame_type = (_bits & 0x30) >> 4
-                _dtype_vseq = _bits & 0xF
-                _stream_id = _data[16:20]
-                if not int_id(_stream_id):
-                    logger.warning("(%s) CALL DROPPED AS STREAM ID IS NULL FROM SUBSCRIBER %s", self._system, int_id(_rf_src))
-                    return
                 pkt_time = time.time()
                 _int_dst_id = int_id(_dst_id)
-                _unit_service_dst = _call_type == "unit" and is_on_demand_service_dst(_int_dst_id)
-                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
-                _rx_type_before = self.STATUS.get(_slot, {}).get("RX_TYPE") if _unit_service_dst else None
-                # ACL (legacy order and _laststrid)
-                if self._acl_rejects_dmrd(_rf_src, _dst_id, _slot, _stream_id, _unit_service_dst):
+                _admitted = self.admit_dmrd(_data, _peer_id, _rf_src, _dst_id, _int_dst_id, pkt_time)
+                if _admitted is None:
                     return
-                # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
-                # (peer_id) is new — lets same-system private-call repeat target
-                # the exact hotspot instead of broadcasting to every peer.
-                # Skipped on systems with SUB_MAP_LEARN: false.
-                if self._learns_sub_map:
-                    sub_map = self._CONFIG.get("_SUB_MAP")
-                    if sub_map is not None:
-                        sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
+                _slot, _call_type, _frame_type, _dtype_vseq, _stream_id = _admitted
+                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
+                _rx_type_before = (
+                    self.STATUS.get(_slot, {}).get("RX_TYPE")
+                    if _call_type == "unit" and is_on_demand_service_dst(_int_dst_id) else None
+                )
                 self.note_dmrd_stream(_peer_id, _rf_src, _stream_id)
                 if (
                     _call_type in ("group", "vcsbk")
@@ -2063,33 +2078,17 @@ class HBPProtocol(DatagramProtocol):
                 _seq = _data[4]
                 _rf_src = _data[5:8]
                 _dst_id = _data[8:11]
-                _bits = _data[15]
-                _slot = 2 if (_bits & 0x80) else 1
-                if _bits & 0x40:
-                    _call_type = "unit"
-                elif (_bits & 0x23) == 0x23:
-                    _call_type = "vcsbk"
-                else:
-                    _call_type = "group"
-                _frame_type = (_bits & 0x30) >> 4
-                _dtype_vseq = _bits & 0xF
-                _stream_id = _data[16:20]
-                if not int_id(_stream_id):
-                    logger.warning("(%s) CALL DROPPED AS STREAM ID IS NULL FROM SUBSCRIBER %s", self._system, int_id(_rf_src))
-                    return
                 pkt_time = time.time()
                 _int_dst_id = int_id(_dst_id)
-                _unit_service_dst = _call_type == "unit" and is_on_demand_service_dst(_int_dst_id)
-                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
-                _rx_type_before = self.STATUS.get(_slot, {}).get("RX_TYPE") if _unit_service_dst else None
-                if self._acl_rejects_dmrd(_rf_src, _dst_id, _slot, _stream_id, _unit_service_dst):
+                _admitted = self.admit_dmrd(_data, _peer_id, _rf_src, _dst_id, _int_dst_id, pkt_time)
+                if _admitted is None:
                     return
-                # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
-                # (peer_id) is new — see the MASTER-mode write site for why.
-                if self._learns_sub_map:
-                    sub_map = self._CONFIG.get("_SUB_MAP")
-                    if sub_map is not None:
-                        sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
+                _slot, _call_type, _frame_type, _dtype_vseq, _stream_id = _admitted
+                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
+                _rx_type_before = (
+                    self.STATUS.get(_slot, {}).get("RX_TYPE")
+                    if _call_type == "unit" and is_on_demand_service_dst(_int_dst_id) else None
+                )
                 # TG 4000: reset after ACL/SUB_MAP (legacy order — routerHBP.dmrd_received)
                 if self._handle_tg4000_packet(
                     _peer_id, _slot, _int_dst_id, _call_type, _frame_type, _dtype_vseq,
