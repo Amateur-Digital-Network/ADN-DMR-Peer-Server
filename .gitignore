@@ -5,6 +5,7 @@
 # Production config (use *.example.yaml as template)
 adn-server.yaml
 adn-echo.yaml
+adn-odtp.yaml
 adn-voice.yaml
 *.local.yaml
 *.local.yml

@@ -161,3 +161,14 @@ def test_rejects_tg4000_voice_outside_a_master() -> None:
     with pytest.raises(ConfigError) as exc:
         validate_config(config)
     assert "SYSTEMS.BRIDGE.TG4000_VOICE: only on MASTER" in str(exc.value)
+
+
+def test_odtp_section_is_checked() -> None:
+    config = _minimal_config()
+    config["ODTP"] = {"LISTEN_PORT": 54006, "PEER_SUFFIX": 98, "SMS_FORMAT": "tms", "MASTER_IP": "127.0.0.1"}
+    validate_config(config)
+    config["ODTP"].update(PEER_SUFFIX=100, SMS_FORMAT="sms", MAX_SESSIONS="many")
+    with pytest.raises(ConfigError) as exc:
+        validate_config(config)
+    assert "ODTP.PEER_SUFFIX" in str(exc.value) and "ODTP.SMS_FORMAT" in str(exc.value)
+    assert "ODTP.MAX_SESSIONS" in str(exc.value)
