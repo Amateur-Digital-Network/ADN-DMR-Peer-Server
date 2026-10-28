@@ -1359,10 +1359,7 @@ class HBPProtocol(DatagramProtocol):
                 self._system, _rptc_field_str(self._peers[peer].get("CALLSIGN", b"")), self._peers[peer].get("RADIO_ID", b""),
             )
             self.transport.write(b"".join([MSTCL, peer]), self._peers[peer]["SOCKADDR"])
-            self._remove_peer(peer)
-            self._reset_if_no_peers()
-        if remove_list:
-            self._push_config_to_monitor()
+            self.drop_peer(peer)
 
     def _reset_if_no_peers(self) -> None:
         """Last peer gone: restore default OPTIONS and let BRIDGERESET clear this system's legs.
@@ -1399,6 +1396,27 @@ class HBPProtocol(DatagramProtocol):
         self._peers.pop(peer_id, None)
         self._refresh_connected_peer_count()
         self._mark_downlink_index_dirty()
+
+    def drop_peer(self, peer_id: bytes) -> None:
+        """Forget a peer that left; the last one gone resets the system's options and legs."""
+        self._remove_peer(peer_id)
+        self._reset_if_no_peers()
+        self._push_config_to_monitor()
+
+    def logged_in_addr(self, peer_id: bytes) -> tuple[str, int] | None:
+        """``peer_id``'s address once its login is complete (CONNECTION "YES"), else None."""
+        # Subscript, not .get(): it is asked for every frame sent to a peer, and .get() is one more call.
+        try:
+            peer = self._peers[peer_id]
+        except KeyError:
+            return None
+        return peer["SOCKADDR"] if peer["CONNECTION"] == "YES" else None
+
+    def logged_in_peer_at(self, addr: tuple[str, int]) -> bytes | None:
+        for peer_id, peer in self._peers.items():
+            if peer["CONNECTION"] == "YES" and peer["SOCKADDR"] == addr:
+                return peer_id
+        return None
 
     def _acl_rejects_dmrd(
         self,
@@ -1884,9 +1902,7 @@ class HBPProtocol(DatagramProtocol):
                 if _peer_id in self._peers and self._peers[_peer_id]["CONNECTION"] == "YES" and self._peers[_peer_id]["SOCKADDR"] == _sockaddr:
                     logger.info("(%s) Peer is closing down: %s (%s)", self._system, _rptc_field_str(self._peers[_peer_id]["CALLSIGN"]), int_id(_peer_id))
                     self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
-                    self._remove_peer(_peer_id)
-                    self._reset_if_no_peers()
-                    self._push_config_to_monitor()
+                    self.drop_peer(_peer_id)
             else:
                 _peer_id = _data[4:8]
                 if _peer_id in self._peers and self._peers[_peer_id]["CONNECTION"] == "WAITING_CONFIG" and self._peers[_peer_id]["SOCKADDR"] == _sockaddr:
