@@ -233,6 +233,12 @@ def _make_slot_status() -> dict[str, Any]:
 class HBPProtocol(DatagramProtocol):
     """Port of HBSYSTEM (hblink.py). MASTER: same master_datagramReceived logic and logs."""
 
+    # A MASTER's replies to its peers; a subclass for another login dialect renames them here.
+    REPLY_ACK = RPTACK
+    REPLY_NAK = MSTNAK
+    REPLY_PONG = MSTPONG
+    REPLY_CLOSE = MSTCL
+
     def __init__(
         self,
         system_name: str,
@@ -1252,7 +1258,7 @@ class HBPProtocol(DatagramProtocol):
         mode = self._config.get("MODE")
         if mode == "MASTER":
             for _peer in self._peers:
-                self.send_peer(_peer, b"".join([MSTCL, _peer]))
+                self.send_peer(_peer, b"".join([self.REPLY_CLOSE, _peer]))
                 logger.info("(%s) De-Registration sent to Peer: %s (%s)", self._system, _rptc_field_str(self._peers[_peer].get("CALLSIGN", b"")), self._peers[_peer].get("RADIO_ID", b""))
         elif mode == "PEER":
             self.send_master(b"".join([RPTCL, self._config.get("RADIO_ID", b"\x00\x00\x00\x00")]))
@@ -1358,7 +1364,7 @@ class HBPProtocol(DatagramProtocol):
                 "(%s) Peer %s (%s) has timed out and is being removed",
                 self._system, _rptc_field_str(self._peers[peer].get("CALLSIGN", b"")), self._peers[peer].get("RADIO_ID", b""),
             )
-            self.transport.write(b"".join([MSTCL, peer]), self._peers[peer]["SOCKADDR"])
+            self.transport.write(b"".join([self.REPLY_CLOSE, peer]), self._peers[peer]["SOCKADDR"])
             self.drop_peer(peer)
 
     def _reset_if_no_peers(self) -> None:
@@ -1844,18 +1850,18 @@ class HBPProtocol(DatagramProtocol):
                     else:
                         logger.info("(%s) Repeater Logging in with Radio ID: %s, %s:%s", self._system, int_id(_peer_id), _sockaddr[0], _sockaddr[1])
                     _salt_str = bytes_4(self._peers[_peer_id]["SALT"])
-                    self.send_peer(_peer_id, b"".join([RPTACK, _salt_str]))
+                    self.send_peer(_peer_id, b"".join([self.REPLY_ACK, _salt_str]))
                     self._peers[_peer_id]["CONNECTION"] = "CHALLENGE_SENT"
                     logger.info("(%s) Sent Challenge Response to %s for login: %s", self._system, int_id(_peer_id), self._peers[_peer_id]["SALT"])
                 else:
-                    self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                     if self._config.get("PROXY_CONTROL"):
                         self.proxy_IPBlackList(_peer_id, _sockaddr)
                     logger.warning("(%s) Invalid Login from %s Radio ID: %s Denied by Registation ACL or not registered ID", self._system, _sockaddr[0], int_id(_peer_id))
                     if self._CONFIG.get("SYSTEMS", {}).get(self._system) and not self._peers:
                         self._CONFIG["SYSTEMS"][self._system]["_reset"] = True
             else:
-                self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                 logger.warning("(%s) Registration denied from Radio ID: %s Maximum number of peers exceeded", self._system, int_id(_peer_id))
 
         elif _command == RPTK:
@@ -1872,28 +1878,28 @@ class HBPProtocol(DatagramProtocol):
                     _calc_hash_val = _calc_hash(_salt_str, _individual_password)
                     if _sent_hash == _calc_hash_val:
                         _this_peer["CONNECTION"] = "WAITING_CONFIG"
-                        self.send_peer(_peer_id, b"".join([RPTACK, _peer_id]))
+                        self.send_peer(_peer_id, b"".join([self.REPLY_ACK, _peer_id]))
                         logger.info("(%s) Peer %s has completed the login exchange successfully (individual password)", self._system, _this_peer["RADIO_ID"])
                     else:
                         logger.warning("(%s) Peer %s has FAILED the login exchange (wrong individual password)", self._system, _this_peer["RADIO_ID"])
-                        self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                        self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                         self._remove_peer(_peer_id)
                 elif len(_passphrase) > 0:
                     _calc_hash_val = _calc_hash(_salt_str, _passphrase)
                     if _sent_hash == _calc_hash_val:
                         _this_peer["CONNECTION"] = "WAITING_CONFIG"
-                        self.send_peer(_peer_id, b"".join([RPTACK, _peer_id]))
+                        self.send_peer(_peer_id, b"".join([self.REPLY_ACK, _peer_id]))
                         logger.info("(%s) Peer %s has completed the login exchange successfully (global passphrase)", self._system, _this_peer["RADIO_ID"])
                     else:
                         logger.warning("(%s) Peer %s has FAILED the login exchange (wrong global passphrase)", self._system, _this_peer["RADIO_ID"])
-                        self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                        self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                         self._remove_peer(_peer_id)
                 else:
                     logger.warning("(%s) Peer %s has FAILED - no individual password configured and no global passphrase", self._system, _this_peer["RADIO_ID"])
-                    self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                     self._remove_peer(_peer_id)
             else:
-                self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                 logger.info("(%s) Login challenge from Radio ID that has not logged in: %s", self._system, int_id(_peer_id))
 
         elif _command == RPTC:
@@ -1901,7 +1907,7 @@ class HBPProtocol(DatagramProtocol):
                 _peer_id = _data[5:9]
                 if _peer_id in self._peers and self._peers[_peer_id]["CONNECTION"] == "YES" and self._peers[_peer_id]["SOCKADDR"] == _sockaddr:
                     logger.info("(%s) Peer is closing down: %s (%s)", self._system, _rptc_field_str(self._peers[_peer_id]["CALLSIGN"]), int_id(_peer_id))
-                    self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                     self.drop_peer(_peer_id)
             else:
                 _peer_id = _data[4:8]
@@ -1935,12 +1941,12 @@ class HBPProtocol(DatagramProtocol):
                         self._remove_peer(_peer_id)
                         if self._config.get("PROXY_CONTROL"):
                             self.proxy_IPBlackList(_peer_id, _sockaddr)
-                        self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                        self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                         if not self._peers:
                             self._CONFIG.setdefault("SYSTEMS", {}).setdefault(self._system, {})["_reset"] = True
                         logger.info("(%s) Callsign does not match subscriber database: ID: %s, Sent Call: %s, DB call %s", self._system, int_id(_peer_id), _sent_call, self.validate_id(_peer_id))
                     else:
-                        self.send_peer(_peer_id, b"".join([RPTACK, _peer_id]))
+                        self.send_peer(_peer_id, b"".join([self.REPLY_ACK, _peer_id]))
                         logger.info(
                             "(%s) Peer %s (%s) has sent repeater configuration, Package ID: %s, Software ID: %s, Desc: %s",
                             self._system,
@@ -1963,7 +1969,7 @@ class HBPProtocol(DatagramProtocol):
                                 lambda tgids: self._mark_downlink_index_dirty() if tgids else tgids
                             )
                 else:
-                    self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                     logger.info("(%s) Peer info from Radio ID that has not logged in: %s", self._system, int_id(_peer_id))
 
         elif _command == RPTO:
@@ -1974,7 +1980,7 @@ class HBPProtocol(DatagramProtocol):
                 _this_peer["OPTIONS"] = normalize_fixed_width_bytes(_data[8:])
                 invalidate_peer_options_cache(_this_peer)
                 self._mark_downlink_index_dirty()
-                self.send_peer(_peer_id, b"".join([RPTACK, _peer_id]))
+                self.send_peer(_peer_id, b"".join([self.REPLY_ACK, _peer_id]))
                 _opt_log = redact_pass_in_options(_this_peer["OPTIONS"])
                 logger.info(
                     "(%s) Peer %s has sent options %s",
@@ -2010,7 +2016,7 @@ class HBPProtocol(DatagramProtocol):
                             )
                 self._push_config_to_monitor()
             else:
-                self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                 logger.info("(%s) Options from Radio ID that is not logged: %s", self._system, int_id(_peer_id))
 
         elif _command == RPTP:
@@ -2018,10 +2024,10 @@ class HBPProtocol(DatagramProtocol):
             if _peer_id in self._peers and self._peers[_peer_id]["CONNECTION"] == "YES" and self._peers[_peer_id]["SOCKADDR"] == _sockaddr:
                 self._peers[_peer_id]["PINGS_RECEIVED"] += 1
                 self._peers[_peer_id]["LAST_PING"] = time.time()
-                self.send_peer(_peer_id, b"".join([MSTPONG, _peer_id]))
+                self.send_peer(_peer_id, b"".join([self.REPLY_PONG, _peer_id]))
                 logger.log(logging.TRACE if hasattr(logging, "TRACE") else logging.DEBUG, "(%s) Received and answered RPTPING from peer %s (%s)", self._system, _rptc_field_str(self._peers[_peer_id]["CALLSIGN"]), int_id(_peer_id))
             else:
-                self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                 logger.info("(%s) Ping from Radio ID that is not logged in: %s", self._system, int_id(_peer_id))
 
         elif _command == DMRA:
