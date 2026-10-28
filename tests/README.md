@@ -32,6 +32,7 @@ Use the project interpreter, e.g. `/opt/.pyenv/versions/3.11.8/bin/python3`.
 | `smoke/` | Quick routing smoke |
 | `support/` | Shared stacks (`hbp_repeat_stack`, monitor sim) — not run as tests |
 | `harness/` | Shared fakes (`DeterministicScenario`, assertions) — not run as tests |
+| `benchmarks/` | `bench_dmrd.py`: µs and function calls per voice frame through `dmrd_received`, usage in its docstring — not run as tests |
 
 ## Integration vs harness
 
