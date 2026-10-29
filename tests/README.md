@@ -30,8 +30,10 @@ Use the project interpreter, e.g. `/opt/.pyenv/versions/3.11.8/bin/python3`.
 | `fakes/` | Re-exports for application tests (`InMemorySubscriptionStore` shim) — not run as tests |
 | `infrastructure/` | Logging reload, ACL router, **HBP REPEAT + proxy fan-in integration**, MQTT |
 | `smoke/` | Quick routing smoke |
-| `support/` | Shared stacks (`hbp_repeat_stack`, monitor sim) — not run as tests |
+| `trunking/` | Tier III: wire format, config, registry, legs, DMRT signalling, site destinations; real-stack site login, uplink, downlink, site to site, echo, private calls |
+| `support/` | Shared stacks (`hbp_repeat_stack`, `trunk_site_stack`, `dmrtc_wire`, monitor sim) — not run as tests |
 | `harness/` | Shared fakes (`DeterministicScenario`, assertions) — not run as tests |
+| `benchmarks/` | `bench_dmrd.py`: µs and function calls per voice frame through `dmrd_received`, usage in its docstring — not run as tests |
 
 ## Integration vs harness
 
@@ -64,6 +66,7 @@ Mark new stack tests with `@pytest.mark.integration`.
 | `test_subscription_router_dmrd.py` | — | `dmrd_received` via `SubscriptionRouter` |
 | `test_unit_data_ingress.py` | 4 | Unit headers, CSBK, reports |
 | `test_unit_data_routing.py` | 5 | SUB_MAP, hotspot, gateway, OBP fanout |
+| `test_hbp_source_without_protocol.py` | — | Group call from an HBP system with no protocol (no packet control) |
 
 ### hbp/
 
@@ -74,6 +77,10 @@ Mark new stack tests with `@pytest.mark.integration`.
 | `test_ingress.py` | 3 | RX start, rate drop, OBP loop loser |
 | `test_master_maintenance.py` | 2 | Peer timeout / shared PEERS dict |
 | `test_timeout_collision.py` | 3 | 180s timeout, collision, rekey |
+| `test_admit_dmrd.py` | — | DMRD admission shared by MASTER and PEER: flags byte, null stream, ACL, SUB_MAP |
+| `test_slot_rx_record.py` | — | Slot row of an accepted frame and a new call's LC (MASTER, PEER) |
+| `test_logged_in_peers.py` | — | `logged_in_addr`, `logged_in_peer_at`, `drop_peer` |
+| `test_master_replies.py` | — | Every MASTER reply through `REPLY_ACK`/`NAK`/`PONG`/`CLOSE` |
 
 ### obp/
 
@@ -114,6 +121,32 @@ Scheduled announcements, TTS and beacons are tested with their plugin: `plugins/
 | `test_playback_send_loop.py` | 4 | Send loop, max duration, interval |
 | `test_recording_timers.py` | 2 | Idle timeout, VTERM commit |
 | `test_rekey_playback.py` | 4 | Seq preservation past 255 / 30s |
+
+### trunking/
+
+Real-stack files (`test_site_*`) use `support/trunk_site_stack.py`: real `TrunkSiteProtocol` and hotspot `HBPProtocol` over one `RoutingUseCases`, with sites driven by `support/dmrtc_wire.py` (DMRGateway login state machine, dmrtc DMRT layouts).
+
+| File | Topic |
+|------|-------|
+| `test_trunk_wire.py` | DMRT parse/build at exact lengths, 71-byte DMRD, call UUID, subscribable TGs |
+| `test_trunk_config.py` | `TRUNKING` validator rules, `trunk_systems` |
+| `test_trunk_registry.py` | Registration cap, TTL, roaming, holders, UUID and echo windows, restore |
+| `test_trunk_legs.py` | STATIC legs on both slots, release, re-arm after a bridge reset, no store scan |
+| `test_trunk_signalling.py` | DMRT 0x01–0x04: ACLs, caps, SUB_MAP pin, roaming 0x42 |
+| `test_recent_keys.py` | `RecentKeys`: once per window, expiry from the oldest end, cap |
+| `test_trunk_sites.py` | Site destinations, call UUIDs, tick, persistence |
+| `test_site_login.py` | DTC* login, DTCACK/DTCNAK/DTCPONG/DTCCL, refusals, truncated frames |
+| `test_site_uplink.py` | 71-byte DMRD only, per-stream rows, TG 4000, flat mirror, row trim |
+| `test_site_downlink.py` | Concurrent calls to a site, two-slot legs sent once, no DMRA |
+| `test_site_to_site.py` | Same-system delivery, REPEAT, cross-system bridges |
+| `test_site_echo.py` | Per-site parrot playback |
+| `test_site_private.py` | Private calls and unit data to registered radios |
+| `test_site_hotspots_unchanged.py` | Hotspot writes byte-identical with a trunk system present |
+| `test_trunk_wire_experimental.py` | EXPERIMENTAL DMRT 0x05–0x0A parse at exact lengths, network bit, 0x49 |
+| `test_trunk_transactions.py` | EXPERIMENTAL UDT, status, call setup: source validation, bridges, answers |
+| `test_site_dmrt_experimental.py` | EXPERIMENTAL UDT and its accept between real sites |
+
+Related, outside `trunking/`: `routing/test_per_stream_rows.py` (per-stream receive rows and concurrent targets), `infrastructure/test_trunk_reload.py` (`TRUNKING` flip on reload), `infrastructure/test_trunk_registration_store.py` (JSON store, writes in a worker thread), `infrastructure/test_trunk_bootstrap.py` (Tier III built only for a `TRUNKING` system, lazy imports, reload wiring, loops, shutdown write).
 
 ### infrastructure (integration highlights)
 

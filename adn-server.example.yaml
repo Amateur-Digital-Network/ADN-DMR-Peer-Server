@@ -78,6 +78,8 @@ ALIASES:
   CHECKSUM_URL: https://servers.adn.systems/file_checksums.json
   CHECKSUM_FILE: file_checksums.json
   KEYS_FILE: keys.json
+  # Tier III registrations, only used when a system has TRUNKING: true.
+  TRUNK_REG_FILE: trunk_registrations.json
 
 # Integrated hotspot proxy (always enabled). Hotspots use PROXY.LISTEN_PORT only.
 PROXY:
@@ -211,6 +213,25 @@ SYSTEMS:
     # The replay starts 2.0 s after the over, beyond GLOBAL.LOOP_GUARD_HOLD, so the
     # loop guard never takes it for a bridge loop; this only makes it explicit.
     LOOP_GUARD: false
+
+  # Tier III trunking sites (DMRGateway TrunkingEnabled=1 + dmrtc), see the Tier III trunking guide.
+  #  TRUNK:
+  #    MODE: MASTER
+  #    ENABLED: false
+  #    TRUNKING: true
+  #    IP: ""
+  #    PORT: 62040
+  #    PASSPHRASE: "<set-in-adn-server.yaml>"
+  #    MAX_PEERS: 4              # number of sites
+  #    REPEAT: true              # site-to-site calls on this system
+  #    GROUP_HANGTIME: 5
+  #    USE_ACL: true
+  #    REG_ACL: DENY:1           # site IDs
+  #    SUB_ACL: DENY:1           # radios
+  #    TGID_TS1_ACL: PERMIT:ALL
+  #    TGID_TS2_ACL: PERMIT:ALL
+  #    DEFAULT_UA_TIMER: 10
+  #    ALLOW_UNREG_ID: false
 
   # OpenBridge: use DMRE embedded version 5 ("OpenBridge v5") + ENHANCED_OBP on all ADN Systems peers.
   OBP-TEST:

@@ -124,6 +124,7 @@ These appear mainly on **MASTER** (and often on **PEER**). OpenBridge uses a dif
 | **DEFAULT_REFLECTOR** | Default **reflector** number for `#` dial bridges (0 = none). |
 | **OVERRIDE_IDENT_TG** | Optional TG for voice ident instead of all-call. |
 | **GENERATOR** | If **> 1**, this MASTER is expanded into **`NAME-0`**, **`NAME-1`**, … with consecutive ports (see `expand_generator` in code). Legacy standalone **`adn-proxy`** used the same range; the **integrated** proxy instead uses **inject-only** **`PROXY.TARGET_SYSTEM`** (no per-hotspot UDP ports on the server). |
+| **TRUNKING** | Default `false`. `true` makes this MASTER a **DMR Tier III** system: it accepts only DMRGateway `TrunkingEnabled=1` sites (dmrtc), which log in with the DTC* commands, subscribe their own talkgroups and register their radios. It needs its own `PORT` and cannot be `PROXY.TARGET_SYSTEM`; `SINGLE_MODE`, `TS1_STATIC` / `TS2_STATIC`, `DEFAULT_REFLECTOR`, `OPTIONS`, `GENERATOR` > 1 and `SUB_MAP_LEARN: false` are refused with it. Setting or removing it on reload recreates the system, and its peers log in again. See [DMR Tier III trunking](tier3-trunking.md). |
 
 **MASTER** listens for PEER connections (unless it is the **inject-only** proxy target — see [Hotspot proxy](hotspot-proxy.md)); each authenticated peer is stored under **`PEERS`** at runtime.
 
@@ -280,6 +281,7 @@ Downloads and local files for **peer IDs**, **subscriber IDs**, **talkgroup labe
 | **PEER_FILE** / **SUBSCRIBER_FILE** / **TGID_FILE** | Local filenames. |
 | **\*_URL** | Remote sources for downloads. |
 | **SUB_MAP_FILE** | Pickle path for **SUB_MAP** (private call routing), `sub_map.pkl` if empty. See [Private calls](private-calls.md#sub_map-persistence). |
+| **TRUNK_REG_FILE** | JSON file for **Tier III registrations** (`trunk_registrations.json` if empty), only used when a system has `TRUNKING: true`. Read once, when the first TRUNKING system starts; written in a worker thread every 300 s when changed or after a failed write, on `SIGHUP` and at shutdown. See [DMR Tier III trunking](tier3-trunking.md#registrations). |
 | **POLL_INTERVAL_SEC** | How often the lists are checked for download (default **900**). |
 | **CHECKSUM_URL** / **CHECKSUM_FILE** | Published checksums, fetched on every poll; a list is downloaded only when its checksum no longer matches the file on disk (an unmatched checksum is retried once an hour). |
 | **SERVER_ID_URL** / **SERVER_ID_FILE** | Server ID list (used by `VALIDATE_SERVER_IDS`). |
@@ -323,3 +325,4 @@ Use the project interpreter (see workspace rules), e.g. `python3.11` from pyenv,
 - [Echo](echo.md) — PEER example (echo process).
 - [Hotspot proxy](hotspot-proxy.md) — integrated **`PROXY`** / **`SELF_SERVICE`**.
 - [OBP proxy](obp-proxy.md) — integrated **`OBP_PROXY`** OpenBridge fan-in.
+- [DMR Tier III trunking](tier3-trunking.md) — **`TRUNKING`** MASTER for dmrtc / DMRGateway sites.

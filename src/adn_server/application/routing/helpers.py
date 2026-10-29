@@ -46,7 +46,9 @@ from __future__ import annotations
 import time
 from typing import Any
 
-from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, bytes_3, bytes_4, int_id
+from ...domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, bytes_3, bytes_4, int_id, slot_frame_type
+from ...domain.dmr import decode
+from ...domain.dmr.const import LC_OPT
 from ...domain.hbp_protocol import HBPF_SLT_VTERM, STREAM_TO
 from ...domain.mesh_session import obp_session
 from ..server_voice import DEFAULT_SERVER_VOICE_ID
@@ -1124,6 +1126,42 @@ def track_rx_stream(
         streams[stream_id] = [peer_id, rf_src, tgid, now, now]
     else:
         entry[4] = now
+
+
+def frame_lc(frame_type: int, dtype_vseq: int, dmrpkt: bytes, dst_id: bytes, rf_src: bytes) -> bytes:
+    """A new call's full LC: its voice header's when that decodes, else one built from the frame's addresses."""
+    if frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VHEAD and len(dmrpkt) >= 33:
+        try:
+            return decode.voice_head_term(dmrpkt)["LC"]
+        except Exception:
+            pass
+    return LC_OPT + dst_id + rf_src
+
+
+def record_slot_rx(
+    slot_st: dict[str, Any],
+    peer_id: bytes,
+    seq: int,
+    rf_src: bytes,
+    dst_id: bytes,
+    call_type: str,
+    frame_type: int,
+    dtype_vseq: int,
+    stream_id: bytes,
+    now: float,
+) -> None:
+    """Note a frame routing accepted where other systems' golden rule, LoopControl and the timeout read it."""
+    slot_st["RX_PEER"] = peer_id
+    slot_st["RX_SEQ"] = seq
+    slot_st["RX_RFS"] = rf_src
+    slot_st["RX_TYPE"] = slot_frame_type(frame_type, dtype_vseq)
+    slot_st["RX_TGID"] = dst_id
+    slot_st["RX_TIME"] = now
+    if call_type in ("group", "vcsbk"):
+        track_rx_stream(
+            slot_st, stream_id, peer_id, rf_src, dst_id, now,
+            ended=frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM,
+        )
 
 
 def hbp_ingress_downlink_session_blocks_tx(

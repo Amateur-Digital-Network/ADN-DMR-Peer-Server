@@ -54,6 +54,7 @@ from ...application.routing.helpers import (
     clear_peer_rx_status_slots,
     clear_peer_ua_sessions,
     derive_peer_rf_mode,
+    frame_lc,
     hbp_master_ingress_repeat_allowed,
     is_on_demand_service_dst,
     is_server_originated_voice,
@@ -67,13 +68,13 @@ from ...application.routing.helpers import (
     peer_should_receive_group_voice,
     peer_single_exclusive_tgid,
     peer_voice_busy_for_unit_data,
+    record_slot_rx,
     register_peer_ua_session,
     resolve_voice_peer_id,
     seed_peer_ua_session_from_status,
     synthetic_group_dmrd_burst_packet,
     synthetic_group_dmrd_route_packet,
     tg4000_reset_on_vhead,
-    track_rx_stream,
 )
 from ...application.routing.peer_downlink_index import (
     build_peer_downlink_index,
@@ -84,8 +85,6 @@ from ...application.routing.peer_downlink_index import (
 from ...application.routing.sub_map_learning import system_learns_sub_map
 from ...application.server_voice import all_server_voice_ids
 from ...domain import bytes_3, bytes_4, int_id, slot_frame_type
-from ...domain.dmr import decode
-from ...domain.dmr.const import LC_OPT
 from ...domain.hbp_protocol import normalize_fixed_width_ascii, normalize_fixed_width_bytes
 from ...domain.mesh_admission import AclRules, AdmissionContext, Rejection, server_prefix
 from ...domain.mesh_routing import MeshEgress, MeshIngress, PeerMeshConfig
@@ -232,6 +231,12 @@ def _make_slot_status() -> dict[str, Any]:
 
 class HBPProtocol(DatagramProtocol):
     """Port of HBSYSTEM (hblink.py). MASTER: same master_datagramReceived logic and logs."""
+
+    # A MASTER's replies to its peers; a subclass for another login dialect renames them here.
+    REPLY_ACK = RPTACK
+    REPLY_NAK = MSTNAK
+    REPLY_PONG = MSTPONG
+    REPLY_CLOSE = MSTCL
 
     def __init__(
         self,
@@ -1252,7 +1257,7 @@ class HBPProtocol(DatagramProtocol):
         mode = self._config.get("MODE")
         if mode == "MASTER":
             for _peer in self._peers:
-                self.send_peer(_peer, b"".join([MSTCL, _peer]))
+                self.send_peer(_peer, b"".join([self.REPLY_CLOSE, _peer]))
                 logger.info("(%s) De-Registration sent to Peer: %s (%s)", self._system, _rptc_field_str(self._peers[_peer].get("CALLSIGN", b"")), self._peers[_peer].get("RADIO_ID", b""))
         elif mode == "PEER":
             self.send_master(b"".join([RPTCL, self._config.get("RADIO_ID", b"\x00\x00\x00\x00")]))
@@ -1358,11 +1363,8 @@ class HBPProtocol(DatagramProtocol):
                 "(%s) Peer %s (%s) has timed out and is being removed",
                 self._system, _rptc_field_str(self._peers[peer].get("CALLSIGN", b"")), self._peers[peer].get("RADIO_ID", b""),
             )
-            self.transport.write(b"".join([MSTCL, peer]), self._peers[peer]["SOCKADDR"])
-            self._remove_peer(peer)
-            self._reset_if_no_peers()
-        if remove_list:
-            self._push_config_to_monitor()
+            self.transport.write(b"".join([self.REPLY_CLOSE, peer]), self._peers[peer]["SOCKADDR"])
+            self.drop_peer(peer)
 
     def _reset_if_no_peers(self) -> None:
         """Last peer gone: restore default OPTIONS and let BRIDGERESET clear this system's legs.
@@ -1399,6 +1401,27 @@ class HBPProtocol(DatagramProtocol):
         self._peers.pop(peer_id, None)
         self._refresh_connected_peer_count()
         self._mark_downlink_index_dirty()
+
+    def drop_peer(self, peer_id: bytes) -> None:
+        """Forget a peer that left; the last one gone resets the system's options and legs."""
+        self._remove_peer(peer_id)
+        self._reset_if_no_peers()
+        self._push_config_to_monitor()
+
+    def logged_in_addr(self, peer_id: bytes) -> tuple[str, int] | None:
+        """``peer_id``'s address once its login is complete (CONNECTION "YES"), else None."""
+        # Subscript, not .get(): it is asked for every frame sent to a peer, and .get() is one more call.
+        try:
+            peer = self._peers[peer_id]
+        except KeyError:
+            return None
+        return peer["SOCKADDR"] if peer["CONNECTION"] == "YES" else None
+
+    def logged_in_peer_at(self, addr: tuple[str, int]) -> bytes | None:
+        for peer_id, peer in self._peers.items():
+            if peer["CONNECTION"] == "YES" and peer["SOCKADDR"] == addr:
+                return peer_id
+        return None
 
     def _acl_rejects_dmrd(
         self,
@@ -1440,6 +1463,40 @@ class HBPProtocol(DatagramProtocol):
                 return True
         return False
 
+    def admit_dmrd(
+        self,
+        data: bytes,
+        peer_id: bytes,
+        rf_src: bytes,
+        dst_id: bytes,
+        int_dst: int,
+        now: float,
+    ) -> tuple[int, str, int, int, bytes] | None:
+        """Decode a DMRD and learn where ``rf_src`` is; None when its stream ID is null or the ACL drops it."""
+        bits = data[15]
+        slot = 2 if bits & 0x80 else 1
+        if bits & 0x40:
+            call_type = "unit"
+        elif (bits & 0x23) == 0x23:
+            call_type = "vcsbk"
+        else:
+            call_type = "group"
+        stream_id = data[16:20]
+        if not any(stream_id):
+            logger.warning("(%s) CALL DROPPED AS STREAM ID IS NULL FROM SUBSCRIBER %s", self._system, int_id(rf_src))
+            return None
+        if self._acl_rejects_dmrd(
+            rf_src, dst_id, slot, stream_id, call_type == "unit" and is_on_demand_service_dst(int_dst),
+        ):
+            return None
+        # SUB_MAP (legacy routerHBP.dmrd_received); the peer, 4th, lets a private call reach that
+        # one peer instead of all of them.
+        if self._learns_sub_map:
+            sub_map = self._CONFIG.get("_SUB_MAP")
+            if sub_map is not None:
+                sub_map[rf_src] = (self._system, slot, now, peer_id)
+        return slot, call_type, (bits & 0x30) >> 4, bits & 0xF, stream_id
+
     def _master_datagram_received(self, _data: bytes, _sockaddr: tuple[str, int]) -> None:
         """Direct port of hblink.py master_datagramReceived (lines 888-1146)."""
         _command = _data[:4]
@@ -1466,36 +1523,17 @@ class HBPProtocol(DatagramProtocol):
                 _seq = _data[4]
                 _rf_src = _data[5:8]
                 _dst_id = _data[8:11]
-                _bits = _data[15]
-                _slot = 2 if (_bits & 0x80) else 1
-                if _bits & 0x40:
-                    _call_type = "unit"
-                elif (_bits & 0x23) == 0x23:
-                    _call_type = "vcsbk"
-                else:
-                    _call_type = "group"
-                _frame_type = (_bits & 0x30) >> 4
-                _dtype_vseq = _bits & 0xF
-                _stream_id = _data[16:20]
-                if not int_id(_stream_id):
-                    logger.warning("(%s) CALL DROPPED AS STREAM ID IS NULL FROM SUBSCRIBER %s", self._system, int_id(_rf_src))
-                    return
                 pkt_time = time.time()
                 _int_dst_id = int_id(_dst_id)
-                _unit_service_dst = _call_type == "unit" and is_on_demand_service_dst(_int_dst_id)
-                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
-                _rx_type_before = self.STATUS.get(_slot, {}).get("RX_TYPE") if _unit_service_dst else None
-                # ACL (legacy order and _laststrid)
-                if self._acl_rejects_dmrd(_rf_src, _dst_id, _slot, _stream_id, _unit_service_dst):
+                _admitted = self.admit_dmrd(_data, _peer_id, _rf_src, _dst_id, _int_dst_id, pkt_time)
+                if _admitted is None:
                     return
-                # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
-                # (peer_id) is new — lets same-system private-call repeat target
-                # the exact hotspot instead of broadcasting to every peer.
-                # Skipped on systems with SUB_MAP_LEARN: false.
-                if self._learns_sub_map:
-                    sub_map = self._CONFIG.get("_SUB_MAP")
-                    if sub_map is not None:
-                        sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
+                _slot, _call_type, _frame_type, _dtype_vseq, _stream_id = _admitted
+                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
+                _rx_type_before = (
+                    self.STATUS.get(_slot, {}).get("RX_TYPE")
+                    if _call_type == "unit" and is_on_demand_service_dst(_int_dst_id) else None
+                )
                 self.note_dmrd_stream(_peer_id, _rf_src, _stream_id)
                 if (
                     _call_type in ("group", "vcsbk")
@@ -1697,32 +1735,14 @@ class HBPProtocol(DatagramProtocol):
                 if _accepted:
                     if _slot in self.STATUS and not _unit_data:
                         _suppress = self.STATUS[_slot].get("_suppress_uplink")
-                        if _stream_id != self.STATUS[_slot].get("RX_STREAM_ID"):
-                            if not _suppress:
-                                self.STATUS[_slot]["RX_START"] = pkt_time
-                            if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD and len(dmrpkt) >= 33:
-                                try:
-                                    decoded_slot = decode.voice_head_term(dmrpkt)
-                                    if not _suppress:
-                                        self.STATUS[_slot]["RX_LC"] = decoded_slot["LC"]
-                                except Exception:
-                                    if not _suppress:
-                                        self.STATUS[_slot]["RX_LC"] = LC_OPT + _dst_id + _rf_src
-                            else:
-                                if not _suppress:
-                                    self.STATUS[_slot]["RX_LC"] = LC_OPT + _dst_id + _rf_src
+                        if _stream_id != self.STATUS[_slot].get("RX_STREAM_ID") and not _suppress:
+                            self.STATUS[_slot]["RX_START"] = pkt_time
+                            self.STATUS[_slot]["RX_LC"] = frame_lc(_frame_type, _dtype_vseq, dmrpkt, _dst_id, _rf_src)
                         if not _suppress:
-                            self.STATUS[_slot]["RX_PEER"] = _peer_id
-                            self.STATUS[_slot]["RX_SEQ"] = _seq
-                            self.STATUS[_slot]["RX_RFS"] = _rf_src
-                            self.STATUS[_slot]["RX_TYPE"] = slot_frame_type(_frame_type, _dtype_vseq)
-                            self.STATUS[_slot]["RX_TGID"] = _dst_id
-                            self.STATUS[_slot]["RX_TIME"] = pkt_time
-                            if _call_type in ("group", "vcsbk"):
-                                track_rx_stream(
-                                    self.STATUS[_slot], _stream_id, _peer_id, _rf_src, _dst_id, pkt_time,
-                                    ended=_frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM,
-                                )
+                            record_slot_rx(
+                                self.STATUS[_slot], _peer_id, _seq, _rf_src, _dst_id,
+                                _call_type, _frame_type, _dtype_vseq, _stream_id, pkt_time,
+                            )
                         # Always track RX_STREAM_ID so subsequent frames of a suppressed
                         # stream are not re-evaluated as a new stream (which would clear
                         # _suppress_uplink and leak the uplink to the network).
@@ -1811,18 +1831,18 @@ class HBPProtocol(DatagramProtocol):
                     else:
                         logger.info("(%s) Repeater Logging in with Radio ID: %s, %s:%s", self._system, int_id(_peer_id), _sockaddr[0], _sockaddr[1])
                     _salt_str = bytes_4(self._peers[_peer_id]["SALT"])
-                    self.send_peer(_peer_id, b"".join([RPTACK, _salt_str]))
+                    self.send_peer(_peer_id, b"".join([self.REPLY_ACK, _salt_str]))
                     self._peers[_peer_id]["CONNECTION"] = "CHALLENGE_SENT"
                     logger.info("(%s) Sent Challenge Response to %s for login: %s", self._system, int_id(_peer_id), self._peers[_peer_id]["SALT"])
                 else:
-                    self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                     if self._config.get("PROXY_CONTROL"):
                         self.proxy_IPBlackList(_peer_id, _sockaddr)
                     logger.warning("(%s) Invalid Login from %s Radio ID: %s Denied by Registation ACL or not registered ID", self._system, _sockaddr[0], int_id(_peer_id))
                     if self._CONFIG.get("SYSTEMS", {}).get(self._system) and not self._peers:
                         self._CONFIG["SYSTEMS"][self._system]["_reset"] = True
             else:
-                self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                 logger.warning("(%s) Registration denied from Radio ID: %s Maximum number of peers exceeded", self._system, int_id(_peer_id))
 
         elif _command == RPTK:
@@ -1839,28 +1859,28 @@ class HBPProtocol(DatagramProtocol):
                     _calc_hash_val = _calc_hash(_salt_str, _individual_password)
                     if _sent_hash == _calc_hash_val:
                         _this_peer["CONNECTION"] = "WAITING_CONFIG"
-                        self.send_peer(_peer_id, b"".join([RPTACK, _peer_id]))
+                        self.send_peer(_peer_id, b"".join([self.REPLY_ACK, _peer_id]))
                         logger.info("(%s) Peer %s has completed the login exchange successfully (individual password)", self._system, _this_peer["RADIO_ID"])
                     else:
                         logger.warning("(%s) Peer %s has FAILED the login exchange (wrong individual password)", self._system, _this_peer["RADIO_ID"])
-                        self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                        self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                         self._remove_peer(_peer_id)
                 elif len(_passphrase) > 0:
                     _calc_hash_val = _calc_hash(_salt_str, _passphrase)
                     if _sent_hash == _calc_hash_val:
                         _this_peer["CONNECTION"] = "WAITING_CONFIG"
-                        self.send_peer(_peer_id, b"".join([RPTACK, _peer_id]))
+                        self.send_peer(_peer_id, b"".join([self.REPLY_ACK, _peer_id]))
                         logger.info("(%s) Peer %s has completed the login exchange successfully (global passphrase)", self._system, _this_peer["RADIO_ID"])
                     else:
                         logger.warning("(%s) Peer %s has FAILED the login exchange (wrong global passphrase)", self._system, _this_peer["RADIO_ID"])
-                        self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                        self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                         self._remove_peer(_peer_id)
                 else:
                     logger.warning("(%s) Peer %s has FAILED - no individual password configured and no global passphrase", self._system, _this_peer["RADIO_ID"])
-                    self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                     self._remove_peer(_peer_id)
             else:
-                self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                 logger.info("(%s) Login challenge from Radio ID that has not logged in: %s", self._system, int_id(_peer_id))
 
         elif _command == RPTC:
@@ -1868,10 +1888,8 @@ class HBPProtocol(DatagramProtocol):
                 _peer_id = _data[5:9]
                 if _peer_id in self._peers and self._peers[_peer_id]["CONNECTION"] == "YES" and self._peers[_peer_id]["SOCKADDR"] == _sockaddr:
                     logger.info("(%s) Peer is closing down: %s (%s)", self._system, _rptc_field_str(self._peers[_peer_id]["CALLSIGN"]), int_id(_peer_id))
-                    self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
-                    self._remove_peer(_peer_id)
-                    self._reset_if_no_peers()
-                    self._push_config_to_monitor()
+                    self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
+                    self.drop_peer(_peer_id)
             else:
                 _peer_id = _data[4:8]
                 if _peer_id in self._peers and self._peers[_peer_id]["CONNECTION"] == "WAITING_CONFIG" and self._peers[_peer_id]["SOCKADDR"] == _sockaddr:
@@ -1904,12 +1922,12 @@ class HBPProtocol(DatagramProtocol):
                         self._remove_peer(_peer_id)
                         if self._config.get("PROXY_CONTROL"):
                             self.proxy_IPBlackList(_peer_id, _sockaddr)
-                        self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                        self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                         if not self._peers:
                             self._CONFIG.setdefault("SYSTEMS", {}).setdefault(self._system, {})["_reset"] = True
                         logger.info("(%s) Callsign does not match subscriber database: ID: %s, Sent Call: %s, DB call %s", self._system, int_id(_peer_id), _sent_call, self.validate_id(_peer_id))
                     else:
-                        self.send_peer(_peer_id, b"".join([RPTACK, _peer_id]))
+                        self.send_peer(_peer_id, b"".join([self.REPLY_ACK, _peer_id]))
                         logger.info(
                             "(%s) Peer %s (%s) has sent repeater configuration, Package ID: %s, Software ID: %s, Desc: %s",
                             self._system,
@@ -1932,7 +1950,7 @@ class HBPProtocol(DatagramProtocol):
                                 lambda tgids: self._mark_downlink_index_dirty() if tgids else tgids
                             )
                 else:
-                    self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                    self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                     logger.info("(%s) Peer info from Radio ID that has not logged in: %s", self._system, int_id(_peer_id))
 
         elif _command == RPTO:
@@ -1943,7 +1961,7 @@ class HBPProtocol(DatagramProtocol):
                 _this_peer["OPTIONS"] = normalize_fixed_width_bytes(_data[8:])
                 invalidate_peer_options_cache(_this_peer)
                 self._mark_downlink_index_dirty()
-                self.send_peer(_peer_id, b"".join([RPTACK, _peer_id]))
+                self.send_peer(_peer_id, b"".join([self.REPLY_ACK, _peer_id]))
                 _opt_log = redact_pass_in_options(_this_peer["OPTIONS"])
                 logger.info(
                     "(%s) Peer %s has sent options %s",
@@ -1979,7 +1997,7 @@ class HBPProtocol(DatagramProtocol):
                             )
                 self._push_config_to_monitor()
             else:
-                self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                 logger.info("(%s) Options from Radio ID that is not logged: %s", self._system, int_id(_peer_id))
 
         elif _command == RPTP:
@@ -1987,10 +2005,10 @@ class HBPProtocol(DatagramProtocol):
             if _peer_id in self._peers and self._peers[_peer_id]["CONNECTION"] == "YES" and self._peers[_peer_id]["SOCKADDR"] == _sockaddr:
                 self._peers[_peer_id]["PINGS_RECEIVED"] += 1
                 self._peers[_peer_id]["LAST_PING"] = time.time()
-                self.send_peer(_peer_id, b"".join([MSTPONG, _peer_id]))
+                self.send_peer(_peer_id, b"".join([self.REPLY_PONG, _peer_id]))
                 logger.log(logging.TRACE if hasattr(logging, "TRACE") else logging.DEBUG, "(%s) Received and answered RPTPING from peer %s (%s)", self._system, _rptc_field_str(self._peers[_peer_id]["CALLSIGN"]), int_id(_peer_id))
             else:
-                self.transport.write(b"".join([MSTNAK, _peer_id]), _sockaddr)
+                self.transport.write(b"".join([self.REPLY_NAK, _peer_id]), _sockaddr)
                 logger.info("(%s) Ping from Radio ID that is not logged in: %s", self._system, int_id(_peer_id))
 
         elif _command == DMRA:
@@ -2063,33 +2081,17 @@ class HBPProtocol(DatagramProtocol):
                 _seq = _data[4]
                 _rf_src = _data[5:8]
                 _dst_id = _data[8:11]
-                _bits = _data[15]
-                _slot = 2 if (_bits & 0x80) else 1
-                if _bits & 0x40:
-                    _call_type = "unit"
-                elif (_bits & 0x23) == 0x23:
-                    _call_type = "vcsbk"
-                else:
-                    _call_type = "group"
-                _frame_type = (_bits & 0x30) >> 4
-                _dtype_vseq = _bits & 0xF
-                _stream_id = _data[16:20]
-                if not int_id(_stream_id):
-                    logger.warning("(%s) CALL DROPPED AS STREAM ID IS NULL FROM SUBSCRIBER %s", self._system, int_id(_rf_src))
-                    return
                 pkt_time = time.time()
                 _int_dst_id = int_id(_dst_id)
-                _unit_service_dst = _call_type == "unit" and is_on_demand_service_dst(_int_dst_id)
-                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
-                _rx_type_before = self.STATUS.get(_slot, {}).get("RX_TYPE") if _unit_service_dst else None
-                if self._acl_rejects_dmrd(_rf_src, _dst_id, _slot, _stream_id, _unit_service_dst):
+                _admitted = self.admit_dmrd(_data, _peer_id, _rf_src, _dst_id, _int_dst_id, pkt_time)
+                if _admitted is None:
                     return
-                # SUB_MAP update (legacy routerHBP.dmrd_received). 4th element
-                # (peer_id) is new — see the MASTER-mode write site for why.
-                if self._learns_sub_map:
-                    sub_map = self._CONFIG.get("_SUB_MAP")
-                    if sub_map is not None:
-                        sub_map[_rf_src] = (self._system, _slot, pkt_time, _peer_id)
+                _slot, _call_type, _frame_type, _dtype_vseq, _stream_id = _admitted
+                # Read before this frame updates it: an on-demand request is the VTERM of a live call.
+                _rx_type_before = (
+                    self.STATUS.get(_slot, {}).get("RX_TYPE")
+                    if _call_type == "unit" and is_on_demand_service_dst(_int_dst_id) else None
+                )
                 # TG 4000: reset after ACL/SUB_MAP (legacy order — routerHBP.dmrd_received)
                 if self._handle_tg4000_packet(
                     _peer_id, _slot, _int_dst_id, _call_type, _frame_type, _dtype_vseq,
@@ -2114,14 +2116,7 @@ class HBPProtocol(DatagramProtocol):
                 if _slot in self.STATUS and not _unit_data:
                     if _stream_id != self.STATUS[_slot].get("RX_STREAM_ID"):
                         self.STATUS[_slot]["RX_START"] = pkt_time
-                        if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD and len(dmrpkt) >= 33:
-                            try:
-                                decoded_slot = decode.voice_head_term(dmrpkt)
-                                self.STATUS[_slot]["RX_LC"] = decoded_slot["LC"]
-                            except Exception:
-                                self.STATUS[_slot]["RX_LC"] = LC_OPT + _dst_id + _rf_src
-                        else:
-                            self.STATUS[_slot]["RX_LC"] = LC_OPT + _dst_id + _rf_src
+                        self.STATUS[_slot]["RX_LC"] = frame_lc(_frame_type, _dtype_vseq, dmrpkt, _dst_id, _rf_src)
                 _accepted = False
                 if self._dmrd_received:
                     _accepted = self._dmrd_received(

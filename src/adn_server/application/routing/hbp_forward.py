@@ -46,6 +46,7 @@ from __future__ import annotations
 import logging
 import time
 from hashlib import blake2b
+from typing import Any
 
 from ...domain import bytes_4, int_id
 from .helpers import (
@@ -174,6 +175,9 @@ class HbpForwardMixin:
         stream_id: bytes,
         data: bytes,
         pkt_time: float,
+        protocols: dict[str, Any],
+        src_proto: Any,
+        slot_st: dict[str, Any] | None,
         *,
         loop_guard_check: bool = True,
         terminator: bool = False,
@@ -184,16 +188,13 @@ class HbpForwardMixin:
         Uses ingress ``pkt_time`` (UDP receive time) for rate/timeout parity with legacy.
         ``loop_guard_check`` is False for plugin / server announcement frames.
         """
-        protocols = self._get_protocols() if self._get_protocols else {}
-        src_proto = protocols.get(system_name)
-        if not src_proto:
+        if slot_st is None:
             return True
         systems_cfg = self._config.get("SYSTEMS", {})
-        _slot_st = getattr(src_proto, "STATUS", {}).get(slot, {})
-        _is_new_stream = stream_id != _slot_st.get("RX_STREAM_ID")
+        _is_new_stream = stream_id != slot_st.get("RX_STREAM_ID")
         if _is_new_stream:
-            _slot_st.pop("_suppress_uplink", None)
-            _slot_st.pop("_silent_activation_tg", None)
+            slot_st.pop("_suppress_uplink", None)
+            slot_st.pop("_silent_activation_tg", None)
             # Echo of the same caller on the same TG from another ingress (transcoding
             # bridge loop): stream-ID loop control below cannot see it.
             if loop_guard_check and loop_guard_drops(
@@ -209,7 +210,7 @@ class HbpForwardMixin:
                 self._config, system_name, sys_cfg, connected_count=connected,
             )
             if hbp_ingress_new_stream_collision(
-                _slot_st, peer_id, rf_src, stream_id, pkt_time, per_peer=per_peer,
+                slot_st, peer_id, rf_src, stream_id, pkt_time, per_peer=per_peer,
             ):
                 self._log_ingress_warning_once(
                     self._ingress_drop_key(
@@ -235,11 +236,11 @@ class HbpForwardMixin:
                         "(%s) TG %s has active QSO — activating dynamic TG silently for peer %s (uplink suppressed)",
                         system_name, int_id(dst_id), int_id(peer_id),
                     )
-                    _slot_st["_suppress_uplink"] = True
-                    _slot_st["_silent_activation_tg"] = int_id(dst_id)
+                    slot_st["_suppress_uplink"] = True
+                    slot_st["_silent_activation_tg"] = int_id(dst_id)
                     # Bind stream early so voice frames do not re-enter the new-stream
                     # path and spam silent-activation logs (udp_hbp parity).
-                    _slot_st["RX_STREAM_ID"] = stream_id
+                    slot_st["RX_STREAM_ID"] = stream_id
                 else:
                     self._log_ingress_warning_once(
                         self._ingress_drop_key(
@@ -268,24 +269,24 @@ class HbpForwardMixin:
                 )
                 return False
             self._clear_ingress_drop_log(system_name, peer_id, dst_id, stream_id, slot)
-            _slot_st["packets"] = 0
-            _slot_st["loss"] = 0
-            _slot_st["crcs"] = set()
-            _slot_st["LOOPLOG"] = False
-            _slot_st.pop("_bcsq", None)
-            _slot_st["lastSeq"] = False
-            _slot_st["lastData"] = False
-            _slot_st["RX_START"] = pkt_time
-        if _slot_st.get("lastData") and _slot_st["lastData"] == data and seq > 1:
-            _slot_st["loss"] = _slot_st.get("loss", 0) + 1
+            slot_st["packets"] = 0
+            slot_st["loss"] = 0
+            slot_st["crcs"] = set()
+            slot_st["LOOPLOG"] = False
+            slot_st.pop("_bcsq", None)
+            slot_st["lastSeq"] = False
+            slot_st["lastData"] = False
+            slot_st["RX_START"] = pkt_time
+        if slot_st.get("lastData") and slot_st["lastData"] == data and seq > 1:
+            slot_st["loss"] = slot_st.get("loss", 0) + 1
             logger.debug(
                 "(%s) *PacketControl* last packet is a complete duplicate, discarding. Stream ID: %s TGID: %s",
                 system_name, int_id(stream_id), int_id(dst_id),
             )
             return False
-        _slot_st["packets"] = _slot_st.get("packets", 0) + 1
-        _pkts = _slot_st["packets"]
-        _rx_start = _slot_st.get("RX_START", pkt_time)
+        slot_st["packets"] = slot_st.get("packets", 0) + 1
+        _pkts = slot_st["packets"]
+        _rx_start = slot_st.get("RX_START", pkt_time)
         if _pkts > 18 and _rx_start < pkt_time:
             _rate = _pkts / (pkt_time - _rx_start)
             if _rate > 25:
@@ -293,16 +294,16 @@ class HbpForwardMixin:
                     "(%s) *PacketControl* RATE DROP! Stream ID: %s TGID: %s",
                     system_name, int_id(stream_id), int_id(dst_id),
                 )
-                _slot_st["LAST"] = pkt_time
+                slot_st["LAST"] = pkt_time
                 return False
         if _rx_start + 180 < pkt_time:
-            if not _slot_st.get("LOOPLOG"):
+            if not slot_st.get("LOOPLOG"):
                 logger.info(
                     "(%s) HBP *SOURCE TIMEOUT* STREAM ID: %s, TG: %s, TS: %s, IGNORE THIS SOURCE",
                     system_name, int_id(stream_id), int_id(dst_id), slot,
                 )
-                _slot_st["LOOPLOG"] = True
-            _slot_st["LAST"] = pkt_time
+                slot_st["LOOPLOG"] = True
+            slot_st["LAST"] = pkt_time
             return False
         for other_name, proto in protocols.items():
             if other_name == system_name:
@@ -315,13 +316,13 @@ class HbpForwardMixin:
                 for _sysslot in ostatus:
                     ss = ostatus.get(_sysslot)
                     if isinstance(ss, dict) and stream_id == ss.get("RX_STREAM_ID"):
-                        if not _slot_st.get("LOOPLOG"):
+                        if not slot_st.get("LOOPLOG"):
                             logger.debug(
                                 "(%s) HBP *LoopControl* FIRST HBP: %s, STREAM ID: %s, TG: %s, TS: %s, IGNORE THIS SOURCE",
                                 system_name, other_name, int_id(stream_id), int_id(dst_id), _sysslot,
                             )
-                            _slot_st["LOOPLOG"] = True
-                        _slot_st["LAST"] = pkt_time
+                            slot_st["LOOPLOG"] = True
+                        slot_st["LAST"] = pkt_time
                         return False
             else:
                 obp_st = ostatus.get(stream_id)
@@ -331,41 +332,41 @@ class HbpForwardMixin:
                     and obp_st.get("TGID") == dst_id
                     and not obp_st.get("_fin")
                 ):
-                    if not _slot_st.get("LOOPLOG"):
+                    if not slot_st.get("LOOPLOG"):
                         logger.debug(
                             "(%s) HBP *LoopControl* FIRST OBP %s, STREAM ID: %s, TG %s, IGNORE THIS SOURCE",
                             system_name, other_name, int_id(stream_id), int_id(dst_id),
                         )
-                        _slot_st["LOOPLOG"] = True
-                    _slot_st["LAST"] = pkt_time
+                        slot_st["LOOPLOG"] = True
+                    slot_st["LAST"] = pkt_time
                     if (
                         systems_cfg.get(system_name, {}).get("ENHANCED_OBP")
-                        and "_bcsq" not in _slot_st
+                        and "_bcsq" not in slot_st
                     ):
                         if hasattr(src_proto, "_obp_send_bcsq"):
                             src_proto._obp_send_bcsq(dst_id, stream_id)
-                        _slot_st["_bcsq"] = True
+                        slot_st["_bcsq"] = True
                     return False
         _step = seq_advance(
-            _slot_st.get("lastSeq"), seq, pkt_time - _slot_st.get("lastSeqTime", pkt_time),
+            slot_st.get("lastSeq"), seq, pkt_time - slot_st.get("lastSeqTime", pkt_time),
             terminator=terminator,
         )
         if _step <= 0:  # same sequence again, or a late / out-of-order packet
-            _slot_st["loss"] = _slot_st.get("loss", 0) + 1
+            slot_st["loss"] = slot_st.get("loss", 0) + 1
             return False
         _h = blake2b(digest_size=16)
         _h.update(data)
         _pkt_crc = _h.digest()
-        if seq > 0 and "crcs" in _slot_st and _pkt_crc in _slot_st["crcs"]:
-            _slot_st["loss"] = _slot_st.get("loss", 0) + 1
+        if seq > 0 and "crcs" in slot_st and _pkt_crc in slot_st["crcs"]:
+            slot_st["loss"] = slot_st.get("loss", 0) + 1
             return False
         if _step > 1:
-            _slot_st["loss"] = _slot_st.get("loss", 0) + _step - 1
-        _slot_st["lastSeq"] = seq
-        _slot_st["lastSeqTime"] = pkt_time
-        _slot_st["lastData"] = data
-        if "crcs" in _slot_st:
-            _slot_st["crcs"].add(_pkt_crc)
+            slot_st["loss"] = slot_st.get("loss", 0) + _step - 1
+        slot_st["lastSeq"] = seq
+        slot_st["lastSeqTime"] = pkt_time
+        slot_st["lastData"] = data
+        if "crcs" in slot_st:
+            slot_st["crcs"].add(_pkt_crc)
         return True
 
 

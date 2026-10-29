@@ -65,6 +65,29 @@ def learn_sub_map(
     return True
 
 
+def sub_map_heard_at(config: dict[str, Any], rf_src: bytes) -> float | None:
+    sub_map = config.get("_SUB_MAP")
+    entry = sub_map.get(rf_src) if sub_map else None
+    return None if entry is None else entry[2]
+
+
+def sub_map_peer(config: dict[str, Any], rf_src: bytes, system_name: str) -> bytes | None:
+    """The peer of ``system_name`` where ``rf_src`` was last heard; None when it was heard elsewhere or never."""
+    sub_map = config.get("_SUB_MAP")
+    entry = sub_map.get(rf_src) if sub_map else None
+    if entry is None or entry[0] != system_name or len(entry) < 4:
+        return None
+    return entry[3]
+
+
+def forget_sub_map(config: dict[str, Any], rf_src: bytes, system_name: str, peer_id: bytes) -> bool:
+    """Drop ``rf_src`` from SUB_MAP only while it still points at ``system_name`` / ``peer_id``."""
+    if sub_map_peer(config, rf_src, system_name) != peer_id:
+        return False
+    del config["_SUB_MAP"][rf_src]
+    return True
+
+
 def purge_non_learning_systems(config: dict[str, Any]) -> int:
     """Drop SUB_MAP entries that point at a system with ``SUB_MAP_LEARN: false``.
 

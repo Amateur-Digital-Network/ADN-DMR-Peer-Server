@@ -112,7 +112,7 @@ def _upsert_inband_sink(
     )
 
 
-def _upsert_static_off(
+def upsert_static_leg(
     store: SubscriptionStore,
     *,
     system: str,
@@ -438,7 +438,7 @@ def make_static_tg_store(
     # Legacy make_static_tg always sets ACTIVE True (TO_TYPE OFF); SINGLE_MODE contention
     # is handled in-band during QSO, not by withholding static arm on OPTIONS/RPTO.
     del single_mode  # reserved for callers; parity with bridge_master.make_static_tg
-    _upsert_static_off(
+    upsert_static_leg(
         store,
         system=system,
         tg=tg,

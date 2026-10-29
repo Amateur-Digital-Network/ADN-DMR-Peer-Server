@@ -27,6 +27,7 @@ The **ADN DMR Peer Server** is a [GPL-3.0](https://www.gnu.org/licenses/gpl-3.0.
 | Voice / TTS | [Voice, announcements, and TTS](server/user-guide/voice-and-tts.md) |
 | Legacy dashboard + server 2.x | [Report proxy](server/user-guide/report-proxy.md) |
 | OpenBridge / DMRE | [OpenBridge](server/protocols/openbridge.md), [DMRE v5](server/protocols/dmre-v5.md), [OBP proxy](server/user-guide/obp-proxy.md) |
+| DMR Tier III sites (dmrtc + DMRGateway) | [DMR Tier III trunking](server/user-guide/tier3-trunking.md), [Tier III protocol](server/protocols/tier3.md) |
 | HBP | [HBP](server/protocols/hbp.md) |
 | Code layout | [Architecture](server/development/architecture.md), [Behaviour and timers](server/development/behaviour-and-timers.md) |
 | Credits, license, lineage | [Credits & license](server/user-guide/attribution.md) |
