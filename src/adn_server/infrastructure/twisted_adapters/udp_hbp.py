@@ -54,6 +54,7 @@ from ...application.routing.helpers import (
     clear_peer_rx_status_slots,
     clear_peer_ua_sessions,
     derive_peer_rf_mode,
+    frame_lc,
     hbp_master_ingress_repeat_allowed,
     is_on_demand_service_dst,
     is_server_originated_voice,
@@ -67,13 +68,13 @@ from ...application.routing.helpers import (
     peer_should_receive_group_voice,
     peer_single_exclusive_tgid,
     peer_voice_busy_for_unit_data,
+    record_slot_rx,
     register_peer_ua_session,
     resolve_voice_peer_id,
     seed_peer_ua_session_from_status,
     synthetic_group_dmrd_burst_packet,
     synthetic_group_dmrd_route_packet,
     tg4000_reset_on_vhead,
-    track_rx_stream,
 )
 from ...application.routing.peer_downlink_index import (
     build_peer_downlink_index,
@@ -84,8 +85,6 @@ from ...application.routing.peer_downlink_index import (
 from ...application.routing.sub_map_learning import system_learns_sub_map
 from ...application.server_voice import all_server_voice_ids
 from ...domain import bytes_3, bytes_4, int_id, slot_frame_type
-from ...domain.dmr import decode
-from ...domain.dmr.const import LC_OPT
 from ...domain.hbp_protocol import normalize_fixed_width_ascii, normalize_fixed_width_bytes
 from ...domain.mesh_admission import AclRules, AdmissionContext, Rejection, server_prefix
 from ...domain.mesh_routing import MeshEgress, MeshIngress, PeerMeshConfig
@@ -1736,32 +1735,14 @@ class HBPProtocol(DatagramProtocol):
                 if _accepted:
                     if _slot in self.STATUS and not _unit_data:
                         _suppress = self.STATUS[_slot].get("_suppress_uplink")
-                        if _stream_id != self.STATUS[_slot].get("RX_STREAM_ID"):
-                            if not _suppress:
-                                self.STATUS[_slot]["RX_START"] = pkt_time
-                            if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD and len(dmrpkt) >= 33:
-                                try:
-                                    decoded_slot = decode.voice_head_term(dmrpkt)
-                                    if not _suppress:
-                                        self.STATUS[_slot]["RX_LC"] = decoded_slot["LC"]
-                                except Exception:
-                                    if not _suppress:
-                                        self.STATUS[_slot]["RX_LC"] = LC_OPT + _dst_id + _rf_src
-                            else:
-                                if not _suppress:
-                                    self.STATUS[_slot]["RX_LC"] = LC_OPT + _dst_id + _rf_src
+                        if _stream_id != self.STATUS[_slot].get("RX_STREAM_ID") and not _suppress:
+                            self.STATUS[_slot]["RX_START"] = pkt_time
+                            self.STATUS[_slot]["RX_LC"] = frame_lc(_frame_type, _dtype_vseq, dmrpkt, _dst_id, _rf_src)
                         if not _suppress:
-                            self.STATUS[_slot]["RX_PEER"] = _peer_id
-                            self.STATUS[_slot]["RX_SEQ"] = _seq
-                            self.STATUS[_slot]["RX_RFS"] = _rf_src
-                            self.STATUS[_slot]["RX_TYPE"] = slot_frame_type(_frame_type, _dtype_vseq)
-                            self.STATUS[_slot]["RX_TGID"] = _dst_id
-                            self.STATUS[_slot]["RX_TIME"] = pkt_time
-                            if _call_type in ("group", "vcsbk"):
-                                track_rx_stream(
-                                    self.STATUS[_slot], _stream_id, _peer_id, _rf_src, _dst_id, pkt_time,
-                                    ended=_frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VTERM,
-                                )
+                            record_slot_rx(
+                                self.STATUS[_slot], _peer_id, _seq, _rf_src, _dst_id,
+                                _call_type, _frame_type, _dtype_vseq, _stream_id, pkt_time,
+                            )
                         # Always track RX_STREAM_ID so subsequent frames of a suppressed
                         # stream are not re-evaluated as a new stream (which would clear
                         # _suppress_uplink and leak the uplink to the network).
@@ -2135,14 +2116,7 @@ class HBPProtocol(DatagramProtocol):
                 if _slot in self.STATUS and not _unit_data:
                     if _stream_id != self.STATUS[_slot].get("RX_STREAM_ID"):
                         self.STATUS[_slot]["RX_START"] = pkt_time
-                        if _frame_type == HBPF_DATA_SYNC and _dtype_vseq == HBPF_SLT_VHEAD and len(dmrpkt) >= 33:
-                            try:
-                                decoded_slot = decode.voice_head_term(dmrpkt)
-                                self.STATUS[_slot]["RX_LC"] = decoded_slot["LC"]
-                            except Exception:
-                                self.STATUS[_slot]["RX_LC"] = LC_OPT + _dst_id + _rf_src
-                        else:
-                            self.STATUS[_slot]["RX_LC"] = LC_OPT + _dst_id + _rf_src
+                        self.STATUS[_slot]["RX_LC"] = frame_lc(_frame_type, _dtype_vseq, dmrpkt, _dst_id, _rf_src)
                 _accepted = False
                 if self._dmrd_received:
                     _accepted = self._dmrd_received(
