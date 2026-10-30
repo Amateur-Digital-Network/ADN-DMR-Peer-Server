@@ -101,6 +101,7 @@ from adn_server.infrastructure.security.password_download import (
 from adn_server.infrastructure.security.user_passwords_loader import UserPasswordsLoader
 from adn_server.infrastructure.subscription_store import InMemorySubscriptionStore
 from adn_server.infrastructure.talker_alias_emblc import default_ta_emblc_encoder
+from adn_server.infrastructure.twisted_adapters.alias_reload import AliasReloader
 from adn_server.infrastructure.twisted_adapters.looping import start_loop
 from adn_server.infrastructure.twisted_adapters.report.mqtt_config import mqtt_settings_from_config
 from adn_server.infrastructure.twisted_adapters.report.mqtt_publisher import (
@@ -549,57 +550,23 @@ def run_peer_server(
     # within minutes instead of waiting up to a full STALE_DAYS cycle. Once files are fresh,
     # each tick is a cheap mtime check with no network call.
     alias_poll_interval = _resolve_alias_poll_interval(aliases_cfg, logger)
-    alias_reload_state: dict[str, Any] = {"generation": 0, "pending": False}
 
-    def alias_reload_loop():
-        alias_reload_state["generation"] += 1
-        my_generation = alias_reload_state["generation"]
-        if alias_reload_state["pending"]:
-            logger.warning(
-                "(ALIAS) previous alias download still running after %gs, starting a new "
-                "attempt (gen %s); its result will be discarded if it arrives late",
-                alias_poll_interval,
-                my_generation,
-            )
-        alias_reload_state["pending"] = True
-        logger.debug("(ALIAS) starting alias thread (gen %s)", my_generation)
-        # Downloads and parsing run in the thread pool; only the config swap comes
-        # back to the reactor thread.
-        def _load_off_reactor():
-            loaded = alias_loader.load_aliases(config)
-            if isinstance(alias_loader, DefaultAliasLoader):
-                return loaded, alias_loader.load_subscriber_profiles(config)
-            return loaded, None
+    # Downloads and parsing run on the reload thread; only the config swap comes
+    # back to the reactor thread.
+    def _load_off_reactor():
+        loaded = alias_loader.load_aliases(config)
+        if isinstance(alias_loader, DefaultAliasLoader):
+            return loaded, alias_loader.load_subscriber_profiles(config)
+        return loaded, None
 
-        d = threads.deferToThread(_load_off_reactor)
+    def _apply_aliases(result):
+        loaded, profiles = result
+        DefaultAliasLoader.merge_reload_into_config(config, alias_loader, *loaded, profiles=profiles)
+        _log_alias_health(config, config.get("SYSTEMS", {}), logger)
 
-        def _apply(result):
-            loaded, profiles = result
-            if my_generation != alias_reload_state["generation"]:
-                logger.info(
-                    "(ALIAS) discarding alias download result from a superseded attempt "
-                    "(gen %s, current gen %s)",
-                    my_generation,
-                    alias_reload_state["generation"],
-                )
-                return
-            alias_reload_state["pending"] = False
-            DefaultAliasLoader.merge_reload_into_config(
-                config, alias_loader, *loaded, profiles=profiles
-            )
-            _log_alias_health(config, config.get("SYSTEMS", {}), logger)
-
-        def _fail(failure):
-            if my_generation == alias_reload_state["generation"]:
-                alias_reload_state["pending"] = False
-            logger.warning(
-                "(ALIAS) alias reload failed (gen %s): %s", my_generation, failure.getErrorMessage()
-            )
-
-        d.addCallback(_apply)
-        d.addErrback(_fail)
-
-    start_loop(alias_reload_loop, alias_poll_interval, logger)
+    alias_reloader = AliasReloader(_load_off_reactor, _apply_aliases, reactor, logger, alias_poll_interval)
+    alias_reloader.start()
+    start_loop(alias_reloader.tick, alias_poll_interval, logger, name="alias_reload")
 
     # SubMapTrimmer + save. Every 300s, but it writes only when a route changed: a
     # restart used to lose up to an hour of routes (Docker rarely delivers the
