@@ -1,0 +1,32 @@
+# ADN ODTP gateway — config (copy to adn-odtp.yaml; do not commit).
+#
+# Separate process, same binary as adn-server:
+#   python adn-server.py --odtp -c adn-odtp.yaml
+#
+# Each phone app / IP terminal that logs in over ODTP becomes one HBP PEER of
+# MASTER_IP:MASTER_PORT (ID = DMR ID x 100 + PEER_SUFFIX; a 9-digit login is used as is
+# and talks as login // 100), authenticated with the user's own (selfcare) password and sent
+# with OPTIONS TERMINAL=1. See docs/en/server/user-guide/odtp.md.
+
+LOGGER:
+  LOG_FILE: /var/log/adn-server/odtp.log
+  LOG_LEVEL: INFO
+
+ODTP:
+  LISTEN_IP: 0.0.0.0
+  LISTEN_PORT: 54006            # UDP port the apps connect to
+  MASTER_IP: 127.0.0.1          # the adn-server MASTER the terminals log in to
+  MASTER_PORT: 62031
+  PEER_SUFFIX: 98               # 0-99; suffix of the HBP peer ID (fallback 97 when it is taken)
+  SUBSCRIBERS_FILE: ""          # optional RadioID subscriber_ids.json: callsign sent in the RPTC
+
+  # Caps (each refusal is logged once per minute with counters)
+  MAX_SESSIONS: 500             # the MASTER's MAX_PEERS caps them too, shared with its hotspots
+  MAX_SESSIONS_PER_IP: 4
+  MAX_LOGINS_PER_MINUTE: 60
+
+  # Text messages from the app to radios: standard (ETSI), tms (Motorola) or hytera
+  SMS_FORMAT: standard
+  SMS_PREAMBLES: 2
+  # Private call target for the app's GPS position (0 = do not send)
+  LOCATION_DST: 0

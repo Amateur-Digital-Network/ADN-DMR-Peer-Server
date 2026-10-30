@@ -165,6 +165,11 @@ def peer_options_pass_only(options: Any) -> bool:
     return list(parsed.keys()) == ["PASS"] and bool(parsed["PASS"].strip())
 
 
+def peer_is_terminal(options: Any) -> bool:
+    """True when OPTIONS mark the peer as a terminal (``TERMINAL=1``): no MASTER statics for it."""
+    return parse_options_kv(options).get("TERMINAL", "").upper() in ("1", "TRUE", "YES")
+
+
 def peer_options_static_valid(options: Any) -> bool:
     """False when TS1/TS2 static lists contain non-numeric tokens (legacy bridge_master parity).
 

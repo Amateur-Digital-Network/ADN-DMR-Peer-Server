@@ -23,6 +23,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from adn_server.application.odtp.ports import SMS_FORMATS
 from adn_server.application.proxy.deployment import config_has_enabled_openbridge
 from adn_server.application.routing.loop_guard import MAX_LOOP_GUARD_HOLD_S
 
@@ -424,6 +425,35 @@ def _validate_system(name: str, sys_cfg: dict[str, Any], errors: list[str]) -> N
             _expect_number(f"{prefix}.{key}", sys_cfg[key], errors)
 
 
+_ODTP_INT_RANGES = {
+    "LISTEN_PORT": (1, 65535), "MASTER_PORT": (1, 65535), "PEER_SUFFIX": (0, 99), "MAX_SESSIONS": (1, 100000),
+    "MAX_SESSIONS_PER_IP": (1, 100000), "MAX_LOGINS_PER_MINUTE": (1, 100000), "SMS_PREAMBLES": (0, 10),
+    "LOCATION_DST": (0, 0xFFFFFF),
+}
+
+
+def _validate_odtp(odtp_cfg: Any, errors: list[str]) -> None:
+    if odtp_cfg is None:
+        return
+    if not isinstance(odtp_cfg, dict):
+        errors.append(f"ODTP: expected mapping, got {type(odtp_cfg).__name__}.")
+        return
+    for key in ("LISTEN_IP", "MASTER_IP", "SUBSCRIBERS_FILE"):
+        if key in odtp_cfg:
+            _expect_str(f"ODTP.{key}", odtp_cfg[key], errors)
+    for key, (low, high) in _ODTP_INT_RANGES.items():
+        value = odtp_cfg.get(key)
+        if _is_empty(value):
+            continue
+        before = len(errors)
+        _expect_int(f"ODTP.{key}", value, errors)
+        if len(errors) == before and not low <= value <= high:
+            errors.append(f"ODTP.{key}: {value} out of range {low}-{high}.")
+    fmt = odtp_cfg.get("SMS_FORMAT")
+    if not _is_empty(fmt) and fmt not in SMS_FORMATS:
+        errors.append(f"ODTP.SMS_FORMAT: {fmt!r}, expected one of {', '.join(SMS_FORMATS)}.")
+
+
 def validate_config(config: dict[str, Any], *, config_path: str | None = None) -> None:
     """Validate config structure and scalar types. Raises ConfigError with all issues found."""
     errors: list[str] = []
@@ -454,6 +484,7 @@ def validate_config(config: dict[str, Any], *, config_path: str | None = None) -
     )
     if proxy_port is not None and proxy_port == obp_port:
         errors.append(f"PROXY.LISTEN_PORT and OBP_PROXY.LISTEN_PORT: both {proxy_port}, would collide on bind.")
+    _validate_odtp(config.get("ODTP"), errors)
     if _config_requires_database(config):
         _validate_database(config.get("DATABASE"), errors)
 
