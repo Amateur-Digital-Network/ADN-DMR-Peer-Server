@@ -454,6 +454,29 @@ def _validate_odtp(odtp_cfg: Any, errors: list[str]) -> None:
         errors.append(f"ODTP.SMS_FORMAT: {fmt!r}, expected one of {', '.join(SMS_FORMATS)}.")
 
 
+def _validate_adn_panel(panel_cfg: Any, errors: list[str]) -> None:
+    """ADN_PANEL: report of this server to the ADN panel (optional, added by hand)."""
+    if panel_cfg is None:
+        return
+    if not isinstance(panel_cfg, dict):
+        errors.append(f"ADN_PANEL: expected mapping, got {type(panel_cfg).__name__}.")
+        return
+    for key in ("ENDPOINT", "TOKEN"):
+        if key in panel_cfg:
+            _expect_str(f"ADN_PANEL.{key}", panel_cfg[key], errors)
+    endpoint = panel_cfg.get("ENDPOINT")
+    if isinstance(endpoint, str) and endpoint.strip() and not endpoint.strip().startswith(("https://", "http://")):
+        errors.append(f"ADN_PANEL.ENDPOINT: {endpoint!r}, expected an http(s):// URL.")
+    for key, (low, high) in (("REPORT_INTERVAL", (60, 86400)), ("ODTP_PORT", (1, 65535))):
+        value = panel_cfg.get(key)
+        if _is_empty(value):
+            continue
+        before = len(errors)
+        _expect_int(f"ADN_PANEL.{key}", value, errors)
+        if len(errors) == before and not low <= value <= high:
+            errors.append(f"ADN_PANEL.{key}: {value} out of range {low}-{high}.")
+
+
 def validate_config(config: dict[str, Any], *, config_path: str | None = None) -> None:
     """Validate config structure and scalar types. Raises ConfigError with all issues found."""
     errors: list[str] = []
@@ -485,6 +508,7 @@ def validate_config(config: dict[str, Any], *, config_path: str | None = None) -
     if proxy_port is not None and proxy_port == obp_port:
         errors.append(f"PROXY.LISTEN_PORT and OBP_PROXY.LISTEN_PORT: both {proxy_port}, would collide on bind.")
     _validate_odtp(config.get("ODTP"), errors)
+    _validate_adn_panel(config.get("ADN_PANEL"), errors)
     if _config_requires_database(config):
         _validate_database(config.get("DATABASE"), errors)
 

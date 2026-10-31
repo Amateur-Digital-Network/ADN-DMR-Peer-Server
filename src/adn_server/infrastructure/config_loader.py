@@ -121,6 +121,9 @@ class YamlConfigLoader:
         # ODTP is the gateway's own config (adn-odtp.yaml).
         if isinstance(data.get("ODTP"), dict):
             config["ODTP"] = data["ODTP"]
+        # ADN_PANEL (endpoint and token from the panel) is added by hand by the sysop.
+        if isinstance(data.get("ADN_PANEL"), dict):
+            config["ADN_PANEL"] = data["ADN_PANEL"]
         # PLUGINS (directory, master_kill, overrides, send) is read by the plugin manager.
         if isinstance(data.get("PLUGINS"), dict):
             config["PLUGINS"] = data["PLUGINS"]

@@ -120,7 +120,7 @@ def merge_system_config(old_cfg: dict[str, Any], new_cfg: dict[str, Any]) -> dic
 
 
 def merge_top_level_config(config: dict[str, Any], incoming: dict[str, Any]) -> None:
-    """Update GLOBAL / REPORTS / ALIASES / LOGGER / … / PLUGINS in the live config dict."""
+    """Update GLOBAL / REPORTS / ALIASES / LOGGER / … / PLUGINS / ADN_PANEL in the live config dict."""
     kill_flag = config.get("GLOBAL", {}).get("_KILL_SERVER")
     for key in ("GLOBAL", "REPORTS", "ALIASES", "LOGGER", "PROXY", "OBP_PROXY", "DATABASE", "SELF_SERVICE"):
         if key not in incoming:
@@ -129,6 +129,11 @@ def merge_top_level_config(config: dict[str, Any], incoming: dict[str, Any]) -> 
     # PLUGINS always follows the file, absent included: it carries master_kill and the
     # per-plugin send permissions, whose removal must take effect on this reload.
     config["PLUGINS"] = copy.deepcopy(incoming.get("PLUGINS") or {})
+    # ADN_PANEL too: a new token, or removing the section, applies without a restart.
+    if "ADN_PANEL" in incoming:
+        config["ADN_PANEL"] = copy.deepcopy(incoming["ADN_PANEL"])
+    else:
+        config.pop("ADN_PANEL", None)
     if kill_flag is not None:
         config.setdefault("GLOBAL", {})["_KILL_SERVER"] = kill_flag
     for rk in _RUNTIME_TOP_KEYS:

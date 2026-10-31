@@ -117,6 +117,26 @@ Look up the same stream ID in the server log:
 - If the probe's `max_gap_s` matches the server's `Max gap`, the silence was already there when the call came in over the mesh. If only the probe shows it, or `terminated` is 0 while the server logged the call to its end, it appeared on the way from this server to the hotspot.
 - A hotspot listening to several TGs on one slot hears one stream at a time, so a stream that started while another one was playing reaches it late. That is not loss.
 
+## Report to the ADN panel (`ADN_PANEL`)
+
+The server can send the ADN panel its own state: version, uptime, the HBP port hotspots connect to, the ODTP and OBP proxy ports, how many peers are connected, its OpenBridge links with their keepalive state, and the plugins loaded. The panel shows it on the server's page and uses the ports in the public server list (so apps learn the ODTP port from there).
+
+It is off unless the sysop sets it up, and it is **not** in `adn-server.example.yaml`: generate a token on your server's page in the panel (the *Server report* action), then add the section by hand:
+
+```yaml
+ADN_PANEL:
+  ENDPOINT: <shown in the panel with the token>
+  TOKEN: adn_xxxxxxxxxxxx                   # belongs to this server only
+  REPORT_INTERVAL: 300                      # seconds, minimum 60 (default 300)
+  ODTP_PORT: 54006                          # optional: the ODTP gateway runs as its own service
+```
+
+- Without `ENDPOINT` and `TOKEN` nothing is sent.
+- The token says which server the report is from; a new token from the panel replaces the old one.
+- The report carries no IP addresses, passphrases or user IDs.
+- The first report goes out one minute after start, then every `REPORT_INTERVAL`. The POST runs off the reactor with a 10 s timeout, so a slow or unreachable panel never delays traffic.
+- A failure is logged once as `(ADN_PANEL) Could not send the report: ...` (HTTP 401/403 means the token is wrong or was revoked), and again when it works.
+
 ## Requirements
 
 - Network reachability from the **monitor host** to the server’s **`REPORTS.REPORT_PORT`** (and the server’s **`REPORT_CLIENTS`** allow list must include the monitor if used).

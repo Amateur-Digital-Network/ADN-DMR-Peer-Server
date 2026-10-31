@@ -117,6 +117,26 @@ Busca el mismo stream ID en el log del servidor:
 - Si el `max_gap_s` de la sonda coincide con el `Max gap` del servidor, el silencio ya venía en la llamada al entrar por la malla. Si solo lo ve la sonda, o `terminated` es 0 mientras el servidor registró la llamada hasta el final, apareció entre este servidor y el hotspot.
 - Un hotspot que escucha varios TG por un mismo slot oye un stream cada vez: uno que empezó mientras sonaba otro le llega tarde. Eso no es pérdida.
 
+## Informe al panel de ADN (`ADN_PANEL`)
+
+El servidor puede enviar al panel de ADN su propio estado: versión, tiempo encendido, el puerto HBP al que se conectan los hotspots, los puertos de ODTP y del proxy OBP, cuántos peers hay conectados, sus enlaces OpenBridge con el estado del keepalive y los plugins cargados. El panel lo muestra en la ficha del servidor y usa los puertos en la lista pública de servidores (de ahí sacan las apps el puerto ODTP).
+
+Está apagado salvo que el sysop lo configure, y **no** viene en `adn-server.example.yaml`: genera un token en la ficha de tu servidor en el panel (la acción *Informe del servidor*) y añade la sección a mano:
+
+```yaml
+ADN_PANEL:
+  ENDPOINT: <se muestra en el panel junto al token>
+  TOKEN: adn_xxxxxxxxxxxx                   # solo vale para este servidor
+  REPORT_INTERVAL: 300                      # segundos, mínimo 60 (300 por defecto)
+  ODTP_PORT: 54006                          # opcional: la pasarela ODTP es un servicio aparte
+```
+
+- Sin `ENDPOINT` y `TOKEN` no se envía nada.
+- El token dice de qué servidor es el informe; un token nuevo generado en el panel sustituye al anterior.
+- El informe no lleva direcciones IP, passphrases ni IDs de usuarios.
+- El primer informe sale un minuto después de arrancar y luego cada `REPORT_INTERVAL`. El envío va fuera del reactor con un timeout de 10 s, así que un panel lento o caído nunca retrasa el tráfico.
+- Un fallo se registra una sola vez como `(ADN_PANEL) Could not send the report: ...` (HTTP 401/403 = token incorrecto o revocado), y otra vez cuando vuelve a funcionar.
+
 ## Requisitos
 
 - Conectividad de red desde el **host del monitor** al **`REPORTS.REPORT_PORT`** del servidor (y la lista **`REPORT_CLIENTS`** del servidor debe incluir al monitor si se usa).
