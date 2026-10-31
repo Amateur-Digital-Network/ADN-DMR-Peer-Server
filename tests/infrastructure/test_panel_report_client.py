@@ -42,6 +42,11 @@ def panel():
 
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):
+            if self.path == "/moved":
+                self.send_response(302)
+                self.send_header("Location", "/api/ingest/server-report")
+                self.end_headers()
+                return
             body = self.rfile.read(int(self.headers["Content-Length"]))
             received.append({"auth": self.headers["Authorization"], "body": json.loads(body)})
             self.send_response(200 if self.headers["Authorization"] == "Bearer adn_ok" else 401)
@@ -81,3 +86,10 @@ def test_failures_are_logged_once_and_the_recovery(caplog):
         "(ADN_PANEL) Could not send the report: HTTP 401 (check ADN_PANEL.TOKEN in the panel)",
         "(ADN_PANEL) Report sent again (HTTP 200)",
     ]
+
+
+def test_redirect_is_a_failure_and_is_not_followed(panel):
+    url, received = panel
+    moved = url.replace("/api/ingest/server-report", "/moved")
+    assert send_panel_report(PanelReportSettings(moved, "adn_ok", 300, None), {}, "adn-server/test") == 302
+    assert received == []  # the token never reached the redirect target

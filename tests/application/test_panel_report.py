@@ -29,6 +29,7 @@ from adn_server.application.report.panel_report import (
     panel_report_settings,
 )
 from adn_server.domain.errors import ConfigError
+from adn_server.infrastructure.config_reload import merge_top_level_config
 from adn_server.infrastructure.config_validator import validate_config
 from tests.conftest import minimal_valid_config
 
@@ -94,6 +95,7 @@ def test_report_has_ports_peers_and_links_but_no_secrets():
     assert report["hbp_ports"] == [62031]
     assert report["odtp_port"] == 54006
     assert report["obp_proxy_port"] == 62032
+    assert report["peers"] == 1
     assert report["plugins"] == ["voice-announcements"]
     assert report["obp_links"] == [
         {"name": "OBP-2141", "network_id": 21410, "enhanced": False, "connected": None}
@@ -137,3 +139,36 @@ def test_config_validation_of_the_section():
         )
     assert "ADN_PANEL.ENDPOINT" in str(exc.value)
     assert "ADN_PANEL.REPORT_INTERVAL" in str(exc.value)
+
+
+def test_endpoint_must_be_https_except_on_localhost():
+    for endpoint in ("http://panel.example/api", "ftp://panel.example", "https://"):
+        assert panel_report_settings(_config(ENDPOINT=endpoint, TOKEN="adn_x")) is None
+    assert panel_report_settings(_config(ENDPOINT="http://127.0.0.1:8000/api", TOKEN="adn_x"))
+    assert panel_report_settings(_config(ENDPOINT="http://localhost/api", TOKEN="adn_x"))
+    with pytest.raises(ConfigError) as exc:
+        validate_config(
+            minimal_valid_config(ADN_PANEL={"ENDPOINT": "http://panel.example/api", "TOKEN": "adn_x"})
+        )
+    assert "https://" in str(exc.value)
+
+
+def test_masters_bound_to_loopback_are_not_reported():
+    config = _config(ENDPOINT="https://panel.example/api", TOKEN="adn_x")
+    del config["PROXY"]
+    config["SYSTEMS"]["GATEWAY"] = {"MODE": "MASTER", "ENABLED": True, "IP": "127.0.0.1", "PORT": 54100}
+    report = build_panel_report(
+        config, version="2.6.1", uptime_s=0, settings=panel_report_settings(config), now=2000.0
+    )
+    assert report["hbp_ports"] == [54000]
+
+
+def test_reload_follows_the_section_and_removing_it_stops_the_reports():
+    config = _config(ENDPOINT="https://panel.example/api", TOKEN="adn_old", REPORT_INTERVAL=300)
+
+    merge_top_level_config(config, {"ADN_PANEL": {"ENDPOINT": "https://panel.example/api", "TOKEN": "adn_new", "REPORT_INTERVAL": 120}})
+    settings = panel_report_settings(config)
+    assert (settings.token, settings.interval) == ("adn_new", 120)
+
+    merge_top_level_config(config, {})
+    assert panel_report_settings(config) is None

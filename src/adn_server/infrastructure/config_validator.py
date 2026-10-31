@@ -25,6 +25,7 @@ from typing import Any
 
 from adn_server.application.odtp.ports import SMS_FORMATS
 from adn_server.application.proxy.deployment import config_has_enabled_openbridge
+from adn_server.application.report.panel_report import endpoint_allowed
 from adn_server.application.routing.loop_guard import MAX_LOOP_GUARD_HOLD_S
 
 from ..domain.errors import ConfigError
@@ -465,8 +466,10 @@ def _validate_adn_panel(panel_cfg: Any, errors: list[str]) -> None:
         if key in panel_cfg:
             _expect_str(f"ADN_PANEL.{key}", panel_cfg[key], errors)
     endpoint = panel_cfg.get("ENDPOINT")
-    if isinstance(endpoint, str) and endpoint.strip() and not endpoint.strip().startswith(("https://", "http://")):
-        errors.append(f"ADN_PANEL.ENDPOINT: {endpoint!r}, expected an http(s):// URL.")
+    if isinstance(endpoint, str) and endpoint.strip() and not endpoint_allowed(endpoint.strip()):
+        errors.append(
+            f"ADN_PANEL.ENDPOINT: {endpoint!r}, expected an https:// URL (http only for localhost)."
+        )
     for key, (low, high) in (("REPORT_INTERVAL", (60, 86400)), ("ODTP_PORT", (1, 65535))):
         value = panel_cfg.get(key)
         if _is_empty(value):

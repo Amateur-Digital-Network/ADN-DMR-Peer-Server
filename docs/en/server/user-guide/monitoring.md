@@ -121,21 +121,23 @@ Look up the same stream ID in the server log:
 
 The server can send the ADN panel its own state: version, uptime, the HBP port hotspots connect to, the ODTP and OBP proxy ports, how many peers are connected, its OpenBridge links with their keepalive state, and the plugins loaded. The panel shows it on the server's page and uses the ports in the public server list (so apps learn the ODTP port from there).
 
-It is off unless the sysop sets it up, and it is **not** in `adn-server.example.yaml`: generate a token on your server's page in the panel (the *Server report* action), then add the section by hand:
+It is off unless the sysop sets it up (`adn-server.example.yaml` has the section commented out): generate a token on your server's page in the panel (the *Server report* action), which also shows the endpoint, then add the section by hand:
 
 ```yaml
 ADN_PANEL:
   ENDPOINT: <shown in the panel with the token>
   TOKEN: adn_xxxxxxxxxxxx                   # belongs to this server only
-  REPORT_INTERVAL: 300                      # seconds, minimum 60 (default 300)
+  REPORT_INTERVAL: 300                      # seconds, 60-86400 (default 300)
   ODTP_PORT: 54006                          # optional: the ODTP gateway runs as its own service
 ```
 
-- Without `ENDPOINT` and `TOKEN` nothing is sent.
+- Without `ENDPOINT` and `TOKEN` nothing is sent. The endpoint must be `https://` (plain `http://` only for localhost), and a redirect is treated as a failure, never followed, so the token cannot leak to another host.
 - The token says which server the report is from; a new token from the panel replaces the old one.
 - The report carries no IP addresses, passphrases or user IDs.
 - The first report goes out one minute after start, then every `REPORT_INTERVAL`. The POST runs off the reactor with a 10 s timeout, so a slow or unreachable panel never delays traffic.
 - A failure is logged once as `(ADN_PANEL) Could not send the report: ...` (HTTP 401/403 means the token is wrong or was revoked), and again when it works.
+- A config reload applies at once: a new token, a different `REPORT_INTERVAL`, or removing the section (which stops the reports).
+- Without the integrated proxy, `hbp_ports` lists the enabled MASTER ports except those bound to loopback (internal).
 
 ## Requirements
 

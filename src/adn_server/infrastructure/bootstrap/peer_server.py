@@ -518,15 +518,19 @@ def run_peer_server(
     start_loop(reporting_loop, report_interval, logger)
 
     # ADN panel report (ADN_PANEL, added by hand with the token from the panel). Settings
-    # are read on every tick, so a config reload can add, change or remove them.
-    # The payload is built on the reactor; the HTTP POST runs in a thread.
+    # are read on every tick, so a config reload can add, change or remove them, and
+    # the loop follows REPORT_INTERVAL. The payload is built on the reactor; the HTTP
+    # POST runs in a thread.
     panel_log = PanelReportLog(logger)
     panel_user_agent = f"adn-server/{__version__}"
+    panel_loop: list[Any] = []
 
     def panel_report_loop() -> None:
         settings = panel_report_settings(config)
         if settings is None:
             return
+        if panel_loop and panel_loop[0].interval != settings.interval:
+            panel_loop[0].interval = settings.interval
         payload = build_panel_report(
             config,
             version=__version__,
@@ -543,7 +547,9 @@ def run_peer_server(
     if panel_settings is not None:
         logger.info("(ADN_PANEL) Reporting to %s every %s s", panel_settings.url, panel_interval)
     # First report once hotspots and OBP links had time to connect.
-    reactor.callLater(60, lambda: start_loop(panel_report_loop, panel_interval, logger))
+    reactor.callLater(
+        60, lambda: panel_loop.append(start_loop(panel_report_loop, panel_interval, logger))
+    )
 
     # LoopingCalls (legacy intervals). rule_timer / stat_trimmer mutate SubscriptionStore on reactor
     # Timer loops run on the reactor thread (no deferToThread — avoids races with dmrd_received).

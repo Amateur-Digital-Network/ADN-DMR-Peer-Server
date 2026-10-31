@@ -26,9 +26,11 @@ it is not in the config template. Without ENDPOINT and TOKEN nothing is sent.
 
 from __future__ import annotations
 
+import ipaddress
 from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlsplit
 
 from adn_server.application.proxy.deployment import (
     obp_proxy_enabled,
@@ -51,6 +53,26 @@ class PanelReportSettings:
     odtp_port: int | None
 
 
+def is_loopback_host(host: str | None) -> bool:
+    if not host:
+        return False
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def endpoint_allowed(endpoint: str) -> bool:
+    """https only: the bearer token must not travel in cleartext. http is accepted for
+    localhost, where tests or a local relay may listen."""
+    parts = urlsplit(endpoint)
+    if parts.scheme == "https":
+        return bool(parts.hostname)
+    return parts.scheme == "http" and is_loopback_host(parts.hostname)
+
+
 def panel_report_settings(config: dict[str, Any]) -> PanelReportSettings | None:
     """``ADN_PANEL`` settings, or None when the server does not report to the panel."""
     block = config.get("ADN_PANEL")
@@ -58,7 +80,7 @@ def panel_report_settings(config: dict[str, Any]) -> PanelReportSettings | None:
         return None
     endpoint = str(block.get("ENDPOINT") or "").strip().rstrip("/")
     token = str(block.get("TOKEN") or "").strip()
-    if not endpoint or not token:
+    if not endpoint or not token or not endpoint_allowed(endpoint):
         return None
     interval = max(int(block.get("REPORT_INTERVAL") or DEFAULT_INTERVAL), MIN_INTERVAL)
     odtp_port = block.get("ODTP_PORT")
@@ -71,7 +93,8 @@ def panel_report_settings(config: dict[str, Any]) -> PanelReportSettings | None:
 
 
 def _hbp_ports(config: dict[str, Any]) -> list[int]:
-    """Ports hotspots connect to: the integrated proxy's, else each enabled MASTER's."""
+    """Ports hotspots connect to: the integrated proxy's, else each enabled MASTER's
+    except those bound to loopback (internal, e.g. a local gateway's master)."""
     if proxy_target_system(config) is not None:
         return [int(config.get("PROXY", {}).get("LISTEN_PORT", 62031))]
     ports = {
@@ -81,6 +104,7 @@ def _hbp_ports(config: dict[str, Any]) -> list[int]:
         and cfg.get("ENABLED", True)
         and cfg.get("MODE") == "MASTER"
         and cfg.get("PORT")
+        and not is_loopback_host(str(cfg.get("IP") or ""))
     }
     return sorted(ports)
 

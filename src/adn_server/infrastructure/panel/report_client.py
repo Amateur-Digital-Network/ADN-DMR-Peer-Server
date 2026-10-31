@@ -26,11 +26,22 @@ import json
 import logging
 from typing import Any
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from adn_server.application.report.panel_report import PanelReportSettings
 
 TIMEOUT_S = 10
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    """A 3xx is a failure: following it would send the Authorization header to
+    whatever host the redirect names."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+_opener = build_opener(_NoRedirect())
 
 
 def send_panel_report(settings: PanelReportSettings, payload: dict[str, Any], user_agent: str) -> int:
@@ -46,7 +57,7 @@ def send_panel_report(settings: PanelReportSettings, payload: dict[str, Any], us
         },
     )
     try:
-        with urlopen(request, timeout=TIMEOUT_S) as response:
+        with _opener.open(request, timeout=TIMEOUT_S) as response:
             return response.status
     except HTTPError as exc:
         return exc.code
@@ -67,7 +78,12 @@ class PanelReportLog:
                 self._logger.debug("(ADN_PANEL) Report sent (HTTP %s)", status)
             self._failing = False
             return
-        hint = " (check ADN_PANEL.TOKEN in the panel)" if status in (401, 403) else ""
+        if status in (401, 403):
+            hint = " (check ADN_PANEL.TOKEN in the panel)"
+        elif 300 <= status < 400:
+            hint = " (redirect not followed; check ADN_PANEL.ENDPOINT)"
+        else:
+            hint = ""
         self._fail(f"HTTP {status}{hint}")
 
     def error(self, exc: BaseException) -> None:
