@@ -31,6 +31,7 @@ from typing import Any
 from twisted.internet import reactor, threads
 from twisted.python.threadable import isInIOThread
 
+from adn_server import __version__
 from adn_server.application import (
     IdentUseCases,
     ReportingUseCases,
@@ -54,6 +55,8 @@ from adn_server.application.proxy.deployment import (
     obp_proxy_enabled,
     proxy_target_system,
 )
+from adn_server.application.report.panel_report import DEFAULT_INTERVAL as DEFAULT_PANEL_INTERVAL
+from adn_server.application.report.panel_report import build_panel_report, panel_report_settings
 from adn_server.application.report.queue import BoundedReportQueue, QueuedReportSender
 from adn_server.application.routing.sub_map_learning import purge_non_learning_systems
 from adn_server.application.runtime_context import (
@@ -83,6 +86,7 @@ from adn_server.infrastructure.config_normalizer import (
 )
 from adn_server.infrastructure.config_reload import BindSpec, reload_server_config
 from adn_server.infrastructure.logging_config import reopen_file_handlers
+from adn_server.infrastructure.panel.report_client import PanelReportLog, send_panel_report
 from adn_server.infrastructure.persistence import PickleSubMapStore, SubMapSaver
 from adn_server.infrastructure.persistence.alias_loader import DefaultAliasLoader
 from adn_server.infrastructure.persistence.database_config import database_settings
@@ -269,6 +273,7 @@ def run_peer_server(
     voice_config_path: str,
     loader: Any,
 ) -> None:
+    started_at = time.monotonic()
     # Aliases
     alias_loader = DefaultAliasLoader()
     peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids, server_ids, checksums = (
@@ -511,6 +516,40 @@ def run_peer_server(
 
     report_interval = config.get("REPORTS", {}).get("REPORT_INTERVAL", 60)
     start_loop(reporting_loop, report_interval, logger)
+
+    # ADN panel report (ADN_PANEL, added by hand with the token from the panel). Settings
+    # are read on every tick, so a config reload can add, change or remove them, and
+    # the loop follows REPORT_INTERVAL. The payload is built on the reactor; the HTTP
+    # POST runs in a thread.
+    panel_log = PanelReportLog(logger)
+    panel_user_agent = f"adn-server/{__version__}"
+    panel_loop: list[Any] = []
+
+    def panel_report_loop() -> None:
+        settings = panel_report_settings(config)
+        if settings is None:
+            return
+        if panel_loop and panel_loop[0].interval != settings.interval:
+            panel_loop[0].interval = settings.interval
+        payload = build_panel_report(
+            config,
+            version=__version__,
+            uptime_s=time.monotonic() - started_at,
+            settings=settings,
+            sessions=mesh_sessions(config),
+            plugins=plugin_manager.loaded_names(),
+        )
+        d = threads.deferToThread(send_panel_report, settings, payload, panel_user_agent)
+        d.addCallbacks(panel_log.sent, lambda failure: panel_log.error(failure.value))
+
+    panel_settings = panel_report_settings(config)
+    panel_interval = panel_settings.interval if panel_settings else DEFAULT_PANEL_INTERVAL
+    if panel_settings is not None:
+        logger.info("(ADN_PANEL) Reporting to %s every %s s", panel_settings.url, panel_interval)
+    # First report once hotspots and OBP links had time to connect.
+    reactor.callLater(
+        60, lambda: panel_loop.append(start_loop(panel_report_loop, panel_interval, logger))
+    )
 
     # LoopingCalls (legacy intervals). rule_timer / stat_trimmer mutate SubscriptionStore on reactor
     # Timer loops run on the reactor thread (no deferToThread — avoids races with dmrd_received).

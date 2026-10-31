@@ -49,6 +49,14 @@ REPORTS:
   #   QOS: 0
   #   Wire: state (retained), voice_event (live)
 
+# Optional: send this server's state (version, ports, OBP links) to the ADN panel.
+# Generate the token on your server's page in the panel; it also shows the ENDPOINT.
+# ADN_PANEL:
+#   ENDPOINT: "<shown in the panel with the token>"   # https:// only
+#   TOKEN: "<set-in-adn-server.yaml>"
+#   REPORT_INTERVAL: 300   # seconds, 60-86400
+#   ODTP_PORT: 54006       # optional: port of the ODTP gateway (its own service)
+
 LOGGER:
   # ENABLED: false   # omit or true = normal; false = no console/file logs (NullHandler)
   LOG_FILE: /var/log/adn-server/adn-server.log
