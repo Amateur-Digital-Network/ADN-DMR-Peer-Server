@@ -10,6 +10,7 @@
 
 LOGGER:
   LOG_FILE: /var/log/adn-server/odtp.log
+  LOG_HANDLERS: file-timed       # without it the default is console-timed and LOG_FILE is not used
   LOG_LEVEL: INFO
 
 ODTP:
