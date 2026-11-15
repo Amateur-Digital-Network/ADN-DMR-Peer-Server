@@ -19,7 +19,10 @@ ODTP:
   MASTER_IP: 127.0.0.1          # the adn-server MASTER the terminals log in to
   MASTER_PORT: 62031
   PEER_SUFFIX: 98               # 0-99; suffix of the HBP peer ID (fallback 97 when it is taken)
-  SUBSCRIBERS_FILE: ""          # optional RadioID subscriber_ids.json: callsign sent in the RPTC
+  # RadioID subscriber_ids.json (the MASTER's ALIASES PATH + SUBSCRIBER_FILE; relative to the
+  # working directory): the callsign sent in the RPTC. Required when the MASTER has
+  # ALLOW_UNREG_ID: false, or it refuses every terminal.
+  SUBSCRIBERS_FILE: subscriber_ids.json
 
   # Caps (each refusal is logged once per minute with counters)
   MAX_SESSIONS: 500             # the MASTER's MAX_PEERS caps them too, shared with its hotspots

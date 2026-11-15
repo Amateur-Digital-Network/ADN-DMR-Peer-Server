@@ -23,6 +23,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import signal
 import socket
 from typing import Any
@@ -57,6 +58,8 @@ def run_odtp(config: dict[str, Any], *, logger: logging.Logger) -> None:
     settings = odtp_settings(cfg)
     master_ip = socket.gethostbyname(settings.master_ip)  # a connected UDP socket needs an address
     subscribers = cfg.get("SUBSCRIBERS_FILE") or ""
+    if subscribers and not os.path.isfile(subscribers):
+        logger.warning("(ODTP) SUBSCRIBERS_FILE %s not found (yet): no callsign until it exists", subscribers)
     listener = OdtpListener()
     links = TwistedMasterLinks(settings.master_ip, master_ip, settings.master_port)
     gateway = OdtpGateway(

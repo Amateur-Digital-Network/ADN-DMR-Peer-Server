@@ -326,6 +326,8 @@ class TerminalSession:
                 self.gw.drop(self, "MASTER dropped the peer")
             else:  # silence to the terminal, as BrandMeister does
                 what = "wrong password" if before == "AUTHENTICATED" else f"refused ({before})"
+                if before == "CONFIG-SENT" and not self._config["CALLSIGN"].strip():
+                    what += f": no callsign for DMR ID {self.dmr_id} in SUBSCRIBERS_FILE"
                 self.gw.drop(self, f"MASTER login failed: {what}", notify=False)
 
     def _master_up(self) -> None:

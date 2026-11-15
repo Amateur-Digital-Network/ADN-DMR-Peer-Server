@@ -125,6 +125,31 @@ def test_wrong_password_gets_silence_and_no_master_login():
     assert stack.net.peer(PEER) is None and not stack.gw.sessions
 
 
+def _registered_only(stack):
+    """The MASTER refuses a peer whose callsign is not the subscriber database's (ALLOW_UNREG_ID: false)."""
+    stack.net.master._config["ALLOW_UNREG_ID"] = False
+    stack.net.master._CONFIG["_SUB_IDS"] = {TERMINAL_ID: "C31AG"}
+
+
+def test_registered_only_master_accepts_the_callsign_from_the_subscribers_file():
+    stack = Stack()
+    _registered_only(stack)
+    term = stack.terminal()
+    term.login()
+    assert term.got(odtp.KEEP_ALIVE) == [b""] and stack.net.peer(PEER)["CONNECTION"] == "YES"
+
+
+def test_registered_only_master_refuses_no_callsign_and_the_log_says_why(caplog):
+    stack = Stack(callsigns=lambda _i: "")
+    _registered_only(stack)
+    term = stack.terminal()
+    with caplog.at_level(logging.INFO):
+        term.login()
+    assert [t for t, _ in term.inbox] == [odtp.CHALLENGE] and not stack.gw.sessions
+    drops = [r.getMessage() for r in caplog.records if "login failed" in r.getMessage()]
+    assert drops and "refused (CONFIG-SENT): no callsign for DMR ID 2130035 in SUBSCRIBERS_FILE" in drops[0]
+
+
 def test_a_failed_login_does_not_kick_the_connected_session():
     stack, term = _up()
     intruder = stack.terminal(50001)
