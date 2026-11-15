@@ -39,7 +39,7 @@ Copia **`adn-odtp.example.yaml`** → **`adn-odtp.yaml`** (no se versiona):
 | `LISTEN_IP` / `LISTEN_PORT` | `0.0.0.0` / `54006` | Puerto UDP al que se conectan las apps |
 | `MASTER_IP` / `MASTER_PORT` | `127.0.0.1` / `62031` | MASTER donde entran los terminales (el puerto del proxy de hotspots si se quieren contraseñas de autoservicio) |
 | `PEER_SUFFIX` | `98` | 0–99, sufijo del ID de peer |
-| `SUBSCRIBERS_FILE` | — | `subscriber_ids.json` de RadioID para el indicativo del RPTC (se busca, no se carga) |
+| `SUBSCRIBERS_FILE` | — | `subscriber_ids.json` de RadioID (el `SUBSCRIBER_FILE` del MASTER) para el indicativo del RPTC (se busca, no se carga). **Obligatorio** si el MASTER tiene `ALLOW_UNREG_ID: false`: sin él el indicativo va vacío y el MASTER rechaza a todos los terminales tras el RPTC. Los IDs que solo están en el `LOCAL_SUBSCRIBER_FILE` o el `PEER_FILE` del MASTER no se resuelven |
 | `MAX_SESSIONS` | `500` | Sesiones en total. El `MAX_PEERS` del MASTER también las limita, compartido con sus hotspots: si está lleno, la app no recibe respuesta y cada reintento gasta un login |
 | `MAX_SESSIONS_PER_IP` | `4` | Sesiones desde una IP |
 | `MAX_LOGINS_PER_MINUTE` | `60` | Sesiones nuevas (= logins al MASTER) por minuto |
