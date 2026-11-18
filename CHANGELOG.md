@@ -4,6 +4,126 @@ All notable changes to **adn-server** are documented here.
 
 <!-- version list -->
 
+## v2.7.0 (2026-11-18)
+
+### Bug Fixes
+
+- **config**: Enable Talker Alias in the example config
+  ([`1b06dd4`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/1b06dd4cb6ad07b9dc0f22f3ae362b5822c56c18))
+
+- **config**: Persist SUB_MAP by default in the example config
+  ([`d6af705`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/d6af705c243f0bedd76ed8d5d3409e9ca5ef91ca))
+
+- **hbp**: Compare the RPTC callsign with the subscriber DB ignoring case
+  ([`7b3d6b2`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/7b3d6b2c90ac5b65d0cdb98df36c9d47cd27b298))
+
+- **odtp**: Example config writes its log to LOG_FILE (LOG_HANDLERS: file-timed)
+  ([`2bd1b2e`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/2bd1b2e03280d7fa09a4a4f3adf896a7e42b13d2))
+
+- **odtp**: Systemd example starts the gateway with --odtp, not --echo
+  ([`6655c95`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/6655c95d4932079729a229d442ad5d89b1c01101))
+
+- **odtp**: Terminals refused by a MASTER with ALLOW_UNREG_ID: false
+  ([`e5c6b41`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/e5c6b4117eae15e1e93a6ef8ebdfb58927a26d23))
+
+- **report**: Review of ADN_PANEL (https only, no redirects, live interval)
+  ([`faad377`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/faad377d385ea53bf1014b04339d536a3bd91204))
+
+- **routing**: Do not send unit data twice to a hotspot of the same REPEAT MASTER
+  ([`588e448`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/588e44823eedfc9569134c0d570eba12a2bd4f6a))
+
+- **routing**: Keep a private call's targets with the call
+  ([`017d4b1`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/017d4b16fe209b2836dde7d3a89eb18a366f2083))
+
+- **routing**: OBP Loss is a share of the expected packets, never over 100 %
+  ([`2c8965d`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/2c8965d6c1a5f64c665e135fc68cbe3877391404))
+
+- **routing**: Time out a bridge TX leg whose last frame was voice burst C
+  ([`4ec78ff`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/4ec78ffbb60bf8517cacfb025cb4db8dc41fd663))
+
+- **routing**: Unit data sent to a hotspot is a full 55-byte DMRD frame
+  ([`eb8fbb4`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/eb8fbb42f0c81884eba36aac0adfe450d4983d66))
+
+- **sub_map**: Write SUB_MAP to the default file when SUB_MAP_FILE is empty
+  ([`56bae7a`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/56bae7a8e3787de754419a19fbefb653948396df))
+
+- **talker-alias**: Enable Talker Alias when TALKER_ALIAS is omitted
+  ([`2904e19`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/2904e19feb8551f457f1b0e5940136fc62030bdd))
+
+- **timers**: A periodic task logs an unhandled error and starts again
+  ([`8e18a97`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/8e18a97e937ffd13d0c036425de6735b9275771d))
+
+### Code Style
+
+- Shorten comment (review)
+  ([`1ac6346`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/1ac6346a073529644094d83b6d570b5b0b73df06))
+
+- Shorten comment (review)
+  ([`2184cce`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/2184cce6cbda85a681b7cb968c8580ab3539b240))
+
+- **hbp**: One-line docstring for _callsign_matches, fix test file header
+  ([`380e10b`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/380e10be2d6f5969283f2a3d7ed738f398794359))
+
+- **tests**: Add the project copyright line to the bridge leg test header
+  ([`9679219`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/967921933f26ae57faa549e108af29f6144aec4a))
+
+### Documentation
+
+- Sync the guides with what changed since 2.6.0
+  ([`2e7a995`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/2e7a995efc242b36863ffd4704b26705e124cd5c))
+
+- **odtp**: ODTP gateway guide, TERMINAL=1 and configuration (en/es)
+  ([`1d9985c`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/1d9985c439fbbb18a3223be28d3fed083f0f5dd5))
+
+### Features
+
+- **dmr**: DMR packet data in the domain
+  ([`e547229`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/e547229fad4a71af31af92ecaaa2b9110dd206cb))
+
+- **hbp**: PeerLogin resends OPTIONS and logs out
+  ([`c3ba516`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/c3ba516fe207912c1b8fe11922af00e4adce46f4))
+
+- **ident**: Voice ident per hotspot on a shared MASTER
+  ([`6c337bf`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/6c337bf87b0805ccdb538e328746137d9d143869))
+
+- **odtp**: ODTP gateway as adn-server --odtp
+  ([`6d6346d`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/6d6346d37e2e657c342b2c26733765b03e8d6348))
+
+- **odtp**: Rewind (ODTP) codec in the domain
+  ([`9f14306`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/9f1430657a67525b807956a1e4e1d10a49319a3a))
+
+- **report**: Send this server's state to the ADN panel (ADN_PANEL)
+  ([`cc7b294`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/cc7b294580bcab4cef2509c17b6e0877c7f894ae))
+
+- **routing**: A TERMINAL=1 peer takes no MASTER statics
+  ([`fdcb805`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/fdcb8051bafc05f7c30e1ffc75780c3f7b796745))
+
+### Performance Improvements
+
+- **aliases**: Reload aliases on one dedicated thread
+  ([`1fa3726`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/1fa37266dd35dd26fb3d492d9871af82bcd7a6a1))
+
+- **hbp**: Match a hotspot to the RF source directly, not by scanning all peers
+  ([`f86574e`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/f86574ec9784287ed6a07d75558cfa6b165366e8))
+
+### Refactoring
+
+- **dmr**: DMRD voice frames built incrementally in the domain
+  ([`3f85617`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/3f85617d7dd2b58d58941b8850b0565eb1f34b89))
+
+- **dmr**: One embedded-LC assembler in the domain
+  ([`347dae1`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/347dae1e738061326f24f329a9c9c0f2fd6b9571))
+
+- **hbp**: DMR and MASTER/PEER opcodes live in the domain
+  ([`0b00704`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/0b0070486bf8347b9484ab2b2233bc3925975443))
+
+- **hbp**: PEER login and keepalive in a reusable PeerLogin
+  ([`034ea00`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/034ea00672560b79818955da7cf6757d086ca9bd))
+
+- **plugins**: DMRD header parser lives in the domain
+  ([`c856fa8`](https://github.com/Amateur-Digital-Network/ADN-DMR-Peer-Server/commit/c856fa833bdfabd263d7e29e89762d59d9e39db2))
+
+
 ## v2.6.1 (2026-10-16)
 
 ### Bug Fixes
