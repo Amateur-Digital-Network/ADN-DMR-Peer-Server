@@ -32,12 +32,46 @@ from __future__ import annotations
 
 from typing import Any
 
+# DMR
+DMR = b"DMR"
+DMRD = b"DMRD"
+DMRE = b"DMRE"
+DMRF = b"DMRF"
+DMRA = b"DMRA"
+
+# Master/peer
+RPTL = b"RPTL"
+RPTPING = b"RPTPING"
+RPTACK = b"RPTACK"
+RPTCL = b"RPTCL"
+RPTK = b"RPTK"
+RPTC = b"RPTC"
+RPTP = b"RPTP"
+RPTA = b"RPTA"
+RPTO = b"RPTO"
+MSTCL = b"MSTCL"
+MSTNAK = b"MSTNAK"
+MSTPONG = b"MSTPONG"
+MSTN = b"MSTN"   # peer receives MSTNAK as MSTN (4-char command)
+MSTP = b"MSTP"   # peer receives MSTPONG as MSTP
+MSTC = b"MSTC"   # peer receives MSTCL as MSTC
+
 # Frame types (bits)
 HBPF_VOICE = 0x0
 HBPF_VOICE_SYNC = 0x1
 HBPF_DATA_SYNC = 0x2
 HBPF_SLT_VHEAD = 0x1
 HBPF_SLT_VTERM = 0x2
+
+# RX_TYPE/TX_TYPE of a voice burst: kept clear of the data types, because voice
+# burst C carries vseq 2, the same number as HBPF_SLT_VTERM.
+SLOT_TYPE_VOICE = 0x10
+
+
+def slot_frame_type(frame_type: int, dtype_vseq: int) -> int:
+    """RX_TYPE/TX_TYPE to record for a frame: only a terminator reads as HBPF_SLT_VTERM."""
+    return dtype_vseq if frame_type == HBPF_DATA_SYNC else SLOT_TYPE_VOICE | dtype_vseq
+
 
 # Protocol version
 VER = 5

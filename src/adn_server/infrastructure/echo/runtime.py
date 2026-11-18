@@ -27,7 +27,7 @@ import signal
 import sys
 from typing import Any
 
-from twisted.internet import reactor, task
+from twisted.internet import reactor
 
 from adn_server.application.playback_use_cases import PlaybackUseCases
 from adn_server.infrastructure import reopen_file_handlers
@@ -37,12 +37,9 @@ from adn_server.infrastructure.config_normalizer import (
     normalize_obp_config,
     normalize_peer_config,
 )
+from adn_server.infrastructure.twisted_adapters.looping import start_loop
 from adn_server.infrastructure.twisted_adapters.report_server import ReportServerFactory
 from adn_server.infrastructure.twisted_adapters.udp_hbp import HBPProtocolFactory
-
-
-def _looping_errback(logger_obj: logging.Logger, failure: Any) -> None:
-    logger_obj.error("(GLOBAL) Unhandled error in timed loop: %s", failure.getTraceback())
 
 
 def run_echo(config: dict[str, Any], *, logger: logging.Logger) -> None:
@@ -71,7 +68,7 @@ def run_echo(config: dict[str, Any], *, logger: logging.Logger) -> None:
             report_factory.send_config()
 
         report_interval = config.get("REPORTS", {}).get("REPORT_INTERVAL", 60)
-        task.LoopingCall(reporting_loop).start(report_interval).addErrback(_looping_errback, logger)
+        start_loop(reporting_loop, report_interval, logger)
 
     def sig_handler(sig: int, _frame: Any) -> None:
         logger.info("SHUTDOWN: ECHO IS TERMINATING WITH SIGNAL %s", sig)

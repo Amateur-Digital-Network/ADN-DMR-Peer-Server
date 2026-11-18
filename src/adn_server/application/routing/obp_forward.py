@@ -54,7 +54,7 @@ from ...domain.dmr import decode
 from ...domain.dmr.const import LC_OPT
 from ..subscription.obp_source_ops import ensure_obp_source_for_tg_store, obp_source_needs_ensure
 from ..subscription.subscription_queries import store_has_table
-from .helpers import group_voice_tg_ingress_collision, obp_is_canonical_ingress, seq_advance, unit_data_reportable
+from .helpers import group_voice_tg_ingress_collision, loss_percent, obp_is_canonical_ingress, seq_advance, unit_data_reportable
 from .loop_guard import loop_guard_drops
 
 logger = logging.getLogger(__name__)
@@ -219,6 +219,7 @@ class ObpForwardMixin:
                 "RX_PEER": peer_id,
                 "packets": 0,
                 "loss": 0,
+                "dropped": 0,
                 "crcs": set(),
             }
             if frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VHEAD:
@@ -385,13 +386,13 @@ class ObpForwardMixin:
                 return False
 
             if st["lastData"] and st["lastData"] == data and seq > 1:
-                st["loss"] += 1
+                st["dropped"] = st.get("dropped", 0) + 1
                 logger.debug(
                     "(%s) *PacketControl* last packet is a complete duplicate of the previous one, disgarding. Stream ID:, %s TGID: %s, LOSS: %.2f%%",
                     system_name,
                     int_id(stream_id),
                     int_id(dst_id),
-                    ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
+                    loss_percent(st),
                 )
                 return False
             _step = seq_advance(
@@ -399,18 +400,18 @@ class ObpForwardMixin:
                 terminator=frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM,
             )
             if _step == 0:
-                st["loss"] += 1
+                st["dropped"] = st.get("dropped", 0) + 1
                 logger.debug(
                     "(%s) *PacketControl* Duplicate sequence number %s, disgarding. Stream ID:, %s TGID: %s, LOSS: %.2f%%",
                     system_name,
                     seq,
                     int_id(stream_id),
                     int_id(dst_id),
-                    ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
+                    loss_percent(st),
                 )
                 return False
             if _step < 0:
-                st["loss"] += 1
+                st["dropped"] = st.get("dropped", 0) + 1
                 logger.debug(
                     "(%s) *PacketControl* Out of order packet - last SEQ: %s, this SEQ: %s,  disgarding. Stream ID:, %s TGID: %s, LOSS: %.2f%%",
                     system_name,
@@ -418,11 +419,11 @@ class ObpForwardMixin:
                     seq,
                     int_id(stream_id),
                     int_id(dst_id),
-                    ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
+                    loss_percent(st),
                 )
                 return False
             if seq > 0 and _pkt_crc in st["crcs"]:
-                st["loss"] += 1
+                st["dropped"] = st.get("dropped", 0) + 1
                 logger.debug(
                     "(%s) *PacketControl* DMR packet payload with hash: %s seen before in this stream, disgarding. Stream ID:, %s TGID: %s: SEQ:%s PACKETS: %s, LOSS: %.2f%% ",
                     system_name,
@@ -431,7 +432,7 @@ class ObpForwardMixin:
                     int_id(dst_id),
                     seq,
                     st["packets"],
-                    ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
+                    loss_percent(st),
                 )
                 return False
             if _step > 1:
@@ -443,7 +444,7 @@ class ObpForwardMixin:
                     seq,
                     int_id(stream_id),
                     int_id(dst_id),
-                    ((st["loss"] / st["packets"]) * 100) if st.get("packets") else 0.0,
+                    loss_percent(st),
                 )
             st["lastSeq"] = seq
             st["lastSeqTime"] = pkt_time

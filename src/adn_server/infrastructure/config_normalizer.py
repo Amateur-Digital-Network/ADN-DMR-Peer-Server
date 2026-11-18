@@ -94,7 +94,7 @@ def ensure_system_runtime_config(config: dict) -> None:
 def apply_talker_alias_defaults(config: dict) -> None:
     """Default GLOBAL Talker Alias keys (mode both; max length is protocol-fixed in code)."""
     g = config.setdefault("GLOBAL", {})
-    g.setdefault("TALKER_ALIAS", False)
+    g.setdefault("TALKER_ALIAS", True)
     g.setdefault("TALKER_ALIAS_MODE", "both")
     g.setdefault("TALKER_ALIAS_FORMAT", "{callsign} {fname}")
     g.setdefault("TALKER_ALIAS_TEXT_FORMAT", "utf8")

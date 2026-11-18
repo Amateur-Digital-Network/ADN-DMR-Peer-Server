@@ -93,6 +93,16 @@ def decode_full_lc(_data):
     '''
     return binlc
 
+# Info bit of each of the 96 data bits (row data bits of the 13x15 matrix, deinterleaved).
+_DATA_SENT_AT = tuple(
+    (i * 181) % 196 for i in tuple(range(4, 12)) + tuple(r * 15 + 1 + c for r in range(1, 9) for c in range(11))
+)
+
+
+def decode_19696(info196):
+    """The 12 bytes (96 data bits) of a 196-bit BPTC block, without FEC (data CRCs catch errors)."""
+    return bitarray([info196[i] for i in _DATA_SENT_AT], endian='big').tobytes()
+
 #------------------------------------------------------------------------------
 # BPTC(196,96) Encoding Routings
 #------------------------------------------------------------------------------

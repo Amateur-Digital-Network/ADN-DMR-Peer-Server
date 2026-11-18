@@ -60,6 +60,10 @@ class PluginManager:
     def bus(self) -> PluginBus:
         return self._bus
 
+    def loaded_names(self) -> list[str]:
+        """Names of the plugins currently loaded."""
+        return sorted(self._loaded)
+
     def plugins_directory(self, server_config: dict[str, Any]) -> Path:
         plugins_cfg = server_config.get("PLUGINS") or {}
         if plugins_cfg.get("master_kill"):

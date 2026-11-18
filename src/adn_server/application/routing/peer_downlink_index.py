@@ -52,10 +52,14 @@ def cached_peer_static_tgs(peer: dict[str, Any]) -> tuple[tuple[str, ...], tuple
     cached = peer.get("_CACHED_OPTIONS_STATIC")
     if cached and cached[0] is opts and cached[3] is system:
         return cached[1], cached[2]
-    from adn_server.application.report.payloads import parse_peer_options_static
+    from adn_server.application.report.payloads import (
+        parse_peer_options_static,
+        peer_is_terminal,
+    )
 
     ts1, ts2 = parse_peer_options_static(opts)
-    sys_ts1, sys_ts2 = system or _NO_STATIC
+    # A terminal (ODTP app) has no RX group list to mute the MASTER's statics.
+    sys_ts1, sys_ts2 = _NO_STATIC if peer_is_terminal(opts) else (system or _NO_STATIC)
     t1 = tuple(dict.fromkeys([*sys_ts1, *ts1]))
     t2 = tuple(dict.fromkeys([*sys_ts2, *ts2]))
     peer["_CACHED_OPTIONS_STATIC"] = (opts, t1, t2, system)

@@ -66,6 +66,7 @@ nav:
           - Proxy hotspot (integrado): server/user-guide/hotspot-proxy.md
           - Proxy OBP (fan-in OpenBridge): server/user-guide/obp-proxy.md
           - Echo (reproducción): server/user-guide/echo.md
+          - Pasarela ODTP: server/user-guide/odtp.md
           - Créditos y licencia: server/user-guide/attribution.md
       - Protocolos:
           - HBP (DMRD): server/protocols/hbp.md

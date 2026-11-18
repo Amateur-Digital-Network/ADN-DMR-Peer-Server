@@ -46,7 +46,7 @@ Ver [Números especiales — ID de voz del servidor](special-numbers.md#server-v
 |---------|-------------|
 | **Anuncios programados** | Frases AMBE desde `Audio/<lang>/ondemand/` según horario / intervalo. |
 | **Anuncios TTS** | Texto → gTTS → MP3 → ffmpeg → WAV → vocoder → AMBE (ver tubería abajo). |
-| **Ident por voz** | Identificación periódica (opcional); usa `VOICE_IDENT` en la config principal del servidor y `OVERRIDE_IDENT_TG` / all-call. |
+| **Ident por voz** | Identificación cada hora (opcional); `VOICE_IDENT` en la config principal del servidor, `OVERRIDE_IDENT_TG` / all-call. En un MASTER compartido, por cada hotspot que lo pide con `VOICE=1` en sus OPTIONS (ver [Configuración](configuration.md)). |
 | **Grabación** | Si está habilitada, graba AMBE a disco para tráfico en **`RECORDING_TG`** / **`RECORDING_TIMESLOT`** (ver plantilla `adn-voice.example.yaml`). |
 | **Bajo demanda (9991–9999)** | Ver [Números especiales](special-numbers.md). |
 
@@ -67,7 +67,7 @@ El plugin reproduce **un anuncio por TG a la vez**; los demás del mismo TG espe
 
 El plugin envía cada trama con `send_dmrd`, y el núcleo la inyecta como **PTT sintético de hotspot** en `PROXY.TARGET_SYSTEM` (el mismo MASTER que usa el proxy integrado). El enrutamiento reparte a hotspots puenteados y piernas OPENBRIDGE; los peers locales en ese MASTER siguen recibiendo tramas vía `send_system`. La voz enrutada puede igual tomar la pierna TX del slot (cada hotspot se queda con el stream que oye primero); solo una radio u otro stream de plugin en la pierna RX corta el anuncio. Una trama que el enrutado rechaza se reproduce igual a los hotspots del MASTER, con un WARNING por stream.
 
-Los avisos del núcleo (ident de voz, 999x a demanda, aviso de desconexión) ocupan el **TS2** mientras suenan; una radio u otro stream en el slot los corta. El anuncio de otro servidor que llega por OpenBridge es voz normal de la malla y no recibe esa reserva.
+Los avisos del núcleo (ident de voz, 999x a demanda, aviso de desconexión) ocupan el **TS2** mientras suenan; una radio u otro stream en el slot los corta. En un MASTER compartido el ident va a un hotspot a la vez, como la respuesta del TG 4000, y ocupa solo el slot de ese hotspot. El anuncio de otro servidor que llega por OpenBridge es voz normal de la malla y no recibe esa reserva.
 
 ## Cola de emisión
 

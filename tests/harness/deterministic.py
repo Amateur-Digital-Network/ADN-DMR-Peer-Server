@@ -35,7 +35,7 @@ from typing import Any
 from adn_server.application.reporting_use_cases import ReportingUseCases
 from adn_server.application.routing_use_cases import RoutingUseCases
 from adn_server.application.subscription.store_sync import replace_store_from_routing_table
-from adn_server.domain import bytes_3, bytes_4
+from adn_server.domain import bytes_3, bytes_4, slot_frame_type
 from adn_server.domain.dmr.bptc import encode_emblc
 from adn_server.domain.hbp_protocol import (
     HBPF_DATA_SYNC,
@@ -537,7 +537,7 @@ class DeterministicScenario:
         st["RX_PEER"] = args["peer_id"]
         st["RX_SEQ"] = args["seq"]
         st["RX_RFS"] = args["rf_src"]
-        st["RX_TYPE"] = args["dtype_vseq"]
+        st["RX_TYPE"] = slot_frame_type(args["frame_type"], args["dtype_vseq"])
         st["RX_TGID"] = args["dst_id"]
         st["RX_TIME"] = self.clock.time()
         st["RX_STREAM_ID"] = args["stream_id"]

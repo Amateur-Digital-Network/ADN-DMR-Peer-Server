@@ -23,45 +23,41 @@
 
 """Homebrew protocol opcodes and frame types (legacy const.py).
 
-Frame types and protocol-level constants live in domain.hbp_protocol (the
-canonical source); they are re-exported here so existing infrastructure
-imports keep working.
+Frame types, the DMR and MASTER/PEER opcodes and protocol-level constants live
+in domain.hbp_protocol (the canonical source); they are re-exported here so
+existing infrastructure imports keep working.
 """
 
 from ..domain.hbp_protocol import (  # noqa: F401 — re-export
+    DMR,
+    DMRA,
+    DMRD,
+    DMRE,
+    DMRF,
     HBPF_DATA_SYNC,
     HBPF_SLT_VHEAD,
     HBPF_SLT_VTERM,
     HBPF_VOICE,
     HBPF_VOICE_SYNC,
+    MSTC,
+    MSTCL,
+    MSTN,
+    MSTNAK,
+    MSTP,
+    MSTPONG,
     PROTO_VER,
+    RPTA,
+    RPTACK,
+    RPTC,
+    RPTCL,
+    RPTK,
+    RPTL,
+    RPTO,
+    RPTP,
+    RPTPING,
     STREAM_TO,
     VER,
 )
-
-# DMR
-DMR = b"DMR"
-DMRD = b"DMRD"
-DMRE = b"DMRE"
-DMRF = b"DMRF"
-DMRA = b"DMRA"
-
-# Master/peer
-RPTL = b"RPTL"
-RPTPING = b"RPTPING"
-RPTACK = b"RPTACK"
-RPTCL = b"RPTCL"
-RPTK = b"RPTK"
-RPTC = b"RPTC"
-RPTP = b"RPTP"
-RPTA = b"RPTA"
-RPTO = b"RPTO"
-MSTCL = b"MSTCL"
-MSTNAK = b"MSTNAK"
-MSTPONG = b"MSTPONG"
-MSTN = b"MSTN"   # peer receives MSTNAK as MSTN (4-char command)
-MSTP = b"MSTP"   # peer receives MSTPONG as MSTP
-MSTC = b"MSTC"   # peer receives MSTCL as MSTC
 
 # OpenBridge
 EOBP = b"EOBP"

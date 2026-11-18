@@ -24,7 +24,7 @@ La voz privada no cambia.
 <a id="sub_map-persistence"></a>
 ### Persistencia de SUB_MAP
 
-Con `ALIASES.SUB_MAP_FILE` definido, `SUB_MAP` se revisa cada **300 s** (las entradas de más de 24 h se podan) y solo se escribe cuando cambió una ruta o la marca de tiempo de una entrada pasó a una hora nueva. El fichero se escribe en un `.tmp` y se renombra, así que una caída nunca lo deja truncado. `SIGHUP` y el apagado siempre lo escriben.
+`SUB_MAP` se guarda en `ALIASES.SUB_MAP_FILE` (`sub_map.pkl` si está vacío). Se revisa cada **300 s** (las entradas de más de 24 h se podan) y solo se escribe cuando cambió una ruta o la marca de tiempo de una entrada pasó a una hora nueva. El fichero se escribe en un `.tmp` y se renombra, así que una caída nunca lo deja truncado. `SIGHUP` y el apagado siempre lo escriben.
 
 <a id="service-systems-sub_map_learn"></a>
 ### Sistemas de servicio (`SUB_MAP_LEARN`)

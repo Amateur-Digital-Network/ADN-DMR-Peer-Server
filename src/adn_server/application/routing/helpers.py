@@ -71,6 +71,17 @@ SIMPLEX_VOICE_SLOT = 2
 SEQ_RESYNC_SILENCE_S = 1.0
 
 
+def loss_percent(st: dict[str, Any]) -> float:
+    """Frames a sequence jump skipped, as a share of the frames the stream should have had.
+
+    Repeated, late and out-of-order frames are counted apart (``dropped``): they arrived, and
+    a late one was already counted as missing by the jump it fell into.
+    """
+    lost = st.get("loss", 0)
+    expected = st.get("packets", 0) - st.get("dropped", 0) + lost
+    return (lost / expected) * 100 if expected > 0 else 0.0
+
+
 def seq_advance(last_seq: Any, seq: int, silence: float = 0.0, *, terminator: bool = False) -> int:
     """Steps from ``last_seq`` to ``seq`` on the 8-bit HBP/OBP sequence, which wraps 255 -> 0.
 
@@ -668,14 +679,17 @@ def obp_sync_flat_bridge_tx_times(
     leg: dict[str, Any],
     stream_id: bytes,
     pkt_time: float,
-    dtype_vseq: int,
+    tx_type: int,
 ) -> None:
-    """Refresh per-stream leg activity; mirror times to flat row only for the owner stream."""
+    """Refresh per-stream leg activity; mirror times to flat row only for the owner stream.
+
+    ``tx_type`` is the frame's ``slot_frame_type``, not its raw dtype/vseq.
+    """
     leg["TX_TIME"] = pkt_time
-    leg["TX_TYPE"] = dtype_vseq
+    leg["TX_TYPE"] = tx_type
     if slot_st.get("TX_STREAM_ID") == stream_id:
         slot_st["TX_TIME"] = pkt_time
-        slot_st["TX_TYPE"] = dtype_vseq
+        slot_st["TX_TYPE"] = tx_type
 
 
 def obp_pick_active_bridge_tx_leg(
@@ -1285,6 +1299,14 @@ def _peer_key_from_int(peer_key: Any) -> bytes:
     return bytes_4(int_id(peer_key))
 
 
+def _peer_id_matches(pk_int: int, val: int, val_str: str) -> bool:
+    """A hotspot ID ``pk_int`` belongs to radio/peer ``val``: equal, ``val`` + 2-digit suffix, or ``val`` prefix."""
+    if pk_int == val or pk_int // 100 == val:
+        return True
+    pk_str = str(pk_int)
+    return len(val_str) >= 5 and len(pk_str) >= 7 and pk_str.startswith(val_str)
+
+
 def _fuzzy_peer_matches(
     val: int,
     peers: dict[Any, Any],
@@ -1296,12 +1318,7 @@ def _fuzzy_peer_matches(
             pk_b = _peer_key_from_int(pk)
         except (TypeError, ValueError):
             continue
-        pk_int = int_id(pk_b)
-        pk_str = str(pk_int)
-        if pk_int == val or pk_int // 100 == val:
-            matches.append(pk_b)
-            continue
-        if len(val_str) >= 5 and len(pk_str) >= 7 and pk_str.startswith(val_str):
+        if _peer_id_matches(int_id(pk_b), val, val_str):
             matches.append(pk_b)
     return matches
 
@@ -2223,6 +2240,14 @@ def peer_should_receive_group_voice(
 
 
 def peer_matches_rf_source(peer_id: bytes, rf_src: bytes, peers: dict[Any, Any]) -> bool:
-    """True when a hotspot radio id matches the voice RF source (parrot / echo downlink)."""
+    """True when a hotspot radio id matches the voice RF source (parrot / echo downlink).
+
+    Runs for every hotspot on every downlink frame: the answer only depends on this
+    peer's own ID, so it is checked directly instead of matching every peer of the
+    MASTER and looking for this one in the list (O(peers) per hotspot, O(peers²) per frame).
+    """
     peer_b = _peer_key_from_int(peer_id)
-    return peer_b in _fuzzy_peer_matches(int_id(rf_src), peers)
+    val = int_id(rf_src)
+    if peer_b not in peers:  # keys stored as int/str: keep the scan, it normalises them
+        return peer_b in _fuzzy_peer_matches(val, peers)
+    return _peer_id_matches(int_id(peer_b), val, str(val))

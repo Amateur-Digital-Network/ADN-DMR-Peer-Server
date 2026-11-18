@@ -47,6 +47,17 @@ def is_proxy_inject_only(config: dict[str, Any], system_name: str) -> bool:
     return target is not None and target == system_name
 
 
+def master_shared_by_hotspots(config: dict[str, Any], system_name: str) -> bool:
+    """Several hotspots on one MASTER (inject-only proxy target or MAX_PEERS > 1): OPTIONS stay per hotspot."""
+    if is_proxy_inject_only(config, system_name):
+        return True
+    sys_cfg = config.get("SYSTEMS", {}).get(system_name, {})
+    try:
+        return int(sys_cfg.get("MAX_PEERS", 1)) > 1
+    except (TypeError, ValueError):
+        return False
+
+
 def normalize_proxy_target(config: dict[str, Any]) -> None:
     """Strip direct UDP bind fields from inject-only proxy target (D-23)."""
     target = proxy_target_system(config)

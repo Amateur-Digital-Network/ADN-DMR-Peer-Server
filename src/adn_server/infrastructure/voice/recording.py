@@ -32,6 +32,8 @@ from typing import Any
 
 from bitarray import bitarray
 
+from ...domain.dmr.frames import voice_bits
+
 logger = logging.getLogger(__name__)
 
 RECORDING_MAX_FRAMES = 2750
@@ -82,11 +84,8 @@ class RecordingHandler:
         if not self._active or self._stream_id != stream_id:
             return
         if frame_type in (0, 1):  # HBPF_VOICE, HBPF_VOICE_SYNC
-            _bits_data = bitarray(endian="big")
-            _bits_data.frombytes(dmrpkt)
-            if len(_bits_data) >= 264:
-                self._bursts.extend(_bits_data[:108])
-                self._bursts.extend(_bits_data[156:264])
+            if len(dmrpkt) >= 33:
+                self._bursts.extend(voice_bits(dmrpkt))
             self._frames += 1
             if self._frames >= RECORDING_MAX_FRAMES:
                 logger.info("(RECORDING) Max duration reached (%d frames), saving", self._frames)

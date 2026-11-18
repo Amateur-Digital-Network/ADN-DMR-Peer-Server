@@ -27,9 +27,10 @@ ADN DMR Peer Server entrypoint.
 
 Run: python -m adn_server.main [-c adn-server.yaml] [--logging LEVEL]
        python -m adn_server.main --echo [-c adn-echo.yaml]
+       python -m adn_server.main --odtp [-c adn-odtp.yaml]
        python -m adn_server.main --doctor [-c adn-server.yaml]
        python -m adn_server.main --replay capture.pcap [--system OBP-FR]
-Config default: adn-server.yaml (or adn-echo.yaml with --echo).
+Config default: adn-server.yaml (adn-echo.yaml with --echo, adn-odtp.yaml with --odtp).
 """
 
 from __future__ import annotations
@@ -47,10 +48,14 @@ if str(_ROOT) not in sys.path:
 from adn_server.domain.errors import ConfigError
 from adn_server.infrastructure import YamlConfigLoader, setup_logging
 from adn_server.infrastructure.bootstrap import run_peer_server
-from adn_server.infrastructure.config_normalizer import apply_talker_alias_defaults, normalize_obp_config
+from adn_server.infrastructure.config_normalizer import (
+    apply_talker_alias_defaults,
+    normalize_obp_config,
+)
 from adn_server.infrastructure.doctor import run_doctor
-from adn_server.infrastructure.obp_replay import run_replay
 from adn_server.infrastructure.echo import run_echo
+from adn_server.infrastructure.obp_replay import run_replay
+from adn_server.infrastructure.odtp import run_odtp
 
 
 def _project_root() -> str:
@@ -70,6 +75,11 @@ def _parse_args() -> argparse.Namespace:
         "--echo",
         action="store_true",
         help="Playback mode: run ECHO PEER(s) from adn-echo.yaml (default config)",
+    )
+    parser.add_argument(
+        "--odtp",
+        action="store_true",
+        help="ODTP gateway: phone apps and IP terminals log in to a MASTER (default config adn-odtp.yaml)",
     )
     parser.add_argument(
         "--no-proxy",
@@ -130,7 +140,7 @@ def main() -> None:
 
     args = _parse_args()
     project_root = _project_root()
-    default_config = "adn-echo.yaml" if args.echo else "adn-server.yaml"
+    default_config = "adn-echo.yaml" if args.echo else "adn-odtp.yaml" if args.odtp else "adn-server.yaml"
     config_path = args.CONFIG_FILE or os.path.join(project_root, default_config)
 
     if args.doctor:
@@ -164,11 +174,12 @@ def main() -> None:
             )
         )
 
-    if not args.echo:
+    standalone = args.echo or args.odtp
+    if not standalone:
         apply_talker_alias_defaults(config)
 
     voice_config_path = os.path.join(os.path.dirname(os.path.abspath(config_path)), "adn-voice.yaml")
-    voice_data = loader.load_voice_config(voice_config_path) if not args.echo else None
+    voice_data = loader.load_voice_config(voice_config_path) if not standalone else None
     if voice_data:
         config.setdefault("VOICE", {}).update(voice_data)
 
@@ -179,6 +190,9 @@ def main() -> None:
 
     if args.echo:
         run_echo(config, logger=logger)
+        return
+    if args.odtp:
+        run_odtp(config, logger=logger)
         return
 
     run_peer_server(

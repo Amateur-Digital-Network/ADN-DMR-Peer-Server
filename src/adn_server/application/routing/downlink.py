@@ -61,6 +61,10 @@ PeerVoiceSlotRow = dict[str, Any]
 PeerVoiceSlotMap = dict[int, PeerVoiceSlotRow]
 PeerHangMap = dict[int, tuple[int, float]]
 
+# When this hotspot's last group voice stream ended, sent or heard. A stream still going is in
+# peer_voice_slots (time of its last frame); the voice ident waits for both to be quiet.
+PEER_STREAM_END = "_STREAM_END"
+
 
 @dataclass
 class DownlinkContext:
@@ -489,6 +493,7 @@ def track_peer_group_dmrd(
     else:
         voice_slot = int(voice_slot)
     if frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM:
+        peer[PEER_STREAM_END] = time.time() if pkt_time is None else float(pkt_time)
         if (
             not from_ingress
             and peer_wants_downlink_single_listen_lock(peer, ctx.sys_cfg)

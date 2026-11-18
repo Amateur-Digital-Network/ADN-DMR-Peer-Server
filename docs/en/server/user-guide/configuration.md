@@ -82,7 +82,7 @@ Optional DMR Talker Alias on HBP (`DMRA` packets). Full guide: [Talker Alias](ta
 
 | Key | Meaning |
 |-----|---------|
-| **TALKER_ALIAS** | Enable server TA inject/passthrough (`false` default). |
+| **TALKER_ALIAS** | Enable server TA inject/passthrough (`true` default). |
 | **TALKER_ALIAS_MODE** | `both` (default), `passthrough`, or `inject`. |
 | **TALKER_ALIAS_FORMAT** | Template, e.g. `{callsign} {fname}`. Max **29** chars (protocol limit, not YAML). |
 | **TALKER_ALIAS_SEND_DMRA** | Send standalone HBP `DMRA` UDP (`false` default; radios use embedded LC). |
@@ -119,8 +119,8 @@ These appear mainly on **MASTER** (and often on **PEER**). OpenBridge uses a dif
 | **MAX_PEERS** | Maximum connected hotspots. On the **proxy target** MASTER, caps concurrent fan-in sessions. |
 | **EXPORT_AMBE** | Feature flag for AMBE export (if enabled in build). |
 | **SINGLE_MODE** | Affects OPTIONS / generator expansion (single-user style). |
-| **VOICE_IDENT** | Enables periodic **voice ident** when conditions are met (see `IdentUseCases`). |
-| **TS1_STATIC** / **TS2_STATIC** | Comma-separated static TGs added to **every** connected hotspot of this MASTER, on top of its own OPTIONS (TGs 0–5, 9 and 9990–9999 are ignored). A `SIGHUP` updates connected hotspots and the MASTER's bridge legs; the monitor shows each hotspot's resulting list, these first. |
+| **VOICE_IDENT** | Enables the hourly **voice ident** (TS2, after 30 s without traffic). On a MASTER with one hotspot it identifies the system. On a MASTER several hotspots share (proxy target, or `MAX_PEERS` > 1) it only allows it: each hotspot whose OPTIONS say `VOICE=1` (or `IDENT=1`) gets its own ident, with its callsign, `LANG` and `VOICETG`/`IDENTTG`, sent to that hotspot only; a hotspot's OPTIONS never change this value for the others. |
+| **TS1_STATIC** / **TS2_STATIC** | Comma-separated static TGs added to **every** connected hotspot of this MASTER, on top of its own OPTIONS (TGs 0–5, 9 and 9990–9999 are ignored). Not added to terminals (`TERMINAL=1`, see [ODTP gateway](odtp.md)). A `SIGHUP` updates connected hotspots and the MASTER's bridge legs; the monitor shows each hotspot's resulting list, these first. |
 | **DEFAULT_REFLECTOR** | Default **reflector** number for `#` dial bridges (0 = none). |
 | **OVERRIDE_IDENT_TG** | Optional TG for voice ident instead of all-call. |
 | **GENERATOR** | If **> 1**, this MASTER is expanded into **`NAME-0`**, **`NAME-1`**, … with consecutive ports (see `expand_generator` in code). Legacy standalone **`adn-proxy`** used the same range; the **integrated** proxy instead uses **inject-only** **`PROXY.TARGET_SYSTEM`** (no per-hotspot UDP ports on the server). |
@@ -279,7 +279,7 @@ Downloads and local files for **peer IDs**, **subscriber IDs**, **talkgroup labe
 | **TRY_DOWNLOAD** | Whether to fetch from URLs when stale. |
 | **PEER_FILE** / **SUBSCRIBER_FILE** / **TGID_FILE** | Local filenames. |
 | **\*_URL** | Remote sources for downloads. |
-| **SUB_MAP_FILE** | Pickle path for **SUB_MAP** (private call routing); default name if empty. See [Private calls](private-calls.md#sub_map-persistence). |
+| **SUB_MAP_FILE** | Pickle path for **SUB_MAP** (private call routing), `sub_map.pkl` if empty. See [Private calls](private-calls.md#sub_map-persistence). |
 | **POLL_INTERVAL_SEC** | How often the lists are checked for download (default **900**). |
 | **CHECKSUM_URL** / **CHECKSUM_FILE** | Published checksums, fetched on every poll; a list is downloaded only when its checksum no longer matches the file on disk (an unmatched checksum is retried once an hour). |
 | **SERVER_ID_URL** / **SERVER_ID_FILE** | Server ID list (used by `VALIDATE_SERVER_IDS`). |

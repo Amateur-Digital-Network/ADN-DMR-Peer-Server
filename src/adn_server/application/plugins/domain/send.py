@@ -24,10 +24,10 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, NamedTuple
+from typing import Any
 
 from ....domain import HBPF_DATA_SYNC, HBPF_SLT_VHEAD, HBPF_SLT_VTERM, HBPF_VOICE, HBPF_VOICE_SYNC
-from ....domain.mesh_admission import call_attributes
+from ....domain.dmrd import DmrdHeader, parse_dmrd_header  # noqa: F401 — re-export
 
 # CSBK, data header, rate 1/2 and rate 3/4 data blocks: ARS, LRRP, SMS and the like.
 PLUGIN_SENDABLE_DTYPES = frozenset({3, 6, 7, 8})
@@ -36,36 +36,6 @@ GROUP_VOICE = "group_voice"
 DEFAULT_MAX_FRAMES_PER_S = 40.0
 # A voice stream is one frame every 60 ms (~17/s), at most one per talkgroup at a time.
 VOICE_FRAMES_PER_S_PER_TG = 18.0
-
-
-class DmrdHeader(NamedTuple):
-    seq: int
-    rf_src: bytes
-    dst_id: bytes
-    peer_id: bytes
-    slot: int
-    call_type: str
-    frame_type: int
-    dtype_vseq: int
-    stream_id: bytes
-
-
-def parse_dmrd_header(pkt: bytes) -> DmrdHeader | None:
-    """The HBP DMRD header fields of any call type (group, vcsbk or unit)."""
-    if len(pkt) < 53 or pkt[:4] != b"DMRD":
-        return None
-    attrs = call_attributes(pkt[15])
-    return DmrdHeader(
-        seq=pkt[4],
-        rf_src=pkt[5:8],
-        dst_id=pkt[8:11],
-        peer_id=pkt[11:15],
-        slot=attrs.slot,
-        call_type=attrs.call_type,
-        frame_type=attrs.frame_type,
-        dtype_vseq=attrs.dtype_vseq,
-        stream_id=pkt[16:20],
-    )
 
 
 def plugin_frame_kind(call_type: str, frame_type: int, dtype_vseq: int) -> str | None:

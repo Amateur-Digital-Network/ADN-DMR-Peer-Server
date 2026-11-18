@@ -52,7 +52,7 @@ from ...domain import bytes_3, bytes_4, int_id
 from ...domain.config_coerce import coerce_bool, parse_options_single
 from ...domain.dynamic_tg import DynamicTgEntry
 from ...domain.hbp_protocol import normalize_fixed_width_ascii
-from ..proxy.deployment import is_proxy_inject_only
+from ..proxy.deployment import master_shared_by_hotspots
 
 logger = logging.getLogger(__name__)
 
@@ -444,22 +444,6 @@ class SubscriptionTableMixin:
 
         return peer_options_static_valid(opt_str)
 
-    def _should_apply_system_single_from_options(self, system_name: str) -> bool:
-        """Whether peer OPTIONS may overwrite system ``SINGLE_MODE`` (legacy single-hotspot only).
-
-        Inject-only proxy and multi-peer masters keep YAML ``SINGLE_MODE`` for bridge
-        timers / in-band signalling; per-peer ``SINGLE`` still applies to downlink via
-        ``peer_single_mode()``.
-        """
-        sys_cfg = self._config.get("SYSTEMS", {}).get(system_name, {})
-        if is_proxy_inject_only(self._config, system_name):
-            return False
-        try:
-            max_peers = int(sys_cfg.get("MAX_PEERS", 1))
-        except (TypeError, ValueError):
-            max_peers = 1
-        return max_peers <= 1
-
     def _apply_master_runtime_options(self, system_name: str, _options: dict[str, Any]) -> None:
         """Apply SINGLE/TIMER/VOICE/LANG from peer OPTIONS over YAML defaults (legacy options_config).
 
@@ -469,12 +453,15 @@ class SubscriptionTableMixin:
         sys_cfg = systems_cfg.get(system_name, {})
         if sys_cfg.get("MODE") != "MASTER":
             return
-        if "VOICE" in _options and bool(_options["VOICE"]) and (
+        # On a shared MASTER, VOICE and the ident TG are read from each hotspot's OPTIONS by the ident;
+        # VOICE_IDENT stays the YAML's permission.
+        shared = master_shared_by_hotspots(self._config, system_name)
+        if not shared and "VOICE" in _options and bool(_options["VOICE"]) and (
             sys_cfg.get("VOICE_IDENT") != bool(int(_options["VOICE"]))
         ):
             sys_cfg["VOICE_IDENT"] = bool(int(_options["VOICE"]))
             logger.debug("(OPTIONS) %s - Setting voice ident to %s", system_name, sys_cfg["VOICE_IDENT"])
-        if "OVERRIDE_IDENT_TG" in _options and _options["OVERRIDE_IDENT_TG"] and (
+        if not shared and "OVERRIDE_IDENT_TG" in _options and _options["OVERRIDE_IDENT_TG"] and (
             sys_cfg.get("OVERRIDE_IDENT_TG") != int(_options["OVERRIDE_IDENT_TG"])
         ):
             sys_cfg["OVERRIDE_IDENT_TG"] = int(_options["OVERRIDE_IDENT_TG"])
@@ -486,7 +473,7 @@ class SubscriptionTableMixin:
         if "LANG" in _options and _options["LANG"] != sys_cfg.get("ANNOUNCEMENT_LANGUAGE"):
             sys_cfg["ANNOUNCEMENT_LANGUAGE"] = _options["LANG"]
             logger.debug("(OPTIONS) %s - Setting voice language to %s", system_name, sys_cfg["ANNOUNCEMENT_LANGUAGE"])
-        if "SINGLE" in _options and self._should_apply_system_single_from_options(system_name):
+        if "SINGLE" in _options and not shared:
             new_single = parse_options_single(_options["SINGLE"])
             if new_single is not None and coerce_bool(sys_cfg.get("SINGLE_MODE", False)) != new_single:
                 sys_cfg["SINGLE_MODE"] = new_single

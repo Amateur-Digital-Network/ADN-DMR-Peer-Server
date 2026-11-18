@@ -53,7 +53,7 @@ def talker_alias_settings(config: dict[str, Any], system_name: str | None = None
     sys_cfg = config.get("SYSTEMS", {}).get(system_name or "", {}) if system_name else {}
     enabled = sys_cfg.get("TALKER_ALIAS")
     if enabled is None:
-        enabled = global_cfg.get("TALKER_ALIAS", False)
+        enabled = global_cfg.get("TALKER_ALIAS", True)
     mode = sys_cfg.get("TALKER_ALIAS_MODE")
     if mode is None:
         mode = global_cfg.get("TALKER_ALIAS_MODE", "both")

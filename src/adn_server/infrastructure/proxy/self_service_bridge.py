@@ -43,6 +43,7 @@ from adn_server.domain.proxy import ClientEndpoint
 from adn_server.domain.value_objects import int_id
 from adn_server.infrastructure.hbp_constants import RPTACK, RPTC, RPTCL, RPTO
 from adn_server.infrastructure.options_redaction import redact_pass_in_options
+from adn_server.infrastructure.twisted_adapters.looping import start_loop
 
 _RPTC_FALLBACK_DELAY = 10.0
 
@@ -91,9 +92,7 @@ class ProxySelfServiceBridge:
             (10.0, self.send_opts, False),
             (120.0, self.lst_seen, True),
         ):
-            call = LoopingCall(fn)
-            call.start(interval, now=now)
-            self._loop_calls.append(call)
+            self._loop_calls.append(start_loop(fn, interval, self._log, now=now))
         self._log.info(
             "(SELF_SERVICE) DB options on PASS= (immediate), send_opts every 10s, "
             "lst_seen + reconcile_logged_in every 2min"

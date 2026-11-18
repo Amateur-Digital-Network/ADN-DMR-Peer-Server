@@ -28,9 +28,10 @@ import signal
 import time
 from typing import Any
 
-from twisted.internet import reactor, task, threads
+from twisted.internet import reactor, threads
 from twisted.python.threadable import isInIOThread
 
+from adn_server import __version__
 from adn_server.application import (
     IdentUseCases,
     ReportingUseCases,
@@ -54,6 +55,8 @@ from adn_server.application.proxy.deployment import (
     obp_proxy_enabled,
     proxy_target_system,
 )
+from adn_server.application.report.panel_report import DEFAULT_INTERVAL as DEFAULT_PANEL_INTERVAL
+from adn_server.application.report.panel_report import build_panel_report, panel_report_settings
 from adn_server.application.report.queue import BoundedReportQueue, QueuedReportSender
 from adn_server.application.routing.sub_map_learning import purge_non_learning_systems
 from adn_server.application.runtime_context import (
@@ -83,6 +86,7 @@ from adn_server.infrastructure.config_normalizer import (
 )
 from adn_server.infrastructure.config_reload import BindSpec, reload_server_config
 from adn_server.infrastructure.logging_config import reopen_file_handlers
+from adn_server.infrastructure.panel.report_client import PanelReportLog, send_panel_report
 from adn_server.infrastructure.persistence import PickleSubMapStore, SubMapSaver
 from adn_server.infrastructure.persistence.alias_loader import DefaultAliasLoader
 from adn_server.infrastructure.persistence.database_config import database_settings
@@ -101,6 +105,8 @@ from adn_server.infrastructure.security.password_download import (
 from adn_server.infrastructure.security.user_passwords_loader import UserPasswordsLoader
 from adn_server.infrastructure.subscription_store import InMemorySubscriptionStore
 from adn_server.infrastructure.talker_alias_emblc import default_ta_emblc_encoder
+from adn_server.infrastructure.twisted_adapters.alias_reload import AliasReloader
+from adn_server.infrastructure.twisted_adapters.looping import start_loop
 from adn_server.infrastructure.twisted_adapters.report.mqtt_config import mqtt_settings_from_config
 from adn_server.infrastructure.twisted_adapters.report.mqtt_publisher import (
     create_report_mqtt_publisher,
@@ -257,21 +263,6 @@ def _log_alias_health(config: Any, systems_cfg: dict[str, Any], logger: logging.
         )
 
 
-def _looping_errback(logger: logging.Logger, failure):
-    """Errback for LoopingCalls (legacy loopingErrHandle). Stops reactor to avoid memory leaks."""
-    try:
-        tb = failure.getTraceback() if hasattr(failure, "getTraceback") else str(failure)
-    except Exception:
-        tb = repr(failure)
-    logger.error(
-        "(GLOBAL) STOPPING REACTOR TO AVOID MEMORY LEAK: Unhandled error in timed loop.\n%s",
-        tb,
-    )
-    from twisted.internet import reactor as _reactor
-
-    _reactor.stop()
-
-
 def run_peer_server(
     config: dict,
     config_path: str,
@@ -282,6 +273,7 @@ def run_peer_server(
     voice_config_path: str,
     loader: Any,
 ) -> None:
+    started_at = time.monotonic()
     # Aliases
     alias_loader = DefaultAliasLoader()
     peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids, server_ids, checksums = (
@@ -507,11 +499,7 @@ def run_peer_server(
         port = config["REPORTS"].get("REPORT_PORT", 4321)
         reactor.listenTCP(port, report_factory)
         logger.info("(REPORT) Report server listening on TCP %s", port)
-        start_report_queue_worker(
-            report_queue,
-            report_inner,
-            on_errback=lambda e: _looping_errback(e, logger),
-        )
+        start_report_queue_worker(report_queue, report_inner)
         if report_mqtt is not None:
             report_factory.start_mqtt()
             reactor.addSystemEventTrigger("during", "shutdown", report_mqtt.stop)
@@ -527,7 +515,41 @@ def run_peer_server(
         logger.info("(REPORT) Subscriber Map has %s entries", len(config.get("_SUB_MAP", {})))
 
     report_interval = config.get("REPORTS", {}).get("REPORT_INTERVAL", 60)
-    task.LoopingCall(reporting_loop).start(report_interval).addErrback(_looping_errback, logger)
+    start_loop(reporting_loop, report_interval, logger)
+
+    # ADN panel report (ADN_PANEL, added by hand with the token from the panel). Settings
+    # are read on every tick, so a config reload can add, change or remove them, and
+    # the loop follows REPORT_INTERVAL. The payload is built on the reactor; the HTTP
+    # POST runs in a thread.
+    panel_log = PanelReportLog(logger)
+    panel_user_agent = f"adn-server/{__version__}"
+    panel_loop: list[Any] = []
+
+    def panel_report_loop() -> None:
+        settings = panel_report_settings(config)
+        if settings is None:
+            return
+        if panel_loop and panel_loop[0].interval != settings.interval:
+            panel_loop[0].interval = settings.interval
+        payload = build_panel_report(
+            config,
+            version=__version__,
+            uptime_s=time.monotonic() - started_at,
+            settings=settings,
+            sessions=mesh_sessions(config),
+            plugins=plugin_manager.loaded_names(),
+        )
+        d = threads.deferToThread(send_panel_report, settings, payload, panel_user_agent)
+        d.addCallbacks(panel_log.sent, lambda failure: panel_log.error(failure.value))
+
+    panel_settings = panel_report_settings(config)
+    panel_interval = panel_settings.interval if panel_settings else DEFAULT_PANEL_INTERVAL
+    if panel_settings is not None:
+        logger.info("(ADN_PANEL) Reporting to %s every %s s", panel_settings.url, panel_interval)
+    # First report once hotspots and OBP links had time to connect.
+    reactor.callLater(
+        60, lambda: panel_loop.append(start_loop(panel_report_loop, panel_interval, logger))
+    )
 
     # LoopingCalls (legacy intervals). rule_timer / stat_trimmer mutate SubscriptionStore on reactor
     # Timer loops run on the reactor thread (no deferToThread — avoids races with dmrd_received).
@@ -535,28 +557,30 @@ def run_peer_server(
         routing_use_cases.rule_timer_loop()
         reporting_use_cases.send_routing_table(routing_table_for_report(), incremental=True)
 
-    task.LoopingCall(_rule_timer_on_reactor).start(52).addErrback(_looping_errback, logger)
-    task.LoopingCall(routing_use_cases.stream_trimmer_loop).start(5).addErrback(_looping_errback, logger)
-    task.LoopingCall(routing_use_cases.subscription_reset_loop).start(6).addErrback(_looping_errback, logger)
+    start_loop(_rule_timer_on_reactor, 52, logger)
+    start_loop(routing_use_cases.stream_trimmer_loop, 5, logger)
+    start_loop(routing_use_cases.subscription_reset_loop, 6, logger)
     if config.get("GLOBAL", {}).get("GEN_STAT_BRIDGES", False):
 
         def _stat_trimmer_on_reactor() -> None:
             routing_use_cases.stat_trimmer_loop()
             reporting_use_cases.send_routing_table(routing_table_for_report(), incremental=True)
 
-        task.LoopingCall(_stat_trimmer_on_reactor).start(303).addErrback(_looping_errback, logger)
+        start_loop(_stat_trimmer_on_reactor, 303, logger)
 
     # KA Reporting (legacy kaReporting, 60s)
-    task.LoopingCall(lambda: threads.deferToThread(reporting_use_cases.ka_reporting_loop)).start(60).addErrback(_looping_errback, logger)
+    start_loop(lambda: threads.deferToThread(reporting_use_cases.ka_reporting_loop), 60, logger)
 
     # bridgeDebug (legacy 66s) — remove invalid bridges, fix >1 active dial per MASTER
     if config.get("GLOBAL", {}).get("DEBUG_BRIDGES"):
-        task.LoopingCall(
+        start_loop(
             lambda: (
                 routing_use_cases.subscription_debug_loop(),
                 reporting_use_cases.send_routing_table(routing_table_for_report(), incremental=True),
-            )
-        ).start(66).addErrback(_looping_errback, logger)
+            ),
+            66,
+            logger,
+        )
 
     # Alias reload: poll every ALIAS_POLL_INTERVAL_SEC (default 900s / 15 min), independent
     # from STALE_DAYS. STALE_DAYS only controls how old a cached file must be before
@@ -565,57 +589,23 @@ def run_peer_server(
     # within minutes instead of waiting up to a full STALE_DAYS cycle. Once files are fresh,
     # each tick is a cheap mtime check with no network call.
     alias_poll_interval = _resolve_alias_poll_interval(aliases_cfg, logger)
-    alias_reload_state: dict[str, Any] = {"generation": 0, "pending": False}
 
-    def alias_reload_loop():
-        alias_reload_state["generation"] += 1
-        my_generation = alias_reload_state["generation"]
-        if alias_reload_state["pending"]:
-            logger.warning(
-                "(ALIAS) previous alias download still running after %gs, starting a new "
-                "attempt (gen %s); its result will be discarded if it arrives late",
-                alias_poll_interval,
-                my_generation,
-            )
-        alias_reload_state["pending"] = True
-        logger.debug("(ALIAS) starting alias thread (gen %s)", my_generation)
-        # Downloads and parsing run in the thread pool; only the config swap comes
-        # back to the reactor thread.
-        def _load_off_reactor():
-            loaded = alias_loader.load_aliases(config)
-            if isinstance(alias_loader, DefaultAliasLoader):
-                return loaded, alias_loader.load_subscriber_profiles(config)
-            return loaded, None
+    # Downloads and parsing run on the reload thread; only the config swap comes
+    # back to the reactor thread.
+    def _load_off_reactor():
+        loaded = alias_loader.load_aliases(config)
+        if isinstance(alias_loader, DefaultAliasLoader):
+            return loaded, alias_loader.load_subscriber_profiles(config)
+        return loaded, None
 
-        d = threads.deferToThread(_load_off_reactor)
+    def _apply_aliases(result):
+        loaded, profiles = result
+        DefaultAliasLoader.merge_reload_into_config(config, alias_loader, *loaded, profiles=profiles)
+        _log_alias_health(config, config.get("SYSTEMS", {}), logger)
 
-        def _apply(result):
-            loaded, profiles = result
-            if my_generation != alias_reload_state["generation"]:
-                logger.info(
-                    "(ALIAS) discarding alias download result from a superseded attempt "
-                    "(gen %s, current gen %s)",
-                    my_generation,
-                    alias_reload_state["generation"],
-                )
-                return
-            alias_reload_state["pending"] = False
-            DefaultAliasLoader.merge_reload_into_config(
-                config, alias_loader, *loaded, profiles=profiles
-            )
-            _log_alias_health(config, config.get("SYSTEMS", {}), logger)
-
-        def _fail(failure):
-            if my_generation == alias_reload_state["generation"]:
-                alias_reload_state["pending"] = False
-            logger.warning(
-                "(ALIAS) alias reload failed (gen %s): %s", my_generation, failure.getErrorMessage()
-            )
-
-        d.addCallback(_apply)
-        d.addErrback(_fail)
-
-    task.LoopingCall(alias_reload_loop).start(alias_poll_interval).addErrback(_looping_errback, logger)
+    alias_reloader = AliasReloader(_load_off_reactor, _apply_aliases, reactor, logger, alias_poll_interval)
+    alias_reloader.start()
+    start_loop(alias_reloader.tick, alias_poll_interval, logger, name="alias_reload")
 
     # SubMapTrimmer + save. Every 300s, but it writes only when a route changed: a
     # restart used to lose up to an hour of routes (Docker rarely delivers the
@@ -626,14 +616,13 @@ def run_peer_server(
         to_remove = [k for k, v in sub_map.items() if v[2] < (now - 86400)]
         for k in to_remove:
             sub_map.pop(k, None)
-        if aliases_cfg.get("SUB_MAP_FILE"):
-            try:
-                if sub_map_saver.save_if_changed():
-                    logger.info("(SUBSCRIBER) Writing SUB_MAP to disk")
-            except Exception as e:
-                logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
+        try:
+            if sub_map_saver.save_if_changed():
+                logger.info("(SUBSCRIBER) Writing SUB_MAP to disk")
+        except Exception as e:
+            logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
 
-    task.LoopingCall(sub_map_trimmer_loop).start(300).addErrback(_looping_errback, logger)
+    start_loop(sub_map_trimmer_loop, 300, logger)
 
     # Kill switch + shutdown (legacy kill_server every 5s; SIGTERM/SIGINT trigger _KILL_SERVER)
     config.setdefault("GLOBAL", {})["_KILL_SERVER"] = False
@@ -647,8 +636,7 @@ def run_peer_server(
                 logger.info("(GLOBAL) SHUTDOWN: CONFBRIDGE IS TERMINATING - killserver called")
                 if reactor.running:
                     reactor.stop()
-                if aliases_cfg.get("SUB_MAP_FILE"):
-                    sub_map_saver.save()
+                sub_map_saver.save()
                 try:
                     keys_store.save(keys_path, keys)
                     logger.info("(KEYS) saved system keys to keystore")
@@ -657,16 +645,15 @@ def run_peer_server(
         except KeyError:
             pass
 
-    task.LoopingCall(kill_server_loop).start(5).addErrback(_looping_errback, logger)
+    start_loop(kill_server_loop, 5, logger)
 
     def shutdown_handler():
         """On reactor shutdown: save SUB_MAP and keys."""
-        if aliases_cfg.get("SUB_MAP_FILE"):
-            try:
-                sub_map_saver.save()
-                logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (shutdown)")
-            except Exception as e:
-                logger.warning("(SUBSCRIBER) Cannot write SUB_MAP on shutdown: %s", e)
+        try:
+            sub_map_saver.save()
+            logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (shutdown)")
+        except Exception as e:
+            logger.warning("(SUBSCRIBER) Cannot write SUB_MAP on shutdown: %s", e)
         try:
             keys_store.save(keys_path, keys)
             logger.info("(KEYS) saved system keys to keystore (shutdown)")
@@ -824,12 +811,11 @@ def run_peer_server(
     def sighup_reload_config(_sig, _frame):
         """Reload adn-server.yaml (SYSTEMS, GLOBAL); keeps active streams on unchanged listeners."""
         logger.info("(CONFIG-RELOAD) SIGHUP received, scheduling reload")
-        if aliases_cfg.get("SUB_MAP_FILE"):
-            try:
-                sub_map_saver.save()
-                logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (SIGHUP)")
-            except Exception as e:
-                logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
+        try:
+            sub_map_saver.save()
+            logger.info("(SUBSCRIBER) Writing SUB_MAP to disk (SIGHUP)")
+        except Exception as e:
+            logger.warning("(SUBSCRIBER) Cannot write SUB_MAP to file: %s", e)
         reactor.callLater(0, _do_config_reload)
 
     signal.signal(signal.SIGTERM, sig_handler)
@@ -866,7 +852,7 @@ def run_peer_server(
         except Exception as e:
             logger.debug("(VOICE-RELOAD) %s", e)
 
-    task.LoopingCall(voice_reload_loop).start(15).addErrback(_looping_errback, logger)
+    start_loop(voice_reload_loop, 15, logger)
     logger.info("(VOICE-RELOAD) config file watch active (every 15 seconds)")
 
     # The download is blocking HTTP: run it in the thread pool. On the reactor thread a
@@ -892,7 +878,7 @@ def run_peer_server(
             _security_download_done, _security_download_error
         )
 
-    task.LoopingCall(security_loop).start(300).addErrback(_looping_errback, logger)
+    start_loop(security_loop, 300, logger)
     logger.info("(SECURITY) Periodic password download task started (every 5 minutes)")
 
     # Ident (3600s): run ident in thread for MASTERs with VOICE_IDENT
@@ -900,14 +886,14 @@ def run_peer_server(
         logger.debug("(IDENT) starting ident thread")
         reactor.callInThread(ident_use_cases.run_ident)
 
-    task.LoopingCall(ident_loop).start(3600).addErrback(_looping_errback, logger)
-    task.LoopingCall(routing_use_cases.log_connected_systems_and_tgs).start(60).addErrback(_looping_errback, logger)
-    task.LoopingCall(lambda: logger.debug("(ROUTER) KeepAlive reporting loop started")).start(60).addErrback(_looping_errback, logger)
+    start_loop(ident_loop, 3600, logger)
+    start_loop(routing_use_cases.log_connected_systems_and_tgs, 60, logger)
+    start_loop(lambda: logger.debug("(ROUTER) KeepAlive reporting loop started"), 60, logger)
 
     def dynamic_tg_purge_loop() -> None:
         dynamic_tg_uc.purge_expired(config)
 
-    task.LoopingCall(dynamic_tg_purge_loop).start(60).addErrback(_looping_errback, logger)
+    start_loop(dynamic_tg_purge_loop, 60, logger)
     logger.info("(DYNAMIC_TG) Expired SINGLE=1 purge loop started (every 60 seconds)")
 
     # UDP listeners per system (same order as legacy: SYSTEM STARTING then instance created per system)
@@ -992,7 +978,7 @@ def run_peer_server(
         def dynamic_reload_loop() -> None:
             dynamic_tg_uc.process_reload_queue(try_purge=_try_purge_dynamic_reload)
 
-        task.LoopingCall(dynamic_reload_loop).start(10).addErrback(_looping_errback, logger)
+        start_loop(dynamic_reload_loop, 10, logger)
         logger.info("(DYNAMIC_TG) need_reload poll loop started (every 10 seconds)")
 
     logger.info("(GLOBAL) ADN DMR Peer Server started. Use adn-dmr-server as reference.")
