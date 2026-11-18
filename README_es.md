@@ -1,6 +1,6 @@
 # ADN DMR Peer Server
 
-**Versión 2.6** — emparejado con **adn-monitor 2.6** (report v2 slim wire + HELLO JSON).
+**Versión 2.7.0** — emparejado con **adn-monitor 2.7.0** (report v2 slim wire + HELLO JSON).
 
 Servidor puente de conferencia DMR de ADN. La configuración es YAML; el código sigue arquitectura limpia (domain, application, infrastructure). v2 agrega **PROXY** integrado, enrutamiento **SubscriptionStore**, report v2 hacia el monitor, y un punto de entrada unificado **`adn-server.py`** (`--echo`, `--doctor`, `--no-proxy`). Ver [CHANGELOG.md](CHANGELOG.md).
 
