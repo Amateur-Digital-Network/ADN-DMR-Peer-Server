@@ -1126,6 +1126,40 @@ def track_rx_stream(
         entry[4] = now
 
 
+def slot_other_rx_stream_live(
+    slot_st: dict[str, Any],
+    stream_id: bytes,
+    tgid_b: bytes,
+    rf_src: bytes,
+    pkt_time: float,
+) -> bool:
+    """True when another caller on this slot and TG got a frame within STREAM_TO.
+
+    ``RX_STREAMS`` keeps each ingress stream of a MASTER slot apart (see
+    ``track_rx_stream``), so this still sees a caller that keeps talking while a
+    silently activated stream overwrites ``RX_STREAM_ID`` on the same slot.
+    """
+    # While a stream is silent, udp_hbp keeps RX_STREAM_ID on it but leaves the other
+    # caller's RX_RFS / RX_TIME untouched: that leg is what still holds the slot.
+    rx_type = slot_st.get("RX_TYPE")
+    if (
+        rx_type is not None
+        and rx_type != HBPF_SLT_VTERM
+        and slot_st.get("RX_TGID") == tgid_b
+        and not _same_rf_source(rf_src, slot_st.get("RX_RFS") or b"\x00\x00\x00")
+        and (pkt_time - float(slot_st.get("RX_TIME", 0) or 0)) < STREAM_TO
+    ):
+        return True
+    for sid, entry in (slot_st.get("RX_STREAMS") or {}).items():
+        if sid == stream_id or not isinstance(entry, list) or len(entry) < 5:
+            continue
+        if entry[2] != tgid_b or _same_rf_source(rf_src, entry[1]):
+            continue
+        if (pkt_time - float(entry[4] or 0)) < STREAM_TO:
+            return True
+    return False
+
+
 def hbp_ingress_downlink_session_blocks_tx(
     voice_slot: int,
     incoming_tgid_b: bytes,

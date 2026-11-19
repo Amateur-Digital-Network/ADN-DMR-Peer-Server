@@ -158,3 +158,83 @@ def test_hbp_collision_allows_same_subscriber_rekey() -> None:
 
     assert_inject_ok(ok)
     assert_forwarded(scenario, "MASTER-B", count=1, dst_id=91)
+
+
+def _busy_slot(scenario: DeterministicScenario, t0: float) -> dict:
+    """MASTER-A slot 2 carrying another caller's live QSO on TG 91."""
+    slot = scenario.protocols["MASTER-A"].STATUS[2]
+    other = bytes_4(0x80808080)
+    slot.update(
+        {
+            "RX_STREAM_ID": other,
+            "RX_TYPE": HBPF_SLT_VHEAD,
+            "RX_RFS": bytes_3(1111111),
+            "RX_TGID": bytes_3(91),
+            "RX_TIME": t0,
+            "RX_START": t0,
+            "RX_STREAMS": {other: [bytes_4(1), bytes_3(1111111), bytes_3(91), t0, t0]},
+        }
+    )
+    return slot
+
+
+def test_hbp_silent_activation_lifts_when_blocking_qso_ends(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """A reply keyed right after the other station's last frame must not stay muted.
+
+    Seen on a production server: the reply started 0.2 s after the previous over ended
+    (inside STREAM_TO), was silently activated and nobody heard any of its 22 s.
+    Once the blocking QSO is over, the stream is forwarded from that frame on.
+    """
+    bridges = active_routing_table(91, (("MASTER-A", 2), ("MASTER-B", 2)))
+    scenario = DeterministicScenario(routing_table=bridges)
+    t0 = scenario.clock.time()
+    slot = _busy_slot(scenario, t0)
+    base = PacketSpec(dst_id=91, stream_id=0x70707070, rf_src=2222222)
+
+    assert_inject_ok(
+        scenario.inject_hbp(
+            "MASTER-A", DeterministicScenario.voice_head_spec(base), ingress_pkt_time=t0 + 0.2,
+        )
+    )
+    assert slot.get("_suppress_uplink") is True
+    assert len(scenario.capture.for_system("MASTER-B")) == 0
+
+    # The other caller ended (its terminator removed it from RX_STREAMS); a second later
+    # the slot holds nothing live on TG 91.
+    slot["RX_STREAMS"].pop(bytes_4(0x80808080), None)
+    with caplog.at_level(logging.INFO):
+        ok = scenario.inject_hbp(
+            "MASTER-A",
+            DeterministicScenario.voice_burst_spec(base, seq=1, dtype_vseq=1),
+            ingress_pkt_time=t0 + 1.2,
+        )
+    assert_inject_ok(ok)
+    assert not slot.get("_suppress_uplink")
+    assert_forwarded(scenario, "MASTER-B", count=1, dst_id=91)
+    assert any("resuming uplink" in r.message for r in caplog.records)
+
+
+def test_hbp_silent_activation_stays_while_other_caller_keeps_talking() -> None:
+    """The other QSO is still live (its stream got a frame within STREAM_TO): stay muted."""
+    bridges = active_routing_table(91, (("MASTER-A", 2), ("MASTER-B", 2)))
+    scenario = DeterministicScenario(routing_table=bridges)
+    t0 = scenario.clock.time()
+    slot = _busy_slot(scenario, t0)
+    base = PacketSpec(dst_id=91, stream_id=0x70707070, rf_src=2222222)
+
+    assert_inject_ok(
+        scenario.inject_hbp(
+            "MASTER-A", DeterministicScenario.voice_head_spec(base), ingress_pkt_time=t0 + 0.2,
+        )
+    )
+    # The other caller's latest frame, just before ours.
+    slot["RX_STREAMS"][bytes_4(0x80808080)][4] = t0 + 1.1
+    scenario.inject_hbp(
+        "MASTER-A",
+        DeterministicScenario.voice_burst_spec(base, seq=1, dtype_vseq=1),
+        ingress_pkt_time=t0 + 1.2,
+    )
+    assert slot.get("_suppress_uplink") is True
+    assert len(scenario.capture.for_system("MASTER-B")) == 0
