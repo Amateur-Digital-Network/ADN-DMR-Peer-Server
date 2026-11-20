@@ -126,6 +126,7 @@ def test_try_download_gives_up_after_max_attempts(tmp_path: Path) -> None:
 class _FakeResponse:
     def __init__(self, data: bytes) -> None:
         self._data = data
+        self.headers: dict[str, str] = {}
 
     def read(self) -> bytes:
         return self._data

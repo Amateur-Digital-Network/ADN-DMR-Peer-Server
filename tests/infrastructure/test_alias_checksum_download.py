@@ -29,6 +29,7 @@ import json
 import os
 from pathlib import Path
 from unittest.mock import patch
+from urllib.request import Request
 
 from adn_server.infrastructure.persistence.alias_loader import DefaultAliasLoader
 
@@ -38,6 +39,7 @@ _URLOPEN = "adn_server.infrastructure.persistence.alias_loader.urlopen"
 class _Resp:
     def __init__(self, data: bytes) -> None:
         self._data = data
+        self.headers: dict[str, str] = {}
 
     def read(self) -> bytes:
         return self._data
@@ -74,8 +76,8 @@ class _Server:
             ).encode(),
         }
 
-    def urlopen(self, url: str, context=None, timeout=None) -> _Resp:
-        name = url.rsplit("/", 1)[-1]
+    def urlopen(self, request: Request, context=None, timeout=None) -> _Resp:
+        name = request.full_url.rsplit("/", 1)[-1]
         self.fetched.append(name)
         return _Resp(self.files[name])
 

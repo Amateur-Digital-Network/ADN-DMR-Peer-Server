@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import csv
+import gzip
 import hashlib
 import json
 import logging
@@ -35,10 +36,13 @@ import ssl
 import sys
 import threading
 import time
+import zlib
 from collections.abc import Callable
+from email.utils import formatdate
 from pathlib import Path
 from typing import Any
-from urllib.request import urlopen
+from urllib.error import HTTPError
+from urllib.request import Request, urlopen
 
 from ...application.ports import AliasLoader
 from ...domain.value_objects import SubscriberProfile
@@ -71,38 +75,54 @@ def try_download(
     `retry_timeout` so a fully unreachable host can't stall a caller for `max_attempts *
     first_timeout` (this runs synchronously during startup, and off-thread on the
     periodic reload — see alias_reload_loop in peer_server.py). Returns a result message.
+
+    Asks for gzip (the JSON lists shrink ~7x) and stores the decompressed file; the
+    published checksum is of the uncompressed content.
     """
     if not url:
         return f"ID ALIAS MAPPER: '{file_name}' URL empty, not downloaded"
     full = path / file_name
     now = time.time()
     file_exists = full.is_file()
+    if_modified_since: str | None = None
     if file_exists and expected_checksum and current_checksum:
         if current_checksum == expected_checksum:
             return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
     else:
         if file_exists:
-            file_old = (full.stat().st_mtime + stale_sec) < now
-        else:
-            file_old = True
-        if not file_old and file_exists:
-            return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
+            mtime = full.stat().st_mtime
+            if mtime + stale_sec >= now:
+                return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
+            if not expected_checksum:
+                if_modified_since = formatdate(mtime, usegmt=True)
 
     data: bytes | None = None
     last_error: Exception | None = None
+    not_modified = False
     for attempt in range(1, max_attempts + 1):
         timeout = first_timeout if attempt == 1 else retry_timeout
         try:
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            with urlopen(url, context=ctx, timeout=timeout) as response:
+            request = Request(url, headers={"Accept-Encoding": "gzip"})
+            if if_modified_since:
+                request.add_header("If-Modified-Since", if_modified_since)
+            with urlopen(request, context=ctx, timeout=timeout) as response:
                 data = response.read()
+                encoding = response.headers.get("Content-Encoding") or ""
+            if encoding.lower() == "gzip":
+                data = gzip.decompress(data)
             if expected_checksum and hashlib.blake2b(data).hexdigest() != expected_checksum:
                 raise ValueError("downloaded data does not match expected checksum")
             last_error = None
             break
-        except (OSError, ValueError) as e:
+        except (OSError, ValueError, zlib.error, EOFError) as e:
+            # urllib raises a 304 as HTTPError, an OSError.
+            if isinstance(e, HTTPError) and e.code == 304:
+                not_modified = True
+                last_error = None
+                break
             last_error = e
             data = None
             if attempt < max_attempts:
@@ -112,6 +132,12 @@ def try_download(
                 )
                 if retry_delay_sec:
                     time.sleep(retry_delay_sec)
+    if not_modified:
+        try:
+            os.utime(full)
+        except OSError as e:
+            return f"ID ALIAS mapper '{file_name}' file could not be written: {e}"
+        return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
     if isinstance(last_error, ValueError):
         return f"ID ALIAS MAPPER: '{file_name}' could not be downloaded, checksum mismatch after {max_attempts} attempts"
     if last_error is not None:
