@@ -6,21 +6,12 @@ Servidor puente de conferencia DMR de ADN. La configuración es YAML; el código
 
 ## Instalar con ADN-Install
 
-La forma más fácil de usar el servidor es con [ADN-Install](https://github.com/ce5rpy/ADN-Install), en Docker o en bare metal. Elige la versión con `ADN_VERSION`: `stable` (última versión publicada, por defecto), `develop` (la rama `develop` de este repo, **solo para pruebas**) o una versión `X.Y.Z`:
-
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ce5rpy/ADN-Install/master/docker-install.sh | sudo env ADN_VERSION=develop bash
-curl -fsSL https://raw.githubusercontent.com/ce5rpy/ADN-Install/master/install.sh | sudo env ADN_VERSION=develop bash
+curl -fsSL https://raw.githubusercontent.com/ce5rpy/ADN-Install/master/docker-install.sh | sudo bash   # Docker
+curl -fsSL https://raw.githubusercontent.com/ce5rpy/ADN-Install/master/install.sh | sudo bash          # bare metal
 ```
 
-En un servidor ya instalado, actualiza primero su toolkit y después cambia la versión; el comando y los valores son los mismos en Docker y en bare metal:
-
-```bash
-sudo adn-docker update && sudo adn-docker version develop                 # Docker
-sudo adn-deploy update --toolkit && sudo adn-deploy version develop       # bare metal
-```
-
-`version` sin nada muestra las versiones actuales; `stable` vuelve a la última versión publicada. Imágenes Docker: `docker.io/ce5rpy/adn-server`: `:latest` y `:X.Y.Z` (versiones publicadas), `:develop` y `:develop-<commit>` (cada push a `develop`).
+Para más opciones, ver el [README de ADN-Install](https://github.com/ce5rpy/ADN-Install).
 
 ## Licencia
 
