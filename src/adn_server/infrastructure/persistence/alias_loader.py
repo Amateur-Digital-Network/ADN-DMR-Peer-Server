@@ -44,6 +44,7 @@ from typing import Any
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
+from ... import USER_AGENT
 from ...application.ports import AliasLoader
 from ...domain.value_objects import SubscriberProfile
 
@@ -105,7 +106,7 @@ def try_download(
             ctx = ssl.create_default_context()
             ctx.check_hostname = False
             ctx.verify_mode = ssl.CERT_NONE
-            request = Request(url, headers={"Accept-Encoding": "gzip"})
+            request = Request(url, headers={"Accept-Encoding": "gzip", "User-Agent": USER_AGENT})
             if if_modified_since:
                 request.add_header("If-Modified-Since", if_modified_since)
             with urlopen(request, context=ctx, timeout=timeout) as response:

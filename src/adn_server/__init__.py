@@ -37,6 +37,6 @@
 
 """ADN DMR Peer Server — conference bridge (rewrite of bridge_master)."""
 
-from .version import __version__, read_version, read_version_pep440, repo_root
+from .version import USER_AGENT, __version__, read_version, read_version_pep440, repo_root
 
-__all__ = ["__version__", "read_version", "read_version_pep440", "repo_root"]
+__all__ = ["USER_AGENT", "__version__", "read_version", "read_version_pep440", "repo_root"]

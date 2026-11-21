@@ -27,6 +27,7 @@ from urllib.error import URLError
 
 import pytest
 
+from adn_server import __version__
 from adn_server.infrastructure.security import password_download
 from adn_server.infrastructure.security.password_crypto import decrypt_password
 from adn_server.infrastructure.security.password_download import (
@@ -143,3 +144,17 @@ def test_invalid_payload_does_not_overwrite_existing_file(tmp_path, monkeypatch)
 
     assert downloader.periodic_download(_offline_config(tmp_path)) is False
     assert pw_file.read_text(encoding="utf-8") == '{"passwords": {"7300391": "enc"}}'
+
+
+def test_every_download_names_the_server_and_its_version(tmp_path, monkeypatch) -> None:
+    requests = []
+
+    def _capture(req, **kwargs):
+        requests.append(req)
+        raise URLError("offline")
+
+    monkeypatch.setattr(password_download, "urlopen", _capture)
+    DefaultSecurityDownloader(str(tmp_path)).init_downloads(_offline_config(tmp_path))
+
+    assert len(requests) == 2
+    assert {req.get_header("User-agent") for req in requests} == {f"adn-server/{__version__}"}

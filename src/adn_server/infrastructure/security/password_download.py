@@ -36,6 +36,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
+from ... import USER_AGENT
 from ...application.ports import SecurityDownloader
 
 logger = logging.getLogger(__name__)
@@ -100,7 +101,7 @@ def _download_file_safely(
         try:
             logger.debug("(SECURITY) Attempting download from: %s", _log_target(url))
             req = Request(url)
-            req.add_header("User-Agent", "ADN-Systems-DMR/1.0")
+            req.add_header("User-Agent", USER_AGENT)
             with urlopen(req, timeout=timeout) as response:
                 content = response.read()
             if len(content) == 0:
@@ -163,7 +164,7 @@ def _download_user_passwords(config: dict[str, Any], data_dir: str) -> bool:
     try:
         logger.debug("(SECURITY) Downloading passwords from: %s", _log_target(url))
         req = Request(url)
-        req.add_header("User-Agent", "ADN-Systems-DMR/1.0")
+        req.add_header("User-Agent", USER_AGENT)
         with urlopen(req, timeout=DOWNLOAD_TIMEOUT) as response:
             new_content = response.read()
         new_size = len(new_content)
