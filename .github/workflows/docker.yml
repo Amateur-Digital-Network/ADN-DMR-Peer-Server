@@ -43,6 +43,7 @@ env:
   DOCKERFILE: install-docker/dockerfiles/Dockerfile.server
   GIT_URL_ARG: GIT_URL_PEER
   GIT_REF_ARG: GIT_BRANCH_PEER
+  GIT_COMMIT_ARG: GIT_COMMIT_PEER
   PLATFORMS: linux/amd64,linux/arm/v7,linux/arm64
 
 jobs:
@@ -61,6 +62,18 @@ jobs:
           PUSH_SHA: ${{ github.event_name == 'push' && github.sha || '' }}
         run: |
           set -euo pipefail
+          url="https://github.com/${GITHUB_REPOSITORY}.git"
+          # The exact commit is built (and keys the layer cache): a clone of a moving
+          # branch would otherwise be served from the cache of an older build.
+          if [[ -n "$PUSH_SHA" ]]; then
+            sha="$PUSH_SHA"
+          elif [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            sha="$(git ls-remote "$url" "refs/tags/$REF^{}" | cut -f1)"
+            [[ -n "$sha" ]] || sha="$(git ls-remote "$url" "refs/tags/$REF" | cut -f1)"
+          else
+            sha="$(git ls-remote "$url" "refs/heads/$REF" | cut -f1)"
+          fi
+          [[ -n "$sha" ]] || { echo "::error::'$REF' not found in $url"; exit 1; }
           tags=()
           if [[ -n "$VERSION" ]]; then
             tags+=("$IMAGE:${VERSION#v}" "$IMAGE:latest")
@@ -69,14 +82,16 @@ jobs:
             [[ "$LATEST" == "true" ]] && tags+=("$IMAGE:latest")
           else
             name="${REF//\//-}"
-            sha="$PUSH_SHA"
-            [[ -n "$sha" ]] || sha="$(git ls-remote "https://github.com/${GITHUB_REPOSITORY}.git" "refs/heads/$REF" | cut -f1)"
-            [[ -n "$sha" ]] || { echo "::error::branch '$REF' not found"; exit 1; }
             tags+=("$IMAGE:$name" "$IMAGE:$name-${sha:0:7}")
           fi
-          printf '%s\n' "${tags[@]}"
-          { echo "list<<EOF"; printf '%s\n' "${tags[@]}"; echo "EOF"; } >> "$GITHUB_OUTPUT"
-          echo "ref=$REF" >> "$GITHUB_OUTPUT"
+          printf '%s\n' "commit $sha" "${tags[@]}"
+          {
+            echo "list<<EOF"
+            printf '%s\n' "${tags[@]}"
+            echo "EOF"
+            echo "ref=$REF"
+            echo "sha=$sha"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Checkout ADN-Install (Docker files)
         uses: actions/checkout@v5
@@ -102,6 +117,7 @@ jobs:
           build-args: |
             ${{ env.GIT_URL_ARG }}=https://github.com/${{ github.repository }}.git
             ${{ env.GIT_REF_ARG }}=${{ steps.tags.outputs.ref }}
+            ${{ env.GIT_COMMIT_ARG }}=${{ steps.tags.outputs.sha }}
           push: true
           provenance: false
           sbom: false
