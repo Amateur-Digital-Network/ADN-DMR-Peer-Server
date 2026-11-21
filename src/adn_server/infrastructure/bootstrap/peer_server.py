@@ -31,7 +31,7 @@ from typing import Any
 from twisted.internet import reactor, threads
 from twisted.python.threadable import isInIOThread
 
-from adn_server import __version__
+from adn_server import USER_AGENT, __version__
 from adn_server.application import (
     IdentUseCases,
     ReportingUseCases,
@@ -522,7 +522,6 @@ def run_peer_server(
     # the loop follows REPORT_INTERVAL. The payload is built on the reactor; the HTTP
     # POST runs in a thread.
     panel_log = PanelReportLog(logger)
-    panel_user_agent = f"adn-server/{__version__}"
     panel_loop: list[Any] = []
 
     def panel_report_loop() -> None:
@@ -539,7 +538,7 @@ def run_peer_server(
             sessions=mesh_sessions(config),
             plugins=plugin_manager.loaded_names(),
         )
-        d = threads.deferToThread(send_panel_report, settings, payload, panel_user_agent)
+        d = threads.deferToThread(send_panel_report, settings, payload, USER_AGENT)
         d.addCallbacks(panel_log.sent, lambda failure: panel_log.error(failure.value))
 
     panel_settings = panel_report_settings(config)

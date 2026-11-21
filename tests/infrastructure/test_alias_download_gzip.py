@@ -30,6 +30,7 @@ from pathlib import Path
 
 import pytest
 
+from adn_server import __version__
 from adn_server.infrastructure.persistence.alias_loader import try_download
 
 _PLAIN = b'{"count": 1, "results": [{"id": 7300391, "callsign": "CE5RPY"}]}' * 200
@@ -89,6 +90,12 @@ def test_request_asks_for_gzip(tmp_path: Path, origin: tuple[_Origin, str]) -> N
     state, url = origin
     _download(tmp_path, url)
     assert state.requests[0].get("Accept-Encoding") == "gzip"
+
+
+def test_request_names_the_server_and_its_version(tmp_path: Path, origin: tuple[_Origin, str]) -> None:
+    state, url = origin
+    _download(tmp_path, url)
+    assert state.requests[0].get("User-Agent") == f"adn-server/{__version__}"
 
 
 def test_gzip_response_is_stored_decompressed_and_checked_on_plain_content(
