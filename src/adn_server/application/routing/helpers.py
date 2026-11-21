@@ -1135,12 +1135,9 @@ def slot_other_rx_stream_live(
 ) -> bool:
     """True when another caller on this slot and TG got a frame within STREAM_TO.
 
-    ``RX_STREAMS`` keeps each ingress stream of a MASTER slot apart (see
-    ``track_rx_stream``), so this still sees a caller that keeps talking while a
-    silently activated stream overwrites ``RX_STREAM_ID`` on the same slot.
+    A silent stream owns ``RX_STREAM_ID``, so the other caller is found through
+    ``RX_RFS`` / ``RX_TIME`` and ``RX_STREAMS`` (see ``track_rx_stream``).
     """
-    # While a stream is silent, udp_hbp keeps RX_STREAM_ID on it but leaves the other
-    # caller's RX_RFS / RX_TIME untouched: that leg is what still holds the slot.
     rx_type = slot_st.get("RX_TYPE")
     if (
         rx_type is not None

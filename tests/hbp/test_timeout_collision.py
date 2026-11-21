@@ -238,3 +238,18 @@ def test_hbp_silent_activation_stays_while_other_caller_keeps_talking() -> None:
     )
     assert slot.get("_suppress_uplink") is True
     assert len(scenario.capture.for_system("MASTER-B")) == 0
+
+
+def test_hbp_silent_stream_ending_after_the_qso_ends_stays_silent() -> None:
+    """A terminator does not resume a silent stream: nothing to report or forward."""
+    bridges = active_routing_table(91, (("MASTER-A", 2), ("MASTER-B", 2)))
+    scenario = DeterministicScenario(routing_table=bridges, enable_reporting=True)
+    t0 = scenario.clock.time()
+    slot = _busy_slot(scenario, t0)
+    base = PacketSpec(dst_id=91, stream_id=0x70707070, rf_src=2222222)
+    scenario.inject_hbp("MASTER-A", DeterministicScenario.voice_head_spec(base), ingress_pkt_time=t0 + 0.2)
+    assert slot.get("_suppress_uplink") is True
+    slot["RX_STREAMS"].pop(bytes_4(0x80808080), None)
+    scenario.inject_hbp("MASTER-A", DeterministicScenario.voice_term_spec(base), ingress_pkt_time=t0 + 1.2)
+    assert [e for e in scenario.report_factory.events if "GROUP VOICE" in e] == []
+    assert len(scenario.capture.for_system("MASTER-B")) == 0

@@ -278,16 +278,13 @@ class HbpForwardMixin:
             _slot_st["lastSeq"] = False
             _slot_st["lastData"] = False
             _slot_st["RX_START"] = pkt_time
-        elif _slot_st.get("_suppress_uplink") and not (
+        elif _slot_st.get("_suppress_uplink") and not terminator and not (
             tg_has_active_conversation(
                 protocols, systems_cfg, dst_id, stream_id, rf_src, pkt_time,
             )
             or slot_other_rx_stream_live(_slot_st, stream_id, dst_id, rf_src, pkt_time)
         ):
-            # The QSO that made this stream silent is over. Without this the stream stayed
-            # muted to its very end: a reply keyed a fraction of a second after the other
-            # station's terminator (still inside STREAM_TO) was never heard by anyone,
-            # while the sender's radio showed a normal transmission. Forward it from here.
+            # The blocking QSO is over: forward the rest of this stream.
             _slot_st.pop("_suppress_uplink", None)
             _slot_st.pop("_silent_activation_tg", None)
             _slot_st["_uplink_resumed"] = True
