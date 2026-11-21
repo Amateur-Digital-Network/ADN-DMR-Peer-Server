@@ -1,6 +1,7 @@
 # Release workflow
 #
 #   master: python-semantic-release on push → semver tag + GitHub Release → sync develop
+#           → Docker image :X.Y.Z + :latest (docker.yml)
 
 name: release
 
@@ -20,6 +21,10 @@ concurrency:
 jobs:
   release:
     runs-on: ubuntu-latest
+    outputs:
+      released: ${{ steps.semantic.outputs.released }}
+      version: ${{ steps.semantic.outputs.version }}
+      tag: ${{ steps.semantic.outputs.tag }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -102,3 +107,13 @@ jobs:
             echo "::notice::Develop still has ${phantom_after} commit(s) not in master."
             echo "::notice::Merge the next release PR with 'Create a merge commit' to realign automatically."
           fi
+
+  # Same run, not a release event: a release created with GITHUB_TOKEN triggers no workflows.
+  docker:
+    needs: release
+    if: needs.release.outputs.released == 'true' && needs.release.outputs.tag != ''
+    uses: ./.github/workflows/docker.yml
+    with:
+      ref: ${{ needs.release.outputs.tag }}
+      version: ${{ needs.release.outputs.version }}
+    secrets: inherit
