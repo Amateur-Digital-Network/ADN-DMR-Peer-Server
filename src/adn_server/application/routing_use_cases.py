@@ -395,6 +395,19 @@ class RoutingUseCases(
                 self.apply_static_tg_to_bridge(dst_int)
         # Legacy bridge_master routerHBP: BRDG_EVENT on VHEAD/VTERM before bridge source scan.
         _obp_grp = source_is_obp and call_type in ("group", "vcsbk")
+        # A silently activated stream whose blocking QSO just ended starts for the network here.
+        _uplink_resumed = False
+        if not source_is_obp and call_type in ("group", "vcsbk"):
+            _protos = self._get_protocols() if self._get_protocols else {}
+            _sp = _protos.get(system_name) if _protos else None
+            _sst = getattr(_sp, "STATUS", {}).get(slot) if _sp is not None else None
+            if isinstance(_sst, dict):
+                _uplink_resumed = bool(_sst.pop("_uplink_resumed", False))
+        if _uplink_resumed and not (frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM):
+            self._emit_group_voice_rx_start(
+                system_name, stream_id, peer_id, rf_src, slot, dst_id,
+                pkt_time, synthetic_announcement, systems_cfg,
+            )
         if frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VHEAD:
             if not _obp_grp:
                 _is_new_rx_stream = True
@@ -411,37 +424,11 @@ class RoutingUseCases(
                             )
                             _suppress_uplink_rx = bool(slot_st.get("_suppress_uplink"))
                 if _is_new_rx_stream and not _suppress_uplink_rx:
-                    _rx_report_peer = peer_id
-                    if not source_is_obp and not synthetic_announcement:
-                        _rx_report_peer = resolve_voice_peer_id(
-                            peer_id,
-                            rf_src,
-                            system_name,
-                            systems_cfg,
-                        )
-                    self._send_routing_event(
-                        "GROUP VOICE,START,RX,{},{},{},{},{},{},{}".format(
-                            system_name,
-                            int_id(stream_id),
-                            int_id(_rx_report_peer),
-                            int_id(rf_src),
-                            slot,
-                            int_id(dst_id),
-                            int(synthetic_announcement),
-                        )
+                    self._emit_group_voice_rx_start(
+                        system_name, stream_id, peer_id, rf_src, slot, dst_id,
+                        pkt_time, synthetic_announcement, systems_cfg,
+                        resolve_peer=not source_is_obp,
                     )
-                    if self._voice_plugin_bridge is not None:
-                        self._voice_plugin_bridge.emit_group_voice_start(
-                            system_name=system_name,
-                            peer_id=peer_id,
-                            rf_src=rf_src,
-                            dst_id=dst_id,
-                            slot=slot,
-                            stream_id=stream_id,
-                            pkt_time=pkt_time,
-                            source_is_obp=False,
-                            synthetic_announcement=synthetic_announcement,
-                        )
         elif frame_type == HBPF_DATA_SYNC and dtype_vseq == HBPF_SLT_VTERM:
             if not _obp_grp:
                 duration = 0.0
@@ -879,7 +866,12 @@ class RoutingUseCases(
                         _is_new_stream = (_ts_st.get("TX_STREAM_ID") != stream_id)
                     else:
                         src_status = getattr(src_proto, "STATUS", None) if src_proto else None
-                        _is_new_stream = (src_status.get(slot, {}).get("RX_STREAM_ID") if src_status else b"") != stream_id
+                        _is_new_stream = (
+                            (src_status.get(slot, {}).get("RX_STREAM_ID") if src_status else b"") != stream_id
+                            # A resumed silent stream already owns RX_STREAM_ID, but it is new
+                            # to every target: open it there (LC, TX_* state) like a late entry.
+                            or _uplink_resumed
+                        )
                     if _is_new_stream:
                         dst_lc = source_lc[0:3] + entry_tgid_b + rf_src
                         if _obp_deferred_bridge and _bridge_tx_leg is not None:
@@ -1118,6 +1110,48 @@ class RoutingUseCases(
         return True
 
     # ── Unit DATA path (SMS, GPS, CSBK) — legacy routerOBP/routerHBP unit data branch ──
+
+    def _emit_group_voice_rx_start(
+        self,
+        system_name: str,
+        stream_id: bytes,
+        peer_id: bytes,
+        rf_src: bytes,
+        slot: int,
+        dst_id: bytes,
+        pkt_time: float,
+        synthetic_announcement: bool,
+        systems_cfg: Any,
+        *,
+        resolve_peer: bool = True,
+    ) -> None:
+        """Report ``GROUP VOICE,START,RX`` and start the voice plugin for an HBP group stream."""
+        report_peer = peer_id
+        if resolve_peer and not synthetic_announcement:
+            report_peer = resolve_voice_peer_id(peer_id, rf_src, system_name, systems_cfg)
+        self._send_routing_event(
+            "GROUP VOICE,START,RX,{},{},{},{},{},{},{}".format(
+                system_name,
+                int_id(stream_id),
+                int_id(report_peer),
+                int_id(rf_src),
+                slot,
+                int_id(dst_id),
+                int(synthetic_announcement),
+            )
+        )
+        if self._voice_plugin_bridge is not None:
+            self._voice_plugin_bridge.emit_group_voice_start(
+                system_name=system_name,
+                peer_id=peer_id,
+                rf_src=rf_src,
+                dst_id=dst_id,
+                slot=slot,
+                stream_id=stream_id,
+                pkt_time=pkt_time,
+                source_is_obp=False,
+                synthetic_announcement=synthetic_announcement,
+            )
 
     def _log_unit_data_hbp_busy(
         self,

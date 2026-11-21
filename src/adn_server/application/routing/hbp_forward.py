@@ -48,6 +48,7 @@ import time
 from hashlib import blake2b
 
 from ...domain import bytes_4, int_id
+from ...domain.dmr.const import LC_OPT
 from .helpers import (
     group_voice_tg_ingress_collision,
     hbp_ingress_downlink_session_blocks_tx,
@@ -55,6 +56,7 @@ from .helpers import (
     master_per_peer_slot_contention,
     peer_voice_busy_for_unit_data,
     seq_advance,
+    slot_other_rx_stream_live,
     tg_has_active_conversation,
     unit_data_reportable,
 )
@@ -276,6 +278,23 @@ class HbpForwardMixin:
             _slot_st["lastSeq"] = False
             _slot_st["lastData"] = False
             _slot_st["RX_START"] = pkt_time
+        elif _slot_st.get("_suppress_uplink") and not terminator and not (
+            tg_has_active_conversation(
+                protocols, systems_cfg, dst_id, stream_id, rf_src, pkt_time,
+            )
+            or slot_other_rx_stream_live(_slot_st, stream_id, dst_id, rf_src, pkt_time)
+        ):
+            # The blocking QSO is over: forward the rest of this stream.
+            _slot_st.pop("_suppress_uplink", None)
+            _slot_st.pop("_silent_activation_tg", None)
+            _slot_st["_uplink_resumed"] = True
+            _slot_st["RX_START"] = pkt_time
+            _slot_st["RX_LC"] = LC_OPT + dst_id + rf_src
+            self._clear_silent_activation_log(system_name, peer_id, dst_id)
+            logger.info(
+                "(%s) TG %s free again — resuming uplink of stream %s from peer %s",
+                system_name, int_id(dst_id), int_id(stream_id), int_id(peer_id),
+            )
         if _slot_st.get("lastData") and _slot_st["lastData"] == data and seq > 1:
             _slot_st["loss"] = _slot_st.get("loss", 0) + 1
             logger.debug(
