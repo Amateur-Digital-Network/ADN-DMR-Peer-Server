@@ -46,6 +46,8 @@ def create_pool(
         db=db_name,
         port=port,
         charset="utf8mb4",
+        # Drop a connection MySQL closed (restart, wait_timeout) instead of reusing it forever.
+        cp_reconnect=True,
     )
 
 
