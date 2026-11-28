@@ -40,7 +40,7 @@ import zlib
 from collections.abc import Callable
 from email.utils import formatdate
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
@@ -50,6 +50,11 @@ from ...domain.value_objects import SubscriberProfile
 
 logger = logging.getLogger(__name__)
 
+_MAX_ATTEMPTS = 3
+_FIRST_TIMEOUT = 30
+_RETRY_TIMEOUT = 10
+_RETRY_DELAY_SEC = 3
+
 
 def try_download(
     path: Path,
@@ -57,10 +62,10 @@ def try_download(
     url: str,
     stale_sec: float,
     *,
-    max_attempts: int = 3,
-    first_timeout: float = 30,
-    retry_timeout: float = 10,
-    retry_delay_sec: float = 3,
+    max_attempts: int = _MAX_ATTEMPTS,
+    first_timeout: float = _FIRST_TIMEOUT,
+    retry_timeout: float = _RETRY_TIMEOUT,
+    retry_delay_sec: float = _RETRY_DELAY_SEC,
     expected_checksum: str | None = None,
     current_checksum: str | None = None,
 ) -> str:
@@ -97,6 +102,49 @@ def try_download(
             if not expected_checksum:
                 if_modified_since = formatdate(mtime, usegmt=True)
 
+    fetched = _fetch(
+        url, file_name,
+        max_attempts=max_attempts, first_timeout=first_timeout, retry_timeout=retry_timeout,
+        retry_delay_sec=retry_delay_sec, expected_checksum=expected_checksum,
+        if_modified_since=if_modified_since,
+    )
+    data, last_error = fetched.data, fetched.error
+    if fetched.not_modified:
+        try:
+            os.utime(full)
+        except OSError as e:
+            return f"ID ALIAS mapper '{file_name}' file could not be written: {e}"
+        return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
+    if isinstance(last_error, ValueError):
+        return f"ID ALIAS MAPPER: '{file_name}' could not be downloaded, checksum mismatch after {max_attempts} attempts"
+    if last_error is not None:
+        return f"ID ALIAS MAPPER: '{file_name}' could not be downloaded due to an IOError: {last_error}"
+    if not data or data == b"{}":
+        return f"ID ALIAS MAPPER: '{file_name}' file not written because downloaded data is empty"
+    try:
+        _atomic_write(full, data)
+    except OSError as e:
+        return f"ID ALIAS mapper '{file_name}' file could not be written: {e}"
+    return f"ID ALIAS MAPPER: '{file_name}' successfully downloaded"
+
+
+class _Fetched(NamedTuple):
+    data: bytes | None
+    error: Exception | None
+    not_modified: bool
+
+
+def _fetch(
+    url: str,
+    file_name: str,
+    *,
+    max_attempts: int = _MAX_ATTEMPTS,
+    first_timeout: float = _FIRST_TIMEOUT,
+    retry_timeout: float = _RETRY_TIMEOUT,
+    retry_delay_sec: float = _RETRY_DELAY_SEC,
+    expected_checksum: str | None = None,
+    if_modified_since: str | None = None,
+) -> _Fetched:
     data: bytes | None = None
     last_error: Exception | None = None
     not_modified = False
@@ -133,29 +181,17 @@ def try_download(
                 )
                 if retry_delay_sec:
                     time.sleep(retry_delay_sec)
-    if not_modified:
-        try:
-            os.utime(full)
-        except OSError as e:
-            return f"ID ALIAS mapper '{file_name}' file could not be written: {e}"
-        return f"ID ALIAS MAPPER: '{file_name}' is current, not downloaded"
-    if isinstance(last_error, ValueError):
-        return f"ID ALIAS MAPPER: '{file_name}' could not be downloaded, checksum mismatch after {max_attempts} attempts"
-    if last_error is not None:
-        return f"ID ALIAS MAPPER: '{file_name}' could not be downloaded due to an IOError: {last_error}"
-    if not data or data == b"{}":
-        return f"ID ALIAS MAPPER: '{file_name}' file not written because downloaded data is empty"
+    return _Fetched(data, last_error, not_modified)
+
+
+def _atomic_write(full: Path, data: bytes) -> None:
+    full.parent.mkdir(parents=True, exist_ok=True)
+    tmp = full.with_name(f"{full.name}.tmp.{os.getpid()}.{threading.get_ident()}")
     try:
-        full.parent.mkdir(parents=True, exist_ok=True)
-        tmp = full.with_name(f"{full.name}.tmp.{os.getpid()}.{threading.get_ident()}")
-        try:
-            tmp.write_bytes(data)
-            tmp.replace(full)
-        finally:
-            tmp.unlink(missing_ok=True)
-    except OSError as e:
-        return f"ID ALIAS mapper '{file_name}' file could not be written: {e}"
-    return f"ID ALIAS MAPPER: '{file_name}' successfully downloaded"
+        tmp.write_bytes(data)
+        tmp.replace(full)
+    finally:
+        tmp.unlink(missing_ok=True)
 
 
 _DOWNLOAD_FAILURE_MARKERS = (
@@ -201,6 +237,17 @@ def _file_stamp(file_path: Path) -> tuple[int, int, int] | None:
 
 
 _BAD_CHECKSUM_RETRY_SEC = 3600
+
+# D-APRS and SC, added to every subscriber list whether it loaded or not.
+FIXED_SUBSCRIBER_IDS: dict[int, str] = {900999: "D-APRS", 4294967295: "SC"}
+
+# (checksum key, file key, URL key, default file name), in the legacy download order.
+_LISTS = (
+    ("peer_ids", "PEER_FILE", "PEER_URL", "peer_ids.json"),
+    ("subscriber_ids", "SUBSCRIBER_FILE", "SUBSCRIBER_URL", "subscriber_ids.json"),
+    ("talkgroup_ids", "TGID_FILE", "TGID_URL", "talkgroup_ids.json"),
+    ("server_ids", "SERVER_ID_FILE", "SERVER_ID_URL", "server_ids.tsv"),
+)
 
 
 class DefaultAliasLoader(AliasLoader):
@@ -250,26 +297,29 @@ class DefaultAliasLoader(AliasLoader):
         longer matches the file on disk: a DMR ID issued today is known within one
         poll of the server publishing it, and an unchanged 44MB list is never fetched
         again. Without one, STALE_DAYS decides as before.
+
+        The checksum file on disk describes the lists on disk, not what was published:
+        a list whose download failed keeps the checksum it was verified with, so it
+        still loads after a restart, and a corrupt one still fails verification.
         """
         aliases = config.get("ALIASES", {})
         path = Path(aliases.get("PATH", "./data/")).resolve()
         stale_sec = float(aliases.get("STALE_TIME", aliases.get("STALE_DAYS", 1) * 86400))
+        checksum_file = aliases.get("CHECKSUM_FILE")
+        checksums = self._load_checksums(path, checksum_file)
         if aliases.get("TRY_DOWNLOAD"):
-            if aliases.get("CHECKSUM_FILE") and aliases.get("CHECKSUM_URL"):
-                result = try_download(path, aliases["CHECKSUM_FILE"], aliases.get("CHECKSUM_URL", ""), 0)
-                _log_download_result(result)
-            checksums = self._load_checksums(path, aliases.get("CHECKSUM_FILE"))
-            for key, url_key, checksum_key in [
-                ("PEER_FILE", "PEER_URL", "peer_ids"),
-                ("SUBSCRIBER_FILE", "SUBSCRIBER_URL", "subscriber_ids"),
-                ("TGID_FILE", "TGID_URL", "talkgroup_ids"),
-                ("SERVER_ID_FILE", "SERVER_ID_URL", "server_ids"),
-            ]:
+            published = checksums
+            if checksum_file and aliases.get("CHECKSUM_URL"):
+                published = self._fetch_checksums(aliases["CHECKSUM_URL"], checksum_file) or checksums
+            for checksum_key, file_key, url_key, _ in _LISTS:
                 url = aliases.get(url_key)
-                if url and aliases.get(key):
-                    self._download(path, aliases[key], url, stale_sec, checksums.get(checksum_key))
-        else:
-            checksums = self._load_checksums(path, aliases.get("CHECKSUM_FILE"))
+                if url and aliases.get(file_key):
+                    self._download(path, aliases[file_key], url, stale_sec, published.get(checksum_key))
+            if checksum_file:
+                on_disk = self._checksums_of_files_on_disk(path, aliases, published, checksums)
+                if on_disk != checksums:
+                    self._save_checksums(path / checksum_file, on_disk)
+                checksums = on_disk
         peer_file = aliases.get("PEER_FILE", "peer_ids.json")
         sub_file = aliases.get("SUBSCRIBER_FILE", "subscriber_ids.json")
         tgid_file = aliases.get("TGID_FILE", "talkgroup_ids.json")
@@ -324,8 +374,7 @@ class DefaultAliasLoader(AliasLoader):
         _keep("_PEER_IDS", peer_ids, "peer_ids")
         if subscriber_ids:
             # In place: a copy would keep a second 300k-entry table alive.
-            subscriber_ids[900999] = "D-APRS"
-            subscriber_ids[4294967295] = "SC"
+            subscriber_ids.update(FIXED_SUBSCRIBER_IDS)
             config["_SUB_IDS"] = subscriber_ids
             if profiles is not None:
                 config["_SUB_PROFILES"] = profiles
@@ -368,6 +417,47 @@ class DefaultAliasLoader(AliasLoader):
         else:
             self._bad_downloads.pop(file_name, None)
         _log_download_result(result)
+
+    def _fetch_checksums(self, url: str, file_name: str) -> dict[str, str] | None:
+        """The published checksums, in memory: written to disk only once the lists follow."""
+        fetched = _fetch(url, file_name)
+        if fetched.error is not None or not fetched.data:
+            logger.error(
+                "(ALIAS) ID ALIAS MAPPER: '%s' could not be downloaded (%s), using the one on disk",
+                file_name, fetched.error or "empty response",
+            )
+            return None
+        try:
+            data = json.loads(fetched.data)
+        except ValueError as e:
+            logger.error("(ALIAS) ID ALIAS MAPPER: '%s' downloaded is not JSON (%s), using the one on disk", file_name, e)
+            return None
+        if not isinstance(data, dict):
+            logger.error("(ALIAS) ID ALIAS MAPPER: '%s' downloaded is not a mapping, using the one on disk", file_name)
+            return None
+        return data
+
+    def _checksums_of_files_on_disk(
+        self,
+        path: Path,
+        aliases: dict[str, Any],
+        published: dict[str, str],
+        previous: dict[str, str],
+    ) -> dict[str, str]:
+        """Published checksums, except for a list still on its previous verified version."""
+        out = {**previous, **published}
+        for key, file_key, _, default in _LISTS:
+            digest = self._digest(path / aliases.get(file_key, default))
+            if digest is not None and digest != published.get(key) and digest == previous.get(key):
+                out[key] = digest
+        return out
+
+    @staticmethod
+    def _save_checksums(full: Path, checksums: dict[str, str]) -> None:
+        try:
+            _atomic_write(full, json.dumps(checksums, separators=(",", ":")).encode())
+        except OSError as e:
+            logger.error("(ALIAS) ID ALIAS MAPPER: '%s' could not be written: %s", full.name, e)
 
     def _load_checksums(self, path: Path, file_name: str | None) -> dict[str, str]:
         """Load checksum JSON (legacy load_json of CHECKSUM_FILE). Keys e.g. peer_ids, subscriber_ids, talkgroup_ids, server_ids."""

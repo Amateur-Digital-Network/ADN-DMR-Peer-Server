@@ -88,7 +88,7 @@ from adn_server.infrastructure.config_reload import BindSpec, reload_server_conf
 from adn_server.infrastructure.logging_config import reopen_file_handlers
 from adn_server.infrastructure.panel.report_client import PanelReportLog, send_panel_report
 from adn_server.infrastructure.persistence import PickleSubMapStore, SubMapSaver
-from adn_server.infrastructure.persistence.alias_loader import DefaultAliasLoader
+from adn_server.infrastructure.persistence.alias_loader import FIXED_SUBSCRIBER_IDS, DefaultAliasLoader
 from adn_server.infrastructure.persistence.database_config import database_settings
 from adn_server.infrastructure.persistence.dynamic_tg_repository import MysqlDynamicTgRepository
 from adn_server.infrastructure.persistence.keys_store import JsonKeysStore
@@ -223,15 +223,20 @@ def _purge_sub_map_of_quiet_systems(config: Any, logger: logging.Logger) -> None
         logger.info("(SUBSCRIBER) Dropped %s SUB_MAP entries of systems with SUB_MAP_LEARN: false", dropped)
 
 
+def _has_loaded_ids(table: dict[int, str]) -> bool:
+    # The local list can be the subscriber list itself, fixed entries included.
+    return any(i not in FIXED_SUBSCRIBER_IDS for i in table)
+
+
 def _log_alias_health(config: Any, systems_cfg: dict[str, Any], logger: logging.Logger) -> None:
     """Warn loudly when peer/subscriber/server ID tables are empty and would fail-closed.
 
     validate_id() and validate_obp_source_server_id() (udp_hbp.py) reject any ID that is
     not found in _PEER_IDS/_SUB_IDS/_LOCAL_SUBSCRIBER_IDS whenever ALLOW_UNREG_ID is False,
-    and OBP source-server checks reject on an empty _SERVER_IDS when VALIDATE_SERVER_IDS is
-    True. An empty table under those flags means every registration/relay is silently
-    rejected — this makes that failure mode visible in the logs instead of only showing up
-    as "users can't connect" reports.
+    and an empty _SERVER_IDS turns VALIDATE_SERVER_IDS off until it loads. An empty table
+    under those flags means every registration is silently rejected, or every source server
+    let through — this makes that failure mode visible in the logs instead of only showing
+    up as "users can't connect" reports.
     """
     peer_ids = config.get("_PEER_IDS") or {}
     sub_ids = config.get("_SUB_IDS") or {}
@@ -250,7 +255,7 @@ def _log_alias_health(config: Any, systems_cfg: dict[str, Any], logger: logging.
         sys_cfg.get("ENABLED", True) and not sys_cfg.get("ALLOW_UNREG_ID", True)
         for sys_cfg in systems_cfg.values()
     )
-    if enforces_reg and not peer_ids and not sub_ids and not local_sub_ids:
+    if enforces_reg and not peer_ids and not _has_loaded_ids(sub_ids) and not _has_loaded_ids(local_sub_ids):
         logger.error(
             "(ALIAS) peer_ids/subscriber_ids/local_subscriber_ids are ALL EMPTY while at "
             "least one system has ALLOW_UNREG_ID: false — every peer/hotspot registration "
@@ -258,8 +263,8 @@ def _log_alias_health(config: Any, systems_cfg: dict[str, Any], logger: logging.
         )
     if config.get("GLOBAL", {}).get("VALIDATE_SERVER_IDS") and not server_ids:
         logger.error(
-            "(ALIAS) server_ids is EMPTY while GLOBAL.VALIDATE_SERVER_IDS is true — all "
-            "OpenBridge traffic with a 4-5 digit source server will be rejected"
+            "(ALIAS) server_ids is EMPTY while GLOBAL.VALIDATE_SERVER_IDS is true — OpenBridge "
+            "source servers are not validated until a download succeeds or a .bak file is available"
         )
 
 
@@ -279,8 +284,7 @@ def run_peer_server(
     peer_ids, subscriber_ids, talkgroup_ids, local_subscriber_ids, server_ids, checksums = (
         alias_loader.load_aliases(config)
     )
-    subscriber_ids[900999] = "D-APRS"
-    subscriber_ids[4294967295] = "SC"
+    subscriber_ids.update(FIXED_SUBSCRIBER_IDS)
     config["_SUB_IDS"] = subscriber_ids
     config["_SUB_PROFILES"] = alias_loader.load_subscriber_profiles(config)
     config["_PEER_IDS"] = peer_ids

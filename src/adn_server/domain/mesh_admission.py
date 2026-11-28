@@ -239,7 +239,13 @@ def check_source_server(
             args=(frame.system, envelope.source_server),
             level=logging.WARNING,
         )
-    if ctx.validate_server_ids and len(digits) in (4, 5) and digits[:4] not in ctx.known_server_prefixes:
+    # An empty list never loaded: refusing every server on it would cut the mesh off.
+    if (
+        ctx.validate_server_ids
+        and ctx.known_server_prefixes
+        and len(digits) in (4, 5)
+        and digits[:4] not in ctx.known_server_prefixes
+    ):
         return Rejection(
             reason="source-server-unknown",
             message="(%s) Source Server ID is 4 or 5 digits but not in list: %s",
