@@ -138,10 +138,9 @@ def _policy(config: dict[str, Any], name: str, sys_cfg: dict[str, Any], router: 
             tg1_acl=sys_cfg.get("TG1_ACL", (True, [])),
         ),
         server_id=server_prefix(global_cfg.get("SERVER_ID", 0)),
-        # The server-id list and the alias tables are loaded at runtime, not from
-        # the YAML, so offline we cannot answer "is this server known?" and saying
-        # "no" would blame every frame on a table we do not have.
-        validate_server_ids=bool(global_cfg.get("VALIDATE_SERVER_IDS")) and bool(config.get("_SERVER_IDS")),
+        # The alias tables are loaded at runtime, not from the YAML: offline there is
+        # no server list, and no alias table to resolve a 6-7 digit server against.
+        validate_server_ids=bool(global_cfg.get("VALIDATE_SERVER_IDS")),
         known_server_prefixes=config.get("_SERVER_IDS", set()),
         resolve_server_id=lambda _sid: True
     )

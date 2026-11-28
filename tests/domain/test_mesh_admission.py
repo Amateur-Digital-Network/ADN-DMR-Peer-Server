@@ -185,6 +185,13 @@ def test_unknown_short_source_server_passes_when_validation_is_off() -> None:
     assert check_source_server(_frame(), envelope, _ctx(known_server_prefixes={"2131"})) is None
 
 
+def test_short_source_server_passes_while_the_server_list_never_loaded() -> None:
+    """An empty list is a failed download, not a list that knows no server."""
+    envelope = _envelope(source_server=2084)
+    ctx = _ctx(validate_server_ids=True, known_server_prefixes={})
+    assert check_source_server(_frame(), envelope, ctx) is None
+
+
 def test_long_source_server_must_resolve_to_a_dmr_id() -> None:
     envelope = _envelope(source_server=2130001)
     rejection = check_source_server(_frame(), envelope, _ctx(resolve_server_id=lambda _id: False))

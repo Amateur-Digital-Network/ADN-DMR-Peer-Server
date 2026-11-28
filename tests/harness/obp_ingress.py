@@ -129,6 +129,8 @@ def build_config(case: dict[str, Any]) -> dict[str, Any]:
         system["_TARGET_IP"] = case["dns_host"]
     if case.get("stun"):
         config["STUN"] = True
+    if "server_ids" in case:  # the list as the alias loader left it
+        config["_SERVER_IDS"] = case["server_ids"]
     return config
 
 
